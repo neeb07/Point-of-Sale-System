@@ -1,0 +1,335 @@
+// @ts-nocheck
+import React, { useState } from 'react';
+import { Plus, Pencil, Trash2, X, Pizza, Sandwich, Coffee, Package, Loader2, Drumstick, Soup, Utensils, Wheat, Droplet, Flame } from 'lucide-react';
+import { usePOS } from '@/lib/POSContext';
+
+export const categoriesList = [
+  'Starters', 'Fries', 'Wraps & Rolls', 'Sandwiches + Hotdogs', 'Burgers',
+  'Paratha/Spin Rolls', 'Specialities', 'Traditional Pizzas', 'Special Pizzas',
+  'Large Crust Filled Pizza', 'New York Calzone', 'Gravies', 'Gravies With Rice',
+  'Fried Rice/Biryani', 'Chowmein', 'Soups', 'Steaks', 'BBQ', 'Pakistan/Desi',
+  'Salads/Raita', 'Beverages', 'Roti/Naan'
+];
+
+const categoryIcon = {
+  'Starters': Drumstick,
+  'Fries': Package,
+  'Wraps & Rolls': Sandwich,
+  'Sandwiches + Hotdogs': Sandwich,
+  'Burgers': Sandwich,
+  'Paratha/Spin Rolls': Sandwich,
+  'Specialities': Utensils,
+  'Traditional Pizzas': Pizza,
+  'Special Pizzas': Pizza,
+  'Large Crust Filled Pizza': Pizza,
+  'New York Calzone': Pizza,
+  'Gravies': Soup,
+  'Gravies With Rice': Soup,
+  'Fried Rice/Biryani': Utensils,
+  'Chowmein': Utensils,
+  'Soups': Soup,
+  'Steaks': Utensils,
+  'BBQ': Flame,
+  'Pakistan/Desi': Utensils,
+  'Salads/Raita': Droplet,
+  'Beverages': Coffee,
+  'Roti/Naan': Wheat
+};
+
+const categoryGradient = {
+  'Starters': 'linear-gradient(135deg, rgba(245,158,11,0.3), rgba(234,88,12,0.2))',
+  'Traditional Pizzas': 'linear-gradient(135deg, rgba(239,68,68,0.3), rgba(245,158,11,0.2))',
+  'Special Pizzas': 'linear-gradient(135deg, rgba(239,68,68,0.3), rgba(245,158,11,0.2))',
+  'Large Crust Filled Pizza': 'linear-gradient(135deg, rgba(239,68,68,0.3), rgba(245,158,11,0.2))',
+  'New York Calzone': 'linear-gradient(135deg, rgba(239,68,68,0.3), rgba(245,158,11,0.2))',
+  'Burgers': 'linear-gradient(135deg, rgba(245,158,11,0.3), rgba(234,88,12,0.2))',
+  'Beverages': 'linear-gradient(135deg, rgba(16,185,129,0.3), rgba(6,182,212,0.2))',
+};
+
+export default function MenuManagement() {
+  const { menuItems, addMenuItem, updateMenuItem, deleteMenuItem, loading } = usePOS();
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editingItem, setEditingItem] = useState(null);
+
+  const openAdd = () => { setEditingItem(null); setModalOpen(true); };
+  const openEdit = (item) => { setEditingItem(item); setModalOpen(true); };
+  const handleDelete = (id) => {
+    if (window.confirm('Delete this item?')) deleteMenuItem(id);
+  };
+
+  if (loading) {
+    return (
+      <div className="flex-1 h-full flex items-center justify-center" style={{ background: '#FFFFFF' }}>
+        <div className="animate-spin" style={{ color: '#EA6C0A' }}>
+          <Loader2 size={32} />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex-1 h-full overflow-y-auto" style={{ padding: 24, background: '#FFFFFF' }}>
+      <div style={{ maxWidth: 900, margin: '0 auto' }}>
+        {/* Header */}
+        <div className="flex items-center justify-between" style={{ marginBottom: 24 }}>
+          <h1 style={{ color: '#EA6C0A', fontWeight: 700, fontSize: 24 }}>Menu Management</h1>
+          <button
+            onClick={openAdd}
+            className="flex items-center gap-2 transition-all duration-150"
+            style={{
+              height: 40, padding: '0 20px', borderRadius: 10,
+              background: '#EA6C0A',
+              boxShadow: '0 4px 20px rgba(234, 108, 10, 0.4)',
+              color: '#FFFFFF', fontSize: 14, fontWeight: 700,
+              border: 'none', cursor: 'pointer',
+              fontFamily: 'Inter, sans-serif',
+            }}
+          >
+            <Plus size={18} />
+            Add New Item
+          </button>
+        </div>
+
+        {/* Item List */}
+        {menuItems.map(item => {
+          const Icon = categoryIcon[item.category] || Package;
+          const gradient = categoryGradient[item.category] || categoryGradient.Extras;
+          return (
+            <div
+              key={item.id}
+              className="flex items-center"
+              style={{
+                background: '#EA6C0A',
+                borderRadius: 16,
+                boxShadow: '0 4px 12px rgba(234, 108, 10, 0.2)',
+                padding: 16, marginBottom: 10,
+              }}
+            >
+              <div
+                className="flex items-center justify-center flex-shrink-0"
+                style={{ width: 44, height: 44, borderRadius: 10, background: 'rgba(255,255,255,0.2)' }}
+              >
+                <Icon size={20} color="#FFFFFF" />
+              </div>
+              <div style={{ marginLeft: 14, flex: 1, minWidth: 0 }}>
+                <div style={{ color: '#FFFFFF', fontWeight: 700, fontSize: 15 }}>{item.name}</div>
+                <div style={{ color: 'rgba(255,255,255,0.8)', fontSize: 12 }}>{item.category}</div>
+              </div>
+              <div style={{ color: '#FFFFFF', fontWeight: 700, fontSize: 16, marginRight: 16 }}>
+                Rs. {item.price.toLocaleString()}
+              </div>
+              <IconBtn
+                icon={Pencil}
+                hoverBg="rgba(255,255,255,0.2)"
+                hoverColor="#FFFFFF"
+                defaultColor="rgba(255,255,255,0.8)"
+                onClick={() => openEdit(item)}
+              />
+              <IconBtn
+                icon={Trash2}
+                hoverBg="rgba(255,255,255,0.2)"
+                hoverColor="#FFFFFF"
+                defaultColor="rgba(255,255,255,0.8)"
+                onClick={() => handleDelete(item.id)}
+              />
+            </div>
+          );
+        })}
+      </div>
+
+      {modalOpen && (
+        <ItemModal
+          item={editingItem}
+          onClose={() => setModalOpen(false)}
+          onSave={(data) => {
+            if (editingItem) {
+              updateMenuItem(editingItem.id, data);
+            } else {
+              addMenuItem(data);
+            }
+            setModalOpen(false);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function IconBtn({ icon: Icon, hoverBg, hoverColor, defaultColor, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      className="flex items-center justify-center transition-all duration-150"
+      style={{
+        width: 36, height: 36, borderRadius: 8,
+        background: 'transparent',
+        border: 'none', cursor: 'pointer', marginLeft: 6,
+      }}
+      onMouseEnter={e => {
+        e.currentTarget.style.background = hoverBg;
+        e.currentTarget.querySelector('svg').style.color = hoverColor;
+      }}
+      onMouseLeave={e => {
+        e.currentTarget.style.background = 'transparent';
+        e.currentTarget.querySelector('svg').style.color = defaultColor;
+      }}
+    >
+      <Icon size={16} style={{ color: defaultColor, transition: 'color 0.15s' }} />
+    </button>
+  );
+}
+
+function ItemModal({ item, onClose, onSave }) {
+  const [name, setName] = useState(item?.name || '');
+  const [price, setPrice] = useState(item?.price || '');
+  const [category, setCategory] = useState(item?.category || 'Starters');
+  const [imageUrl, setImageUrl] = useState(item?.image_url || '');
+
+  const handleImageUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setImageUrl(reader.result?.toString() || '');
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleSave = () => {
+    if (!name.trim() || !price) return;
+    onSave({ name: name.trim(), price: Number(price), category, image_url: imageUrl });
+  };
+
+  const inputStyle = {
+    width: '100%', height: 44,
+    background: '#FFFFFF',
+    border: '1px solid #E5E7EB',
+    borderRadius: 10, color: '#111827',
+    fontSize: 14, padding: '0 14px',
+    outline: 'none', fontFamily: 'Inter, sans-serif',
+  };
+
+  return (
+    <div
+      className="fixed inset-0 flex items-center justify-center"
+      style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', zIndex: 50 }}
+      onClick={onClose}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          width: 460, padding: 28,
+          background: '#EA6C0A',
+          border: '1px solid #EA6C0A',
+          borderRadius: 16,
+          boxShadow: '0 8px 32px rgba(234, 108, 10, 0.3)',
+        }}
+      >
+        {/* Modal Header */}
+        <div className="flex items-center justify-between" style={{ marginBottom: 24 }}>
+          <h2 style={{ color: '#FFFFFF', fontWeight: 700, fontSize: 18 }}>
+            {item ? 'Edit Item' : 'Add New Item'}
+          </h2>
+          <button
+            onClick={onClose}
+            style={{ background: 'transparent', border: 'none', cursor: 'pointer' }}
+          >
+            <X size={20} color="#FFFFFF" />
+          </button>
+        </div>
+
+        {/* Name */}
+        <label style={{ color: '#FFFFFF', fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 6 }}>Item Name</label>
+        <input
+          value={name}
+          onChange={e => setName(e.target.value)}
+          placeholder="Enter item name"
+          style={{ ...inputStyle, marginBottom: 16 }}
+          onFocus={e => { e.currentTarget.style.border = '1px solid #FFFFFF'; }}
+          onBlur={e => { e.currentTarget.style.border = '1px solid #E5E7EB'; }}
+        />
+
+        {/* Price */}
+        <label style={{ color: '#FFFFFF', fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 6 }}>Price (Rs.)</label>
+        <input
+          type="number"
+          value={price}
+          onChange={e => setPrice(e.target.value)}
+          placeholder="0"
+          style={{ ...inputStyle, marginBottom: 16 }}
+          onFocus={e => { e.currentTarget.style.border = '1px solid #FFFFFF'; }}
+          onBlur={e => { e.currentTarget.style.border = '1px solid #E5E7EB'; }}
+        />
+
+        {/* Category */}
+        <label style={{ color: '#FFFFFF', fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 6 }}>Category</label>
+        <select
+          value={category}
+          onChange={e => setCategory(e.target.value)}
+          style={{
+            ...inputStyle, marginBottom: 16,
+            appearance: 'none',
+            backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23111827' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`,
+            backgroundRepeat: 'no-repeat',
+            backgroundPosition: 'right 14px center',
+          }}
+          onFocus={e => { e.currentTarget.style.border = '1px solid #FFFFFF'; }}
+          onBlur={e => { e.currentTarget.style.border = '1px solid #E5E7EB'; }}
+        >
+          {categoriesList.map(cat => (
+            <option key={cat} value={cat}>{cat}</option>
+          ))}
+        </select>
+
+        {/* Image Upload */}
+        <label style={{ color: '#FFFFFF', fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 6 }}>Item Image</label>
+        <input
+          type="file"
+          accept="image/*"
+          onChange={handleImageUpload}
+          style={{
+            width: '100%', marginBottom: 24,
+            color: '#FFFFFF', fontSize: 13,
+            padding: '8px 0'
+          }}
+        />
+        {imageUrl && (
+          <div style={{ marginBottom: 24 }}>
+            <img src={imageUrl} alt="Preview" style={{ width: 80, height: 80, objectFit: 'cover', borderRadius: 8, border: '1px solid #E5E7EB' }} />
+          </div>
+        )}
+
+        {/* Actions */}
+        <div className="flex gap-3">
+          <button
+            onClick={onClose}
+            className="flex-1 flex items-center justify-center transition-all duration-150"
+            style={{
+              height: 42, borderRadius: 10,
+              background: 'rgba(255,255,255,0.2)',
+              border: 'none',
+              color: '#FFFFFF', fontSize: 14, fontWeight: 600,
+              cursor: 'pointer', fontFamily: 'Inter, sans-serif',
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            className="flex-1 flex items-center justify-center transition-all duration-150"
+            style={{
+              height: 42, borderRadius: 10,
+              background: '#FFFFFF',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+              border: 'none', color: '#EA6C0A', fontSize: 14, fontWeight: 700,
+              cursor: 'pointer', fontFamily: 'Inter, sans-serif',
+            }}
+          >
+            Save Item
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
