@@ -116,7 +116,11 @@ export default function MenuManagement() {
                 <div style={{ color: 'rgba(255,255,255,0.8)', fontSize: 12 }}>{item.category}</div>
               </div>
               <div style={{ color: '#FFFFFF', fontWeight: 700, fontSize: 16, marginRight: 16 }}>
-                Rs. {item.price.toLocaleString()}
+                {item.has_variants === 1 ? (
+                  <span style={{ fontSize: 12, padding: '4px 8px', background: 'rgba(255,255,255,0.2)', borderRadius: 12 }}>Multiple Sizes</span>
+                ) : (
+                  `Rs. ${item.price.toLocaleString()}`
+                )}
               </div>
               <IconBtn
                 icon={Pencil}
@@ -197,8 +201,8 @@ function ItemModal({ item, onClose, onSave }) {
   };
 
   const handleSave = () => {
-    if (!name.trim() || !price) return;
-    onSave({ name: name.trim(), price: Number(price), category, image_url: imageUrl });
+    if (!name.trim() || (item?.has_variants !== 1 && !price)) return;
+    onSave({ name: name.trim(), price: Number(price) || 0, category, image_url: imageUrl });
   };
 
   const inputStyle = {
@@ -252,15 +256,21 @@ function ItemModal({ item, onClose, onSave }) {
 
         {/* Price */}
         <label style={{ color: '#FFFFFF', fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 6 }}>Price (Rs.)</label>
-        <input
-          type="number"
-          value={price}
-          onChange={e => setPrice(e.target.value)}
-          placeholder="0"
-          style={{ ...inputStyle, marginBottom: 16 }}
-          onFocus={e => { e.currentTarget.style.border = '1px solid #FFFFFF'; }}
-          onBlur={e => { e.currentTarget.style.border = '1px solid #E5E7EB'; }}
-        />
+        {item?.has_variants === 1 ? (
+          <div style={{ ...inputStyle, marginBottom: 16, background: 'rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.8)', border: 'none', display: 'flex', alignItems: 'center' }}>
+            Managed via variants
+          </div>
+        ) : (
+          <input
+            type="number"
+            value={price}
+            onChange={e => setPrice(e.target.value)}
+            placeholder="0"
+            style={{ ...inputStyle, marginBottom: 16 }}
+            onFocus={e => { e.currentTarget.style.border = '1px solid #FFFFFF'; }}
+            onBlur={e => { e.currentTarget.style.border = '1px solid #E5E7EB'; }}
+          />
+        )}
 
         {/* Category */}
         <label style={{ color: '#FFFFFF', fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 6 }}>Category</label>

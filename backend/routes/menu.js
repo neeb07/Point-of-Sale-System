@@ -4,34 +4,162 @@ const db = require('../db/database');
 
 // Get all menu items
 router.get('/', (req, res) => {
-  const items = db.prepare('SELECT * FROM menu_items ORDER BY category, name').all();
-  res.json(items);
+  try {
+    const items = db.prepare('SELECT * FROM menu_items ORDER BY category, name').all();
+    const variants = db.prepare('SELECT * FROM item_variants ORDER BY sort_order').all();
+    
+    // Group variants by menu_item_id
+    const variantsByItem = {};
+    variants.forEach(v => {
+      if (!variantsByItem[v.menu_item_id]) variantsByItem[v.menu_item_id] = [];
+      variantsByItem[v.menu_item_id].push({ id: v.id, label: v.label, price: v.price, sort_order: v.sort_order });
+    });
+
+    const result = items.map(item => {
+      return {
+        ...item,
+        variants: item.has_variants ? (variantsByItem[item.id] || []) : []
+      };
+    });
+
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Add new item
 router.post('/', (req, res) => {
-  const { name, category, price, image_url } = req.body;
-  if (!name || !category || !price) {
-    return res.status(400).json({ error: 'name, category, and price are required' });
+  const { name, category, price, image_url, variants } = req.body;
+  
+  if (!name || !category) {
+    return res.status(400).json({ error: 'name and category are required' });
   }
-  const result = db.prepare('INSERT INTO menu_items (name, category, price, image_url) VALUES (?, ?, ?, ?)').run(name, category, Number(price), image_url || null);
-  const newItem = db.prepare('SELECT * FROM menu_items WHERE id = ?').get(result.lastInsertRowid);
-  res.status(201).json(newItem);
+
+  const hasVariants = Array.isArray(variants) && variants.length > 0;
+  
+  // Validation
+  if (!hasVariants && price === undefined) {
+    return res.status(400).json({ error: 'price is required for items without variants' });
+  }
+
+  if (hasVariants) {
+    for (const v of variants) {
+      if (!v.label || typeof v.label !== 'string' || v.label.trim() === '') {
+        return res.status(400).json({ error: 'Variant label is required and must be non-empty string' });
+      }
+      if (v.price === undefined || v.price === null || isNaN(Number(v.price)) || Number(v.price) <= 0) {
+        return res.status(400).json({ error: `Variant price must be a numeric value > 0 for label ${v.label}` });
+      }
+    }
+  }
+
+  try {
+    const createItem = db.transaction(() => {
+      const dbPrice = hasVariants ? 0 : Number(price);
+      const dbHasVariants = hasVariants ? 1 : 0;
+      
+      const result = db.prepare(
+        'INSERT INTO menu_items (name, category, price, image_url, has_variants) VALUES (?, ?, ?, ?, ?)'
+      ).run(name, category, dbPrice, image_url || null, dbHasVariants);
+      
+      const itemId = result.lastInsertRowid;
+      
+      if (hasVariants) {
+        const insertVariant = db.prepare('INSERT INTO item_variants (menu_item_id, label, price, sort_order) VALUES (?, ?, ?, ?)');
+        variants.forEach((v, index) => {
+          insertVariant.run(itemId, v.label.trim(), Number(v.price), v.sort_order || index);
+        });
+      }
+      
+      return itemId;
+    });
+
+    const newItemId = createItem();
+    
+    // Fetch newly created item
+    const newItem = db.prepare('SELECT * FROM menu_items WHERE id = ?').get(newItemId);
+    if (newItem.has_variants) {
+      newItem.variants = db.prepare('SELECT id, label, price, sort_order FROM item_variants WHERE menu_item_id = ? ORDER BY sort_order').all(newItemId);
+    } else {
+      newItem.variants = [];
+    }
+    
+    res.status(201).json(newItem);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Update item
 router.put('/:id', (req, res) => {
-  const { name, category, price, image_url } = req.body;
+  const { name, category, price, image_url, variants } = req.body;
   const { id } = req.params;
-  db.prepare('UPDATE menu_items SET name = ?, category = ?, price = ?, image_url = ? WHERE id = ?').run(name, category, Number(price), image_url || null, id);
-  const updated = db.prepare('SELECT * FROM menu_items WHERE id = ?').get(id);
-  res.json(updated);
+  
+  if (!name || !category) {
+    return res.status(400).json({ error: 'name and category are required' });
+  }
+
+  const hasVariants = Array.isArray(variants) && variants.length > 0;
+  
+  if (!hasVariants && price === undefined) {
+    return res.status(400).json({ error: 'price is required for items without variants' });
+  }
+
+  if (hasVariants) {
+    for (const v of variants) {
+      if (!v.label || typeof v.label !== 'string' || v.label.trim() === '') {
+        return res.status(400).json({ error: 'Variant label is required and must be non-empty string' });
+      }
+      if (v.price === undefined || v.price === null || isNaN(Number(v.price)) || Number(v.price) <= 0) {
+        return res.status(400).json({ error: `Variant price must be a numeric value > 0 for label ${v.label}` });
+      }
+    }
+  }
+
+  try {
+    const updateItem = db.transaction(() => {
+      const dbPrice = hasVariants ? 0 : Number(price);
+      const dbHasVariants = hasVariants ? 1 : 0;
+      
+      db.prepare(
+        'UPDATE menu_items SET name = ?, category = ?, price = ?, image_url = ?, has_variants = ? WHERE id = ?'
+      ).run(name, category, dbPrice, image_url || null, dbHasVariants, id);
+      
+      // Delete existing variants
+      db.prepare('DELETE FROM item_variants WHERE menu_item_id = ?').run(id);
+      
+      if (hasVariants) {
+        const insertVariant = db.prepare('INSERT INTO item_variants (menu_item_id, label, price, sort_order) VALUES (?, ?, ?, ?)');
+        variants.forEach((v, index) => {
+          insertVariant.run(id, v.label.trim(), Number(v.price), v.sort_order || index);
+        });
+      }
+    });
+
+    updateItem();
+    
+    const updatedItem = db.prepare('SELECT * FROM menu_items WHERE id = ?').get(id);
+    if (updatedItem.has_variants) {
+      updatedItem.variants = db.prepare('SELECT id, label, price, sort_order FROM item_variants WHERE menu_item_id = ? ORDER BY sort_order').all(id);
+    } else {
+      updatedItem.variants = [];
+    }
+    
+    res.json(updatedItem);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Delete item
 router.delete('/:id', (req, res) => {
-  db.prepare('DELETE FROM menu_items WHERE id = ?').run(req.params.id);
-  res.json({ success: true });
+  try {
+    db.prepare('DELETE FROM menu_items WHERE id = ?').run(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 module.exports = router;

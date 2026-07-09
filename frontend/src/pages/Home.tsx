@@ -2,11 +2,11 @@ import React, { useState } from 'react';
 import Sidebar from '@/components/pos/Sidebar';
 import SaleScreen from '@/pages/SaleScreen';
 import MenuManagement from '@/pages/MenuManagement';
-import Tables from '@/pages/Tables';
 import Cashier from '@/pages/Cashier';
 import Orders from '@/pages/Orders';
 import Reports from '@/pages/Reports';
 import Settings from '@/pages/Settings';
+import Deals from '@/pages/Deals';
 import LoginScreen from '@/pages/LoginScreen';
 import AccessDenied from '@/components/AccessDenied';
 import { POSProvider } from '@/lib/POSContext';
@@ -15,7 +15,7 @@ import { useAuth } from '@/context/AuthContext';
 const screens: Record<string, React.ComponentType> = {
   sale: SaleScreen,
   menu: MenuManagement,
-  tables: Tables,
+  deals: Deals,
   cashier: Cashier,
   orders: Orders,
   reports: Reports,

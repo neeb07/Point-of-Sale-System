@@ -42,26 +42,26 @@ export default function SaleScreen() {
 
   const handleAddToCart = (item: CartItem) => {
     setCart((prev: CartItem[]) => {
-      const existing = prev.find((c: CartItem) => c.id === item.id);
+      const existing = prev.find((c: CartItem) => c.id === item.id && c.name === item.name);
       if (existing) {
         return prev.map((c: CartItem) =>
-          c.id === item.id ? { ...c, qty: c.qty + 1 } : c
+          (c.id === item.id && c.name === item.name) ? { ...c, qty: c.qty + 1 } : c
         );
       }
       return [...prev, { id: item.id, name: item.name, price: item.price, qty: 1 }];
     });
   };
 
-  const handleUpdateQty = (id: number, delta: number) => {
+  const handleUpdateQty = (id: number, name: string, delta: number) => {
     setCart((prev: CartItem[]) =>
       prev
-        .map((c: CartItem) => (c.id === id ? { ...c, qty: c.qty + delta } : c))
+        .map((c: CartItem) => (c.id === id && c.name === name ? { ...c, qty: c.qty + delta } : c))
         .filter((c: CartItem) => c.qty > 0)
     );
   };
 
-  const handleRemoveItem = (id: number) => {
-    setCart((prev: CartItem[]) => prev.filter((c: CartItem) => c.id !== id));
+  const handleRemoveItem = (id: number, name: string) => {
+    setCart((prev: CartItem[]) => prev.filter((c: CartItem) => !(c.id === id && c.name === name)));
   };
 
   const handleClearCart = () => setCart([]);

@@ -29,7 +29,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [currentUser, setCurrentUser] = useState<Staff | null>(null);
   const [isLocked, setIsLocked] = useState(true);
   const inactivityTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+  const TIMEOUT_MS = 2 * 60 * 60 * 1000; // 2 hours
 
   // Load saved user from localStorage on mount
   useEffect(() => {

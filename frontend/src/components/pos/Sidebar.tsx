@@ -1,10 +1,10 @@
 import React from 'react';
-import { Home as HomeIcon, LayoutGrid, User, ClipboardList, BarChart2, Settings, LogOut, Utensils } from 'lucide-react';
+import { Home as HomeIcon, User, ClipboardList, BarChart2, Settings, LogOut, Utensils, Tag } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 
 interface NavItem {
   id: string;
-  icon: React.ComponentType<{ size?: number; color?: string }>;
+  icon: React.ElementType;
   label: string;
   alwaysShow?: boolean;
   adminOnly?: boolean;
@@ -18,7 +18,7 @@ interface SidebarProps {
 const allNavItems: NavItem[] = [
   { id: 'sale',     icon: HomeIcon,      label: 'Home',    alwaysShow: true },
   { id: 'menu',     icon: Utensils,      label: 'Menu',    alwaysShow: true },
-  { id: 'tables',   icon: LayoutGrid,    label: 'Tables',  alwaysShow: true },
+  { id: 'deals',    icon: Tag,           label: 'Deals',   alwaysShow: true },
   { id: 'cashier',  icon: User,          label: 'Cashier', adminOnly: true },
   { id: 'orders',   icon: ClipboardList, label: 'Orders',  alwaysShow: true },
   { id: 'reports',  icon: BarChart2,     label: 'Reports', alwaysShow: true },

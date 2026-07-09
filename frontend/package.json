@@ -1,15 +1,16 @@
 {
-  "name": "base44-app",
+  "name": "restro-pos",
   "private": true,
-  "version": "0.0.0",
-  "type": "module",
+  "version": "1.0.0",
+  "description": "Restaurant Point of Sale System",
+  "author": "Al-Madina Fast Food",
+  "main": "electron/main.js",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "lint": "eslint . --quiet",
-    "lint:fix": "eslint . --fix",
-    "typecheck": "tsc -p ./jsconfig.json",
-    "preview": "vite preview"
+    "electron:dev": "concurrently \"cd ../backend && node server.js\" \"vite\" \"wait-on http://localhost:5173 && wait-on http://localhost:3001/api/health && electron .\"",
+    "electron:build": "npm run prepare-backend && vite build && electron-builder build --win",
+    "prepare-backend": "cd ../backend && npm install --ignore-scripts && cd ../frontend && npx electron-rebuild -f -w better-sqlite3 --module-dir ../backend"
   },
   "dependencies": {
     "@hello-pangea/dnd": "^17.0.0",
@@ -84,6 +85,10 @@
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
     "baseline-browser-mapping": "^2.8.32",
+    "concurrently": "^10.0.3",
+    "electron": "^42.5.0",
+    "electron-builder": "^26.15.3",
+    "electron-rebuild": "^3.2.9",
     "eslint": "^9.19.0",
     "eslint-plugin-react": "^7.37.4",
     "eslint-plugin-react-hooks": "^5.0.0",
@@ -93,6 +98,45 @@
     "postcss": "^8.5.3",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.8.2",
-    "vite": "^6.1.0"
+    "vite": "^6.1.0",
+    "wait-on": "^9.0.10"
+  },
+  "build": {
+    "appId": "com.restropos.app",
+    "productName": "Restro-POS",
+    "asar": false,
+    "directories": {
+      "output": "C:\\POSBuild"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../backend",
+        "to": "backend",
+        "filter": ["**/*", "!node_modules/**"]
+      }
+    ],
+    "extraFiles": [
+      {
+        "from": "../backend/node_modules",
+        "to": "resources/backend/node_modules"
+      }
+    ],
+    "npmRebuild": false,
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Restro POS"
+    }
   }
 }

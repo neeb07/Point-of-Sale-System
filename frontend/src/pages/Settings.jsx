@@ -1,11 +1,11 @@
 // @ts-nocheck
 import React, { useState, useEffect, useRef } from 'react';
-import { Store, Percent, Receipt, Printer, Clock, Database, Download } from 'lucide-react';
+import { Store, Percent, Receipt, Printer, Clock, Database, Download, Send } from 'lucide-react';
 import PageHeader from '@/components/pos-ui/PageHeader';
 import Toggle from '@/components/pos-ui/Toggle';
 import Toast from '@/components/pos-ui/Toast';
 import Modal from '@/components/pos-ui/Modal';
-import { settingsAPI } from '@/api/index';
+import { settingsAPI, reportsAPI } from '@/api/index';
 
 const NAV_ITEMS = [
   { id: 'restaurant', label: 'Restaurant', icon: Store },
@@ -14,6 +14,7 @@ const NAV_ITEMS = [
   { id: 'printer', label: 'Printer', icon: Printer },
   { id: 'shift', label: 'Shift', icon: Clock },
   { id: 'backup', label: 'Data & Backup', icon: Database },
+  { id: 'reports', label: 'Reports', icon: Send },
 ];
 
 const CARD_STYLE = {
@@ -74,6 +75,7 @@ function FieldLabel({ label, helper }) {
 export default function Settings() {
   const [activeSection, setActiveSection] = useState('restaurant');
   const [toast, setToast] = useState(null);
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
 
   const [profile, setProfile] = useState({
     name: 'Al-Madina Fast Food', tagline: '', address: '', phone: '', footerMessage: 'Thank you for visiting!',
@@ -497,6 +499,190 @@ export default function Settings() {
     </div>
   );
 
+  const handleSendReport = async () => {
+    try {
+      setIsGeneratingPdf(true);
+      
+      // 1. Try Automatic WhatsApp Send First
+      setToast({ message: 'Sending automatic report...', type: 'info' });
+      let autoSuccess = false;
+      try {
+        const response = await fetch('http://localhost:3001/api/whatsapp/send-daily-report', { method: 'POST' });
+        if (response.ok) {
+          autoSuccess = true;
+          setToast({ message: 'Report sent automatically via WhatsApp!', type: 'success' });
+        } else {
+          console.warn('Auto-send failed, falling back to manual generation.');
+        }
+      } catch (err) {
+        console.warn('Auto-send error, falling back to manual generation.', err);
+      }
+
+      if (autoSuccess) {
+        setIsGeneratingPdf(false);
+        return;
+      }
+
+      // 2. Fallback: Manual PDF Generation & Share
+      setToast({ message: 'Generating manual report PDF...', type: 'info' });
+      const today = new Date().toISOString().split('T')[0];
+      const data = await reportsAPI.kpi({ startDate: today, endDate: today }).catch(() => ({}));
+      
+      const totalRevenue = data.total_revenue || 0;
+      const totalOrders = data.total_orders || 0;
+      
+      const topItemsData = await reportsAPI.topItems({ startDate: today, endDate: today }).catch(() => []);
+      const topItems = Array.isArray(topItemsData) ? topItemsData.slice(0, 5) : [];
+      
+      const dateStr = new Date().toLocaleDateString('en-PK', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+      
+      // 1. Generate PDF
+      const { jsPDF } = await import('jspdf');
+      const doc = new jsPDF();
+      
+      // Header
+      doc.setFillColor(249, 115, 22); // Orange header
+      doc.rect(0, 0, 210, 40, 'F');
+      
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(22);
+      doc.setFont("helvetica", "bold");
+      doc.text("TASTY BITES - DAILY REPORT", 105, 20, { align: "center" });
+      
+      doc.setFontSize(12);
+      doc.setFont("helvetica", "normal");
+      doc.text(`Date: ${dateStr}`, 105, 30, { align: "center" });
+      
+      doc.setTextColor(0, 0, 0);
+      
+      // Overview Section
+      doc.setFontSize(16);
+      doc.setFont("helvetica", "bold");
+      doc.text("Daily Insights (Aaj Ka Khulasa)", 20, 60);
+      
+      doc.setDrawColor(200, 200, 200);
+      doc.line(20, 65, 190, 65);
+      
+      doc.setFontSize(12);
+      doc.setFont("helvetica", "normal");
+      doc.text(`Total Orders (Kul Orders):`, 20, 75);
+      doc.setFont("helvetica", "bold");
+      doc.text(`${totalOrders}`, 150, 75);
+      
+      doc.setFont("helvetica", "normal");
+      doc.text(`Total Revenue (Kul Aamdani):`, 20, 85);
+      doc.setFont("helvetica", "bold");
+      doc.text(`Rs. ${totalRevenue.toLocaleString()}`, 150, 85);
+      
+      let y = 105;
+      if (topItems.length > 0) {
+        doc.setFontSize(16);
+        doc.setFont("helvetica", "bold");
+        doc.text("Top Selling Items (Sab Se Zyada Bikne Wale)", 20, 105);
+        doc.line(20, 110, 190, 110);
+        y = 120;
+        
+        doc.setFontSize(12);
+        topItems.forEach((item, index) => {
+          doc.setFont("helvetica", "normal");
+          doc.text(`${index + 1}. ${item.name || 'Item'}`, 20, y);
+          doc.setFont("helvetica", "bold");
+          doc.text(`Qty: ${item.total_qty || 0}`, 150, y);
+          y += 10;
+        });
+        y += 10;
+      }
+      
+      // Footer / AI Insight
+      doc.setFontSize(16);
+      doc.setFont("helvetica", "bold");
+      doc.text("Summary (Nateeja)", 20, y);
+      doc.line(20, y + 5, 190, y + 5);
+      
+      doc.setFontSize(12);
+      doc.setFont("helvetica", "normal");
+      const insightText = totalOrders > 0 
+        ? `Aaj ki sales report kafi achi hai! Total ${totalOrders} orders receive hue hain aur overall revenue Rs. ${totalRevenue.toLocaleString()} raha. Keep it up and try to push more sales on the top items!`
+        : `Aaj abhi tak koi order receive nahi hua.`;
+      
+      const splitText = doc.splitTextToSize(insightText, 170);
+      doc.text(splitText, 20, y + 15);
+      
+      const pdfBlob = doc.output('blob');
+      const fileName = `TastyBites_Daily_Report_${today}.pdf`;
+      const pdfFile = new File([pdfBlob], fileName, { type: 'application/pdf' });
+      
+      const textMsg = `*Aaj Ki Report (${dateStr})*\n\n*Orders:* ${totalOrders}\n*Revenue:* Rs. ${totalRevenue}\n\n_Detailed report PDF file attach kar di gayi hai!_`;
+      
+      // 2. Share or Download
+      let shared = false;
+      if (navigator.canShare && navigator.canShare({ files: [pdfFile] })) {
+        try {
+          await navigator.share({
+            title: 'Daily Report',
+            text: textMsg,
+            files: [pdfFile]
+          });
+          setToast({ message: 'Shared successfully', type: 'success' });
+          shared = true;
+        } catch (e) {
+          console.log('Share API failed or cancelled', e);
+        }
+      }
+      
+      if (!shared) {
+        // Fallback: Download the file and open WhatsApp web
+        doc.save(fileName);
+        
+        const encodedText = encodeURIComponent(textMsg + "\n\n(Please attach the downloaded PDF file)");
+        const phone = '923195304725';
+        const url = `https://wa.me/${phone}?text=${encodedText}`;
+        
+        window.open(url, '_blank');
+        setToast({ message: 'Downloaded PDF. Please attach it on WhatsApp...', type: 'warning' });
+      }
+      
+    } catch (error) {
+      console.error('Report error:', error);
+      setToast({ message: 'Failed to generate report', type: 'error' });
+    } finally {
+      setIsGeneratingPdf(false);
+    }
+  };
+
+  const renderReports = () => (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <div style={{ ...CARD_STYLE, padding: 20 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: '#111827' }}>Daily Summary Report</div>
+        <div style={{ fontSize: 13, color: '#6B7280', marginTop: 4 }}>Send today's sales and orders summary via WhatsApp</div>
+        <button
+          onClick={handleSendReport}
+          disabled={isGeneratingPdf}
+          className="flex items-center gap-2"
+          style={{
+            marginTop: 16, background: isGeneratingPdf ? '#86EFAC' : '#25D366', color: '#FFFFFF',
+            height: 40, borderRadius: 8, fontWeight: 600, fontSize: 14, padding: '0 20px', border: 'none', 
+            cursor: isGeneratingPdf ? 'not-allowed' : 'pointer', transition: 'all 0.2s ease-in-out'
+          }}
+        >
+          {isGeneratingPdf ? (
+            <>
+              <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              Generating PDF...
+            </>
+          ) : (
+            <>
+              <Send size={16} /> Send to WhatsApp (03195304725)
+            </>
+          )}
+        </button>
+      </div>
+    </div>
+  );
+
   const sectionRenderers = {
     restaurant: renderRestaurant,
     tax: renderTax,
@@ -504,6 +690,7 @@ export default function Settings() {
     printer: renderPrinter,
     shift: renderShift,
     backup: renderBackup,
+    reports: renderReports,
   };
 
   return (

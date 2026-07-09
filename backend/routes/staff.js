@@ -74,23 +74,29 @@ router.delete('/:id', (req, res) => {
 
 // POST login via PIN
 router.post('/login', async (req, res) => {
-  const { pin, staff_id } = req.body;
+  const { pin } = req.body;
   if (!pin) return res.status(400).json({ error: 'PIN required' });
-  if (!staff_id) return res.status(400).json({ error: 'Staff ID required' });
 
-  const staff = db.prepare('SELECT id, name, role, color, pin FROM staff WHERE id = ? AND active = 1').get(staff_id);
-  if (!staff) {
-    return res.status(401).json({ error: 'Invalid PIN or inactive account' });
-  }
-
-  const isValid = await bcrypt.compare(String(pin), staff.pin);
-  if (!isValid) {
-    return res.status(401).json({ error: 'Invalid PIN or inactive account' });
-  }
+  const staff = db.prepare('SELECT id, name, role, color, pin FROM staff WHERE active = 1').all();
   
-  // Return staff data without the hashed PIN
-  const { pin: _, ...staffData } = staff;
-  res.json(staffData);
+  for (const member of staff) {
+    let isValid = false;
+    
+    // Check if PIN is bcrypt hashed or plain text
+    if (member.pin.startsWith('$2b$') || member.pin.startsWith('$2a$')) {
+      isValid = await bcrypt.compare(String(pin), member.pin);
+    } else {
+      // Plain text comparison (legacy seeded PINs)
+      isValid = String(pin) === String(member.pin);
+    }
+    
+    if (isValid) {
+      const { pin: _, ...staffData } = member;
+      return res.json(staffData);
+    }
+  }
+
+  return res.status(401).json({ error: 'Invalid PIN or inactive account' });
 });
 
 // Performance per cashier for a date range

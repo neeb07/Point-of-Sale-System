@@ -1,4 +1,4 @@
-const BASE_URL = '/api';
+const BASE_URL = 'http://localhost:3001/api';
 
 interface RequestOptions {
   method: string;
@@ -107,9 +107,17 @@ export const staffAPI = {
   create: (data: Staff) => request<Staff>('POST', '/staff', data),
   update: (id: number, data: Staff) => request<Staff>('PUT', `/staff/${id}`, data),
   delete: (id: number) => request<void>('DELETE', `/staff/${id}`),
-  login: (pin: string, staffId: number) => request<Staff>('POST', '/staff/login', { pin, staff_id: staffId }),
+  login: (pin: string) => request<Staff>('POST', '/staff/login', { pin }),
   performance: (params: Record<string, string> = {}) => {
     const qs = new URLSearchParams(params).toString();
     return request<Record<string, unknown>>('GET', `/staff/performance${qs ? `?${qs}` : ''}`);
   },
+};
+
+export const dealsAPI = {
+  getAll: () => request('GET', '/deals'),
+  getOne: (id: number) => request('GET', `/deals/${id}`),
+  create: (data: unknown) => request('POST', '/deals', data),
+  update: (id: number, data: unknown) => request('PUT', `/deals/${id}`, data),
+  delete: (id: number) => request('DELETE', `/deals/${id}`),
 };

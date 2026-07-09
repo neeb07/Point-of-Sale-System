@@ -8,6 +8,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 // https://vite.dev/config/
 export default defineConfig({
+  base: './',
+
+  build: {
+  outDir: 'dist',
+  emptyOutDir: true
+},
+
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),

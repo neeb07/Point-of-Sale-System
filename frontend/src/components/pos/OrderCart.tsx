@@ -10,8 +10,8 @@ interface CartItem {
 
 interface OrderCartProps {
   cart: CartItem[];
-  onUpdateQty: (id: number, delta: number) => void;
-  onRemoveItem: (id: number) => void;
+  onUpdateQty: (id: number, name: string, delta: number) => void;
+  onRemoveItem: (id: number, name: string) => void;
   onClearCart: () => void;
   onCharge: () => void;
 }
@@ -56,7 +56,7 @@ export default function OrderCart({ cart, onUpdateQty, onRemoveItem, onClearCart
           <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
             {cart.map((item: CartItem, idx: number) => (
               <div
-                key={item.id}
+                key={`${item.id}-${item.name}`}
                 style={{
                   paddingBottom: 14, marginBottom: 14,
                   borderBottom: idx < cart.length - 1 ? '1px solid #F0F0EB' : 'none',
@@ -74,7 +74,7 @@ export default function OrderCart({ cart, onUpdateQty, onRemoveItem, onClearCart
                   <div style={{ fontSize: 12, color: '#A3A39A' }}>Rs. {item.price.toLocaleString()} each</div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <button
-                      onClick={() => onUpdateQty(item.id, -1)}
+                      onClick={() => onUpdateQty(item.id, item.name, -1)}
                       style={{
                         width: 26, height: 26, borderRadius: '50%',
                         background: '#F5F5F0', color: '#6B6B63',
@@ -88,7 +88,7 @@ export default function OrderCart({ cart, onUpdateQty, onRemoveItem, onClearCart
                       {item.qty}
                     </span>
                     <button
-                      onClick={() => onUpdateQty(item.id, 1)}
+                      onClick={() => onUpdateQty(item.id, item.name, 1)}
                       style={{
                         width: 26, height: 26, borderRadius: '50%',
                         background: '#FFF7ED', color: '#F97316',
@@ -99,7 +99,7 @@ export default function OrderCart({ cart, onUpdateQty, onRemoveItem, onClearCart
                       <Plus size={12} />
                     </button>
                     <button
-                      onClick={() => onRemoveItem(item.id)}
+                      onClick={() => onRemoveItem(item.id, item.name)}
                       style={{
                         width: 26, height: 26, borderRadius: '50%',
                         background: 'transparent', color: '#BCBCB4',

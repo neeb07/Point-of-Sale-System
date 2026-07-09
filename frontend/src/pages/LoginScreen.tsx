@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+﻿import { useState, useEffect } from 'react';
 import { Users, ChevronDown, Check, Delete, ChevronLeft, Loader2, Shield } from 'lucide-react';
 import { staffAPI, settingsAPI } from '../api/index';
 import { useAuth } from '../context/AuthContext';
@@ -87,28 +87,27 @@ export default function LoginScreen() {
   };
 
   const verifyPin = async (enteredPin: string) => {
-    if (!selectedStaff) {
-      setErrorMessage('Please select an account first');
-      return;
-    }
-    setLoggingIn(true);
-    try {
-      const result = await staffAPI.login(String(enteredPin), selectedStaff.id);
-      login(result);
-    } catch (err) {
-      setShaking(true);
-      setPinError(true);
-      setErrorMessage('Incorrect PIN. Try again.');
-      setPin('');
-      setTimeout(() => {
-        setShaking(false);
-        setPinError(false);
-        setErrorMessage('');
-      }, 800);
-    } finally {
-      setLoggingIn(false);
-    }
-  };
+  setLoggingIn(true);
+  try {
+    console.log('Attempting login with PIN:', enteredPin);
+    const result = await staffAPI.login(String(enteredPin));
+    console.log('Login result:', result);
+    login(result);
+  } catch (err) {
+    console.error('Login error:', err);
+    setShaking(true);
+    setPinError(true);
+    setErrorMessage('Incorrect PIN. Try again.');
+    setPin('');
+    setTimeout(() => {
+      setShaking(false);
+      setPinError(false);
+      setErrorMessage('');
+    }, 800);
+  } finally {
+    setLoggingIn(false);
+  }
+};
 
   const numpadKeys = [1, 2, 3, 4, 5, 6, 7, 8, 9];
 
@@ -488,6 +487,9 @@ export default function LoginScreen() {
                   {n}
                 </button>
               ))}
+
+              
+
 
               {/* Back / clear account */}
               <button
