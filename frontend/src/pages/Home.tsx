@@ -7,6 +7,7 @@ import Orders from '@/pages/Orders';
 import Reports from '@/pages/Reports';
 import Settings from '@/pages/Settings';
 import Deals from '@/pages/Deals';
+import InventoryScreen from '@/pages/InventoryScreen';
 import LoginScreen from '@/pages/LoginScreen';
 import AccessDenied from '@/components/AccessDenied';
 import { POSProvider } from '@/lib/POSContext';
@@ -20,6 +21,7 @@ const screens: Record<string, React.ComponentType> = {
   orders: Orders,
   reports: Reports,
   settings: Settings,
+  inventory: InventoryScreen,
 };
 
 export default function Home() {
@@ -32,7 +34,7 @@ export default function Home() {
 
   const ActiveScreen = screens[activePage];
 
-  if (activePage === 'cashier' && !isAdmin) {
+  if ((activePage === 'cashier' || activePage === 'inventory') && !isAdmin) {
     return (
       <POSProvider>
         <div
@@ -50,7 +52,7 @@ export default function Home() {
             activePage={activePage}
             onNavigate={setActivePage}
           />
-          <AccessDenied message="Only managers can access Staff Management." />
+          <AccessDenied message="Only managers can access this page." />
         </div>
       </POSProvider>
     );
@@ -73,7 +75,7 @@ export default function Home() {
           activePage={activePage}
           onNavigate={setActivePage}
         />
-        <ActiveScreen />
+        <ActiveScreen onNavigate={setActivePage} />
       </div>
     </POSProvider>
   );

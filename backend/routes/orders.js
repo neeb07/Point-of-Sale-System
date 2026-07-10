@@ -4,9 +4,9 @@ const db = require('../db/database');
 
 // Create a new completed order
 router.post('/', (req, res) => {
-  const { items, total, discount, payment_method, cashier_id, cashier_name } = req.body;
+  const { items, total, discount, payment_method, cashier_id, cashier_name, order_type, delivery_charge } = req.body;
 
-  console.log('Creating order:', { items, total, discount, payment_method, cashier_id, cashier_name });
+  console.log('Creating order:', { items, total, discount, payment_method, cashier_id, cashier_name, order_type, delivery_charge });
 
   if (!items || items.length === 0) {
     return res.status(400).json({ error: 'Order must have at least one item' });
@@ -15,14 +15,16 @@ router.post('/', (req, res) => {
   // Insert order in a transaction so it is atomic
   const createOrder = db.transaction(() => {
     const orderResult = db.prepare(
-      `INSERT INTO orders (total, discount, payment_method, status, cashier_id, cashier_name)
-       VALUES (?, ?, ?, 'completed', ?, ?)`
+      `INSERT INTO orders (total, discount, payment_method, status, cashier_id, cashier_name, order_type, delivery_charge)
+       VALUES (?, ?, ?, 'completed', ?, ?, ?, ?)`
     ).run(
       total,
       discount || 0,
       payment_method || 'Cash',
       cashier_id || null,
-      cashier_name || 'Unknown'
+      cashier_name || 'Unknown',
+      order_type || 'Dine-in',
+      delivery_charge || 0
     );
 
     const orderId = orderResult.lastInsertRowid;
@@ -32,9 +34,36 @@ router.post('/', (req, res) => {
       'INSERT INTO order_items (order_id, menu_item_id, name, price, quantity) VALUES (?, ?, ?, ?, ?)'
     );
 
+    const getRecipe = db.prepare(
+      'SELECT id FROM recipes WHERE menu_item_id = ? AND (variant_id = ? OR variant_id IS NULL)'
+    );
+    const getRecipeIngredients = db.prepare(
+      'SELECT ingredient_id, quantity_required FROM recipe_ingredients WHERE recipe_id = ?'
+    );
+    const deductStock = db.prepare(
+      'UPDATE ingredients SET stock = stock - ? WHERE id = ?'
+    );
+
     items.forEach(item => {
       insertItem.run(orderId, item.id, item.name, item.price, item.quantity);
       console.log('Item inserted:', item.name);
+
+      // --- INVENTORY DEDUCTION ---
+      // NOTE: Deal deduction is intentionally deferred for now. Do not attempt to explode deals
+      // into their component items for stock purposes in this stage. Treat them exactly like
+      // items with no recipes (like pizzas).
+      if (item.is_deal) {
+        return; // Skip deduction
+      }
+
+      const recipeRow = getRecipe.get(item.id, item.variant_id || null);
+      if (recipeRow) {
+        const ingredients = getRecipeIngredients.all(recipeRow.id);
+        ingredients.forEach(ing => {
+          const totalQty = ing.quantity_required * item.quantity;
+          deductStock.run(totalQty, ing.ingredient_id);
+        });
+      }
     });
 
     return orderId;

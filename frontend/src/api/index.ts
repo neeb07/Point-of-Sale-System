@@ -50,7 +50,7 @@ interface Staff {
 
 interface Settings {
   restaurant_name?: string;
-  [key: string]: unknown;
+  [key: string]: any;
 }
 
 interface ReportParams {

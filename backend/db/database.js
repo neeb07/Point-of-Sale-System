@@ -1,7 +1,7 @@
 const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcryptjs');
 
 const userDataDir = process.env.POS_USER_DATA_PATH || path.join(__dirname, '..');
 
@@ -91,6 +91,32 @@ db.exec(`
     sort_order INTEGER DEFAULT 0,
     FOREIGN KEY (menu_item_id) REFERENCES menu_items(id) ON DELETE CASCADE
   );
+
+  CREATE TABLE IF NOT EXISTS ingredients (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    unit TEXT NOT NULL,
+    stock REAL DEFAULT 0,
+    low_stock_threshold REAL DEFAULT 0,
+    cost_per_unit REAL DEFAULT 0
+  );
+
+  CREATE TABLE IF NOT EXISTS recipes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    menu_item_id INTEGER NOT NULL,
+    variant_id INTEGER DEFAULT NULL,
+    FOREIGN KEY (menu_item_id) REFERENCES menu_items(id) ON DELETE CASCADE,
+    FOREIGN KEY (variant_id) REFERENCES item_variants(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS recipe_ingredients (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    recipe_id INTEGER NOT NULL,
+    ingredient_id INTEGER NOT NULL,
+    quantity_required REAL NOT NULL,
+    FOREIGN KEY (recipe_id) REFERENCES recipes(id) ON DELETE CASCADE,
+    FOREIGN KEY (ingredient_id) REFERENCES ingredients(id) ON DELETE CASCADE
+  );
 `);
 
 // Migrations
@@ -105,12 +131,23 @@ try { db.exec("UPDATE menu_items SET category = 'Pizza' WHERE category IN ('Stan
 try { db.exec("UPDATE menu_items SET category = 'Sides' WHERE category IN ('Wrap', 'Hot Wings', 'Broast Chicken', 'Fries', 'Special Meal');"); } catch(e) {}
 try { db.exec("ALTER TABLE deal_items ADD COLUMN variant_id INTEGER DEFAULT NULL;"); } catch(e) {}
 
+// --- NEW MIGRATIONS (Deals sub-groups + Delivery) ---
+// FIX: routes/deals.js reads/writes di.description but this column never existed on
+// deal_items — every deal request would have thrown an SQL error. Adding it here.
+try { db.exec("ALTER TABLE deal_items ADD COLUMN description TEXT DEFAULT NULL;"); } catch(e) {}
+// Lets deals be grouped into "1 Person Deals", "Student Deal", etc. for the Deals sub-bar
+try { db.exec("ALTER TABLE deals ADD COLUMN deal_group TEXT DEFAULT NULL;"); } catch(e) {}
+// Dine-in vs Delivery on each order, and the exact delivery amount charged at the time
+try { db.exec("ALTER TABLE orders ADD COLUMN order_type TEXT DEFAULT 'Dine-in';"); } catch(e) {}
+try { db.exec("ALTER TABLE orders ADD COLUMN delivery_charge REAL DEFAULT 0;"); } catch(e) {}
+try { db.exec("ALTER TABLE ingredients ADD COLUMN low_stock_threshold REAL DEFAULT 0;"); } catch(e) {}
+
 // Seed menu items
 const count = db.prepare('SELECT COUNT(*) as count FROM menu_items').get();
 if (count.count === 0) {
   const insertItem = db.prepare('INSERT INTO menu_items (name, category, price, has_variants) VALUES (?, ?, ?, ?)');
   const insertVariant = db.prepare('INSERT INTO item_variants (menu_item_id, label, price, sort_order) VALUES (?, ?, ?, ?)');
-  
+
   db.transaction(() => {
     // Single price items
     const singleItems = [
@@ -221,69 +258,83 @@ if (settingsCount.count === 0) {
     ['tax_rate', '0'],
     ['currency_symbol', 'Rs.'],
     ['receipt_footer', 'Thank you for visiting!'],
-    ['auto_print', 'true']
+    ['auto_print', 'true'],
+    ['delivery_price', '0']
   ].forEach(([k, v]) => insertSetting.run(k, v));
+}
+
+// Safety net: if settings already existed before this update (an already-running
+// install), the block above won't have run, so delivery_price would be missing.
+// This makes sure it exists either way, without ever overwriting a value you set.
+const deliveryPriceRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('delivery_price');
+if (!deliveryPriceRow) {
+  db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run('delivery_price', '0');
 }
 
 // Seed deals
 const dealsCount = db.prepare('SELECT COUNT(*) as count FROM deals').get();
 if (dealsCount.count === 0) {
-  const insertDeal = db.prepare('INSERT INTO deals (name, price, description) VALUES (?, ?, ?)');
+  const insertDeal = db.prepare('INSERT INTO deals (name, price, description, deal_group) VALUES (?, ?, ?, ?)');
   const insertDealItem = db.prepare('INSERT INTO deal_items (deal_id, menu_item_id, quantity, variant_id) VALUES (?, ?, ?, ?)');
   const getItemId = db.prepare('SELECT id FROM menu_items WHERE name = ?');
   const getVariantId = db.prepare('SELECT id FROM item_variants WHERE menu_item_id = ? AND label = ?');
 
   const seedDeals = [
     // 1 Person Deals
-    { name: '1 Person Deal 1', price: 350, desc: '', items: [{ n: 'Chicken Burger', q: 1 }, { n: '350ml Drink', q: 1 }] },
-    { name: '1 Person Deal 2', price: 350, desc: '', items: [{ n: 'Tikka Burger', q: 1 }, { n: '350ml Drink', q: 1 }] },
-    { name: '1 Person Deal 3', price: 400, desc: '', items: [{ n: 'Zinger Burger', q: 1 }, { n: '350ml Drink', q: 1 }] },
-    { name: '1 Person Deal 4', price: 400, desc: '', items: [{ n: 'Jalapeno Burger', q: 1 }, { n: '350ml Drink', q: 1 }] },
-    { name: '1 Person Deal 5', price: 500, desc: '', items: [{ n: 'Chicken Burger', q: 1 }, { n: '350ml Drink', q: 1 }, { n: 'French Fries', v: 'Small', q: 1 }] },
-    { name: '1 Person Deal 6', price: 600, desc: '', items: [{ n: 'Zinger Burger', q: 1 }, { n: 'French Fries', v: 'Small', q: 1 }, { n: '350ml Drink', q: 1 }] },
+    { name: '1 Person Deal 1', group: '1 Person Deals', price: 350, desc: '', items: [{ n: 'Chicken Burger', q: 1 }, { n: '350ml Drink', q: 1 }] },
+    { name: '1 Person Deal 2', group: '1 Person Deals', price: 350, desc: '', items: [{ n: 'Tikka Burger', q: 1 }, { n: '350ml Drink', q: 1 }] },
+    { name: '1 Person Deal 3', group: '1 Person Deals', price: 400, desc: '', items: [{ n: 'Zinger Burger', q: 1 }, { n: '350ml Drink', q: 1 }] },
+    { name: '1 Person Deal 4', group: '1 Person Deals', price: 400, desc: '', items: [{ n: 'Jalapeno Burger', q: 1 }, { n: '350ml Drink', q: 1 }] },
+    { name: '1 Person Deal 5', group: '1 Person Deals', price: 500, desc: '', items: [{ n: 'Chicken Burger', q: 1 }, { n: '350ml Drink', q: 1 }, { n: 'French Fries', v: 'Small', q: 1 }] },
+    { name: '1 Person Deal 6', group: '1 Person Deals', price: 600, desc: '', items: [{ n: 'Zinger Burger', q: 1 }, { n: 'French Fries', v: 'Small', q: 1 }, { n: '350ml Drink', q: 1 }] },
 
     // 2 Person Deals
-    { name: '2 Person Deal 1', price: 500, desc: '', items: [{ n: 'Shawarma Roll', q: 2 }, { n: '350ml Drink', q: 1 }] },
-    { name: '2 Person Deal 2', price: 600, desc: '', items: [{ n: 'Chicken Burger', q: 2 }, { n: '350ml Drink', q: 1 }] },
-    { name: '2 Person Deal 3', price: 600, desc: '', items: [{ n: 'Pratha Roll', q: 2 }, { n: '350ml Drink', q: 1 }] },
-    { name: '2 Person Deal 4', price: 670, desc: '', items: [{ n: 'Flaming Pasta', v: 'Full', q: 1 }, { n: '350ml Drink', q: 1 }] },
-    { name: '2 Person Deal 5', price: 600, desc: '', items: [{ n: 'Behari Roll', q: 4 }, { n: '350ml Drink', q: 1 }] },
-    { name: '2 Person Deal 6', price: 700, desc: '', items: [{ n: 'Zinger Burger', q: 2 }, { n: '350ml Drink', q: 1 }] },
+    { name: '2 Person Deal 1', group: '2 Person Deals', price: 500, desc: '', items: [{ n: 'Shawarma Roll', q: 2 }, { n: '350ml Drink', q: 1 }] },
+    { name: '2 Person Deal 2', group: '2 Person Deals', price: 600, desc: '', items: [{ n: 'Chicken Burger', q: 2 }, { n: '350ml Drink', q: 1 }] },
+    { name: '2 Person Deal 3', group: '2 Person Deals', price: 600, desc: '', items: [{ n: 'Pratha Roll', q: 2 }, { n: '350ml Drink', q: 1 }] },
+    { name: '2 Person Deal 4', group: '2 Person Deals', price: 670, desc: '', items: [{ n: 'Flaming Pasta', v: 'Full', q: 1 }, { n: '350ml Drink', q: 1 }] },
+    { name: '2 Person Deal 5', group: '2 Person Deals', price: 600, desc: '', items: [{ n: 'Behari Roll', q: 4 }, { n: '350ml Drink', q: 1 }] },
+    { name: '2 Person Deal 6', group: '2 Person Deals', price: 700, desc: '', items: [{ n: 'Zinger Burger', q: 2 }, { n: '350ml Drink', q: 1 }] },
 
     // Student Deal
-    { name: 'Student Deal 1', price: 1000, desc: '', items: [{ n: 'Seekh Kabab Pizza', v: 'Small', q: 1 }, { n: 'Hot Wings/Nuggets', v: '6 Pc', q: 1 }, { n: '350ml Drink', q: 1 }] },
-    { name: 'Student Deal 2', price: 1350, desc: '', items: [{ n: 'Seekh Kabab Pizza', v: 'Medium', q: 1 }, { n: '1000ml Drink', q: 1 }] },
-    { name: 'Student Deal 3', price: 1450, desc: '', items: [{ n: 'Special Malai Boti Pizza', v: 'Large', q: 1 }, { n: '1000ml Drink', q: 1 }] },
+    { name: 'Student Deal 1', group: 'Student Deal', price: 1000, desc: '', items: [{ n: 'Seekh Kabab Pizza', v: 'Small', q: 1 }, { n: 'Hot Wings/Nuggets', v: '6 Pc', q: 1 }, { n: '350ml Drink', q: 1 }] },
+    { name: 'Student Deal 2', group: 'Student Deal', price: 1350, desc: '', items: [{ n: 'Seekh Kabab Pizza', v: 'Medium', q: 1 }, { n: '1000ml Drink', q: 1 }] },
+    { name: 'Student Deal 3', group: 'Student Deal', price: 1450, desc: '', items: [{ n: 'Special Malai Boti Pizza', v: 'Large', q: 1 }, { n: '1000ml Drink', q: 1 }] },
 
     // Special Pizza Deal
-    { name: 'Special Pizza Deal 1', price: 900, desc: "Includes: 1 Small Pizza — any Special Pizza tier flavor, customer's choice", items: [{ n: 'Zinger Burger', q: 1 }, { n: '350ml Drink', q: 1 }] },
-    { name: 'Special Pizza Deal 2', price: 1100, desc: '', items: [{ n: 'Chicken Tikka Pizza', v: 'Small', q: 1 }, { n: 'Chicken Fajita Pizza', v: 'Small', q: 1 }, { n: '350ml Drink', q: 1 }] },
-    { name: 'Special Pizza Deal 3', price: 1700, desc: "Includes: 1 Medium Pizza — any Special Pizza tier flavor, customer's choice", items: [{ n: 'Chicken Fajita Pizza', v: 'Small', q: 1 }, { n: '1000ml Drink', q: 1 }] },
-    { name: 'Special Pizza Deal 4', price: 2300, desc: '', items: [{ n: 'Seekh Kabab Pizza', v: 'Large', q: 1 }, { n: 'Hot Wings/Nuggets', v: '12 Pc', q: 1 }, { n: '1500ml Drink', q: 1 }] },
-    { name: 'Special Pizza Deal 5', price: 2100, desc: '', items: [{ n: 'Chicken Tikka Pizza', v: 'Medium', q: 1 }, { n: 'Chicken Fajita Pizza', v: 'Medium', q: 1 }, { n: '1000ml Drink', q: 1 }] },
-    { name: 'Special Pizza Deal 6', price: 2700, desc: '', items: [{ n: 'Chicken Tikka Pizza', v: 'Large', q: 1 }, { n: 'Chicken Fajita Pizza', v: 'Large', q: 1 }, { n: '1000ml Drink', q: 1 }] },
+    { name: 'Special Pizza Deal 1', group: 'Special Pizza Deal', price: 900, desc: "Includes: 1 Small Pizza — any Special Pizza tier flavor, customer's choice", items: [{ n: 'Zinger Burger', q: 1 }, { n: '350ml Drink', q: 1 }] },
+    { name: 'Special Pizza Deal 2', group: 'Special Pizza Deal', price: 1100, desc: '', items: [{ n: 'Chicken Tikka Pizza', v: 'Small', q: 1 }, { n: 'Chicken Fajita Pizza', v: 'Small', q: 1 }, { n: '350ml Drink', q: 1 }] },
+    { name: 'Special Pizza Deal 3', group: 'Special Pizza Deal', price: 1700, desc: "Includes: 1 Medium Pizza — any Special Pizza tier flavor, customer's choice", items: [{ n: 'Chicken Fajita Pizza', v: 'Small', q: 1 }, { n: '1000ml Drink', q: 1 }] },
+    { name: 'Special Pizza Deal 4', group: 'Special Pizza Deal', price: 2300, desc: '', items: [{ n: 'Seekh Kabab Pizza', v: 'Large', q: 1 }, { n: 'Hot Wings/Nuggets', v: '12 Pc', q: 1 }, { n: '1500ml Drink', q: 1 }] },
+    { name: 'Special Pizza Deal 5', group: 'Special Pizza Deal', price: 2100, desc: '', items: [{ n: 'Chicken Tikka Pizza', v: 'Medium', q: 1 }, { n: 'Chicken Fajita Pizza', v: 'Medium', q: 1 }, { n: '1000ml Drink', q: 1 }] },
+    { name: 'Special Pizza Deal 6', group: 'Special Pizza Deal', price: 2700, desc: '', items: [{ n: 'Chicken Tikka Pizza', v: 'Large', q: 1 }, { n: 'Chicken Fajita Pizza', v: 'Large', q: 1 }, { n: '1000ml Drink', q: 1 }] },
 
     // Family Deal
-    { name: 'Family Deal 1', price: 1900, desc: '', items: [{ n: 'Zinger Burger', q: 5 }, { n: '1500ml Drink', q: 1 }] },
-    { name: 'Family Deal 2', price: 2900, desc: "Includes: 2x Small Pizza — any flavor, customer's choice", items: [{ n: 'Zinger Burger', q: 4 }, { n: 'French Fries', v: 'Large', q: 1 }, { n: '1500ml Drink', q: 1 }] },
-    { name: 'Family Deal 3', price: 3000, desc: "Includes: 1 Large Pizza — any flavor, customer's choice", items: [{ n: 'Zinger Burger', q: 2 }, { n: 'Chicken Burger', q: 2 }, { n: 'French Fries', v: 'Large', q: 1 }, { n: '2.25 Liter Drink', q: 1 }] },
+    { name: 'Family Deal 1', group: 'Family Deal', price: 1900, desc: '', items: [{ n: 'Zinger Burger', q: 5 }, { n: '1500ml Drink', q: 1 }] },
+    { name: 'Family Deal 2', group: 'Family Deal', price: 2900, desc: "Includes: 2x Small Pizza — any flavor, customer's choice", items: [{ n: 'Zinger Burger', q: 4 }, { n: 'French Fries', v: 'Large', q: 1 }, { n: '1500ml Drink', q: 1 }] },
+    { name: 'Family Deal 3', group: 'Family Deal', price: 3000, desc: "Includes: 1 Large Pizza — any flavor, customer's choice", items: [{ n: 'Zinger Burger', q: 2 }, { n: 'Chicken Burger', q: 2 }, { n: 'French Fries', v: 'Large', q: 1 }, { n: '2.25 Liter Drink', q: 1 }] },
 
     // Lunch & Midnight Deal
-    { name: 'Lunch & Midnight Deal 1', price: 1100, desc: '', items: [{ n: 'Zinger Burger', q: 3 }, { n: '1000ml Drink', q: 1 }] },
-    { name: 'Lunch & Midnight Deal 2', price: 1100, desc: "Includes: 1 Medium Pizza — any Special Pizza tier flavor, customer's choice", items: [{ n: '350ml Drink', q: 1 }] },
-    { name: 'Lunch & Midnight Deal 3', price: 1400, desc: '', items: [{ n: 'Chicken Tikka Pizza', v: 'Large', q: 1 }, { n: '1000ml Drink', q: 1 }] },
-    { name: 'Lunch & Midnight Deal 4', price: 1500, desc: '', items: [{ n: 'Zinger Burger', q: 4 }, { n: '1500ml Drink', q: 1 }] },
-    { name: 'Lunch & Midnight Deal 5', price: 2000, desc: "Includes: 1 Small Pizza — any Special Pizza tier flavor, customer's choice", items: [{ n: 'Chicken Fajita Pizza', v: 'Large', q: 1 }, { n: '1500ml Drink', q: 1 }] },
-    { name: 'Lunch & Midnight Deal 6', price: 4500, desc: "Includes: 1 Large Pizza — any Special Pizza tier flavor, customer's choice", items: [{ n: 'Lasagnia Malai Boti Pizza', v: 'Large', q: 1 }, { n: 'Chicken Fajita Pizza', v: 'Large', q: 1 }, { n: '2.25 Liter Drink', q: 1 }] },
-    { name: 'Lunch & Midnight Deal 7', price: 1250, desc: "Includes: 1 Small Pizza — any Special Pizza tier flavor, customer's choice", items: [{ n: 'Hot Wings/Nuggets', v: '6 Pc', q: 1 }, { n: '1000ml Drink', q: 1 }] },
-    { name: 'Lunch & Midnight Deal 8', price: 2400, desc: '', items: [{ n: 'Shahi Pizza', v: 'Large', q: 1 }, { n: 'Bonfire Pizza', v: 'Medium', q: 1 }, { n: '1500ml Drink', q: 1 }] },
-    { name: 'Lunch & Midnight Deal 9', price: 850, desc: '', items: [{ n: 'Lasagnia Malai Boti Pizza', v: 'Small', q: 1 }, { n: '350ml Drink', q: 1 }] },
-    { name: 'Lunch & Midnight Deal 10', price: 1150, desc: '', items: [{ n: 'Pratha Roll', q: 1 }, { n: 'Tasty Bites Special Malai Boti Roll', q: 1 }, { n: 'Shawarma Roll', q: 1 }, { n: 'Zinger Pratha Roll', q: 1 }, { n: '1000ml Drink', q: 1 }] }
+    { name: 'Lunch & Midnight Deal 1', group: 'Lunch & Midnight Deal', price: 1100, desc: '', items: [{ n: 'Zinger Burger', q: 3 }, { n: '1000ml Drink', q: 1 }] },
+    { name: 'Lunch & Midnight Deal 2', group: 'Lunch & Midnight Deal', price: 1100, desc: "Includes: 1 Medium Pizza — any Special Pizza tier flavor, customer's choice", items: [{ n: '350ml Drink', q: 1 }] },
+    { name: 'Lunch & Midnight Deal 3', group: 'Lunch & Midnight Deal', price: 1400, desc: '', items: [{ n: 'Chicken Tikka Pizza', v: 'Large', q: 1 }, { n: '1000ml Drink', q: 1 }] },
+    { name: 'Lunch & Midnight Deal 4', group: 'Lunch & Midnight Deal', price: 1500, desc: '', items: [{ n: 'Zinger Burger', q: 4 }, { n: '1500ml Drink', q: 1 }] },
+    { name: 'Lunch & Midnight Deal 5', group: 'Lunch & Midnight Deal', price: 2000, desc: "Includes: 1 Small Pizza — any Special Pizza tier flavor, customer's choice", items: [{ n: 'Chicken Fajita Pizza', v: 'Large', q: 1 }, { n: '1500ml Drink', q: 1 }] },
+    { name: 'Lunch & Midnight Deal 6', group: 'Lunch & Midnight Deal', price: 4500, desc: "Includes: 1 Large Pizza — any Special Pizza tier flavor, customer's choice", items: [{ n: 'Lasagnia Malai Boti Pizza', v: 'Large', q: 1 }, { n: 'Chicken Fajita Pizza', v: 'Large', q: 1 }, { n: '2.25 Liter Drink', q: 1 }] },
+    { name: 'Lunch & Midnight Deal 7', group: 'Lunch & Midnight Deal', price: 1250, desc: "Includes: 1 Small Pizza — any Special Pizza tier flavor, customer's choice", items: [{ n: 'Hot Wings/Nuggets', v: '6 Pc', q: 1 }, { n: '1000ml Drink', q: 1 }] },
+    { name: 'Lunch & Midnight Deal 8', group: 'Lunch & Midnight Deal', price: 2400, desc: '', items: [{ n: 'Shahi Pizza', v: 'Large', q: 1 }, { n: 'Bonfire Pizza', v: 'Medium', q: 1 }, { n: '1500ml Drink', q: 1 }] },
+    { name: 'Lunch & Midnight Deal 9', group: 'Lunch & Midnight Deal', price: 850, desc: '', items: [{ n: 'Lasagnia Malai Boti Pizza', v: 'Small', q: 1 }, { n: '350ml Drink', q: 1 }] },
+    { name: 'Lunch & Midnight Deal 10', group: 'Lunch & Midnight Deal', price: 1150, desc: '', items: [{ n: 'Pratha Roll', q: 1 }, { n: 'Tasty Bites Special Malai Boti Roll', q: 1 }, { n: 'Shawarma Roll', q: 1 }, { n: 'Zinger Pratha Roll', q: 1 }, { n: '1000ml Drink', q: 1 }] },
+    
+    // Broast Deals
+    { name: 'Broast Deal 1', group: 'Broast Deal', price: 850, desc: '1 Leg, 1 Thigh, 1 Bun, Fries, 1 Garlic Dip', items: [] },
+    { name: 'Broast Deal 2', group: 'Broast Deal', price: 1100, desc: '1 Leg, 1 Thigh, 1 Wing, 1 Breast, 1 Bun, Fries, 1 Garlic Dip', items: [] },
+    { name: 'Broast Deal 3', group: 'Broast Deal', price: 2100, desc: '2 Legs, 1 Thigh, 2 Wings, 2 Breasts, 2 Buns, Fries, 1 Garlic Dip', items: [] }
   ];
 
   db.transaction(() => {
     seedDeals.forEach(d => {
-      const res = insertDeal.run(d.name, d.price, d.desc);
+      const res = insertDeal.run(d.name, d.price, d.desc, d.group);
       const dealId = res.lastInsertRowid;
       d.items.forEach(i => {
         const itemRow = getItemId.get(i.n);
@@ -299,6 +350,161 @@ if (dealsCount.count === 0) {
         }
       });
     });
+  })();
+}
+
+// Normalize deal_group names that were incorrectly pluralized by an earlier backfill
+const dealGroupFixes = [
+  ['Special Pizza Deals', 'Special Pizza Deal'],
+  ['Family Deals', 'Family Deal'],
+  ['Lunch & Midnight Deals', 'Lunch & Midnight Deal'],
+];
+const fixDealGroup = db.prepare('UPDATE deals SET deal_group = ? WHERE deal_group = ?');
+db.transaction(() => {
+  dealGroupFixes.forEach(([from, to]) => fixDealGroup.run(to, from));
+})();
+
+// If deals already existed before this update (deal_group column added via migration
+// but the seed block above was skipped since dealsCount > 0), backfill deal_group
+// for any deal whose name matches one of the known prefixes, so old data doesn't
+// end up permanently ungrouped.
+const ungroupedDeals = db.prepare("SELECT id, name FROM deals WHERE deal_group IS NULL").all();
+if (ungroupedDeals.length > 0) {
+  const groupPrefixes = [
+    { prefix: '1 Person Deal', group: '1 Person Deals' },
+    { prefix: '2 Person Deal', group: '2 Person Deals' },
+    { prefix: 'Student Deal', group: 'Student Deal' },
+    { prefix: 'Special Pizza Deal', group: 'Special Pizza Deal' },
+    { prefix: 'Family Deal', group: 'Family Deal' },
+    { prefix: 'Lunch & Midnight Deal', group: 'Lunch & Midnight Deal' },
+    { prefix: 'Broast Deal', group: 'Broast Deal' },
+  ];
+  const updateGroup = db.prepare('UPDATE deals SET deal_group = ? WHERE id = ?');
+  db.transaction(() => {
+    ungroupedDeals.forEach(row => {
+      const match = groupPrefixes
+        .filter(p => row.name.startsWith(p.prefix))
+        .sort((a, b) => b.prefix.length - a.prefix.length)[0];
+      if (match) updateGroup.run(match.group, row.id);
+    });
+  })();
+}
+
+// --- Seed Ingredients and Recipes ---
+const ingCount = db.prepare('SELECT COUNT(*) as count FROM ingredients').get();
+if (ingCount.count === 0) {
+  const insertIng = db.prepare('INSERT INTO ingredients (name, unit, stock, cost_per_unit, low_stock_threshold) VALUES (?, ?, ?, ?, ?)');
+  const insertRecipe = db.prepare('INSERT INTO recipes (menu_item_id, variant_id) VALUES (?, ?)');
+  const insertRecipeIng = db.prepare('INSERT INTO recipe_ingredients (recipe_id, ingredient_id, quantity_required) VALUES (?, ?, ?)');
+
+  const getItemId = db.prepare('SELECT id FROM menu_items WHERE name = ?');
+  const getVariantId = db.prepare('SELECT id FROM item_variants WHERE menu_item_id = ? AND label = ?');
+
+  db.transaction(() => {
+    // 1. Insert Ingredients
+    const ings = [
+      { name: 'Burger Bun', unit: 'pcs', stock: 100, threshold: 20 },
+      { name: 'Chicken Patty', unit: 'pcs', stock: 100, threshold: 20 },
+      { name: 'Beef Patty', unit: 'pcs', stock: 100, threshold: 20 },
+      { name: 'Zinger Fillet', unit: 'pcs', stock: 100, threshold: 20 },
+      { name: 'Cheese Slice', unit: 'pcs', stock: 100, threshold: 20 },
+      { name: 'Lettuce', unit: 'grams', stock: 5000, threshold: 500 },
+      { name: 'Mayo', unit: 'ml', stock: 5000, threshold: 500 },
+      { name: 'Wings', unit: 'pcs', stock: 200, threshold: 40 }
+    ];
+    const ingMap = {};
+    for (const ing of ings) {
+      const res = insertIng.run(ing.name, ing.unit, ing.stock, 0, ing.threshold);
+      ingMap[ing.name] = res.lastInsertRowid;
+    }
+
+    // 2. Define Recipes
+    const recipes = [
+      {
+        item: 'Zinger Burger',
+        ingredients: [
+          { name: 'Burger Bun', qty: 1 },
+          { name: 'Zinger Fillet', qty: 1 },
+          { name: 'Lettuce', qty: 20 },
+          { name: 'Mayo', qty: 15 }
+        ]
+      },
+      {
+        item: 'Chicken Burger',
+        ingredients: [
+          { name: 'Burger Bun', qty: 1 },
+          { name: 'Chicken Patty', qty: 1 },
+          { name: 'Lettuce', qty: 15 },
+          { name: 'Mayo', qty: 10 }
+        ]
+      },
+      {
+        item: 'Mighty Burger',
+        ingredients: [
+          { name: 'Burger Bun', qty: 1 },
+          { name: 'Zinger Fillet', qty: 2 },
+          { name: 'Cheese Slice', qty: 1 },
+          { name: 'Lettuce', qty: 30 },
+          { name: 'Mayo', qty: 20 }
+        ]
+      },
+      {
+        item: 'Special Beef Burger',
+        ingredients: [
+          { name: 'Burger Bun', qty: 1 },
+          { name: 'Beef Patty', qty: 1 },
+          { name: 'Cheese Slice', qty: 1 },
+          { name: 'Lettuce', qty: 20 },
+          { name: 'Mayo', qty: 15 }
+        ]
+      },
+      {
+        item: '10 Pc Oven Baked Wings',
+        ingredients: [
+          { name: 'Wings', qty: 10 }
+        ]
+      },
+      {
+        item: '10 Pc Honey Wings',
+        ingredients: [
+          { name: 'Wings', qty: 10 }
+        ]
+      },
+      {
+        item: 'Hot Wings/Nuggets',
+        variant: '6 Pc',
+        ingredients: [
+          { name: 'Wings', qty: 6 }
+        ]
+      },
+      {
+        item: 'Hot Wings/Nuggets',
+        variant: '12 Pc',
+        ingredients: [
+          { name: 'Wings', qty: 12 }
+        ]
+      }
+    ];
+
+    for (const r of recipes) {
+      const itemRow = getItemId.get(r.item);
+      if (itemRow) {
+        let vId = null;
+        if (r.variant) {
+          const vRow = getVariantId.get(itemRow.id, r.variant);
+          if (vRow) vId = vRow.id;
+        }
+        const res = insertRecipe.run(itemRow.id, vId);
+        const recipeId = res.lastInsertRowid;
+        
+        for (const i of r.ingredients) {
+          const ingId = ingMap[i.name];
+          if (ingId) {
+            insertRecipeIng.run(recipeId, ingId, i.qty);
+          }
+        }
+      }
+    }
   })();
 }
 

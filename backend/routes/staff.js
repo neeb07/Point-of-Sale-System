@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db/database');
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcryptjs');
 const saltRounds = 10;
 
 // GET all staff
@@ -148,3 +148,4 @@ router.get('/performance', (req, res) => {
 });
 
 module.exports = router;
+

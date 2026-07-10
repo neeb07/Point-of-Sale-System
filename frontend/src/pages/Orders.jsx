@@ -7,7 +7,8 @@ import DataTable from '@/components/pos-ui/DataTable';
 import StatusPill from '@/components/pos-ui/StatusPill';
 import Toast from '@/components/pos-ui/Toast';
 import Modal from '@/components/pos-ui/Modal';
-import { ordersAPI } from '@/api/index';
+import ReceiptModal from '@/components/pos/ReceiptModal';
+import { ordersAPI, settingsAPI } from '@/api/index';
 
 const DATE_CHIPS = [
   { id: 'today', label: 'Today' },
@@ -49,6 +50,20 @@ export default function Orders() {
   const [filters, setFilters] = useState({ dateRange: 'today', search: '', status: 'all', payment: 'all' });
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState('');
+  const [receiptData, setReceiptData] = useState(null);
+  const [restaurantDetails, setRestaurantDetails] = useState(null);
+
+  useEffect(() => {
+    settingsAPI.getAll().then((data) => {
+      setRestaurantDetails({
+        name: data.restaurant_name || '',
+        tagline: data.restaurant_tagline || '',
+        address: data.restaurant_address || '',
+        phone: data.restaurant_phone || '',
+        footerMessage: data.receipt_footer || 'Thank you for visiting!',
+      });
+    }).catch(() => {});
+  }, []);
 
   const fetchOrders = async () => {
     setLoading(true);
@@ -197,6 +212,37 @@ export default function Orders() {
 
   const subtotal = selectedOrder?.items?.reduce((s, i) => s + i.price * i.quantity, 0) || 0;
 
+  const buildReceiptData = (order) => {
+    const itemsSubtotal = order.items?.reduce((s, i) => s + i.price * i.quantity, 0) || 0;
+    const deliveryCharge = Number(order.delivery_charge) || 0;
+    return {
+      orderInfo: {
+        date: moment(order.created_at).format('DD/MM/YYYY'),
+        time: moment(order.created_at).format('HH:mm A'),
+        orderNumber: `#${order.id}`,
+        table: '—',
+        paymentMethod: order.payment_method || 'Cash',
+        cashier: order.cashier_name || 'Unknown',
+        orderType: order.order_type || 'Dine-in',
+      },
+      items: (order.items || []).map((i) => ({
+        name: i.name,
+        quantity: i.quantity,
+        price: i.price,
+      })),
+      subtotal: itemsSubtotal,
+      discount: Number(order.discount) || 0,
+      deliveryCharge,
+      total: Number(order.total) || 0,
+      restaurant: restaurantDetails,
+    };
+  };
+
+  const handleReprint = (order) => {
+    if (!restaurantDetails) return;
+    setReceiptData(buildReceiptData(order));
+  };
+
   return (
     <div style={{ flex: 1, height: '100vh', overflow: 'hidden', display: 'flex', flexDirection: 'column', background: '#FFFFFF', fontFamily: "'Inter', sans-serif" }}>
       <div style={{ padding: 24, flex: 1, overflow: 'auto' }}>
@@ -316,6 +362,7 @@ export default function Orders() {
                   { label: 'DATE & TIME', value: moment(selectedOrder.created_at).format('MMM D, YYYY h:mm A') },
                   { label: 'CASHIER', value: selectedOrder.cashier_name || '—' },
                   { label: 'PAYMENT', value: selectedOrder.payment_method || 'Cash' },
+                  { label: 'ORDER TYPE', value: selectedOrder.order_type || 'Dine-in' },
                 ].map((cell) => (
                   <div key={cell.label}>
                     <div style={{ fontSize: 11, color: '#9CA3AF', textTransform: 'uppercase' }}>{cell.label}</div>
@@ -353,6 +400,12 @@ export default function Orders() {
                   <span style={{ fontSize: 13, fontWeight: 700, color: '#EF4444' }}>-{formatCurrency(selectedOrder.discount)}</span>
                 </div>
               )}
+              {Number(selectedOrder.delivery_charge) > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                  <span style={{ fontSize: 13, color: '#6B7280' }}>Delivery Charge</span>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: '#111827' }}>{formatCurrency(selectedOrder.delivery_charge)}</span>
+                </div>
+              )}
               <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 12 }}>
                 <span style={{ fontSize: 15, fontWeight: 700, color: '#111827' }}>TOTAL</span>
                 <span style={{ fontSize: 18, fontWeight: 700, color: '#F97316' }}>{formatCurrency(selectedOrder.total)}</span>
@@ -361,6 +414,7 @@ export default function Orders() {
 
             <div style={{ height: 80, flexShrink: 0, padding: '16px 20px', borderTop: '1px solid #E5E7EB', display: 'flex', gap: 10 }}>
               <button
+                onClick={() => handleReprint(selectedOrder)}
                 className="flex items-center justify-center gap-2"
                 style={{
                   flex: 1, background: '#FFFFFF', border: '1px solid #E5E7EB', color: '#374151',
@@ -397,6 +451,12 @@ export default function Orders() {
       </Modal>
 
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+
+      <ReceiptModal
+        open={!!receiptData}
+        onClose={() => setReceiptData(null)}
+        orderData={receiptData}
+      />
     </div>
   );
 }

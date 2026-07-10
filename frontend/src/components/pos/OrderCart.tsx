@@ -10,14 +10,28 @@ interface CartItem {
 
 interface OrderCartProps {
   cart: CartItem[];
+  orderType: 'Dine-in' | 'Delivery';
+  deliveryCharge: number;
+  onOrderTypeChange: (type: 'Dine-in' | 'Delivery') => void;
   onUpdateQty: (id: number, name: string, delta: number) => void;
   onRemoveItem: (id: number, name: string) => void;
   onClearCart: () => void;
   onCharge: () => void;
 }
 
-export default function OrderCart({ cart, onUpdateQty, onRemoveItem, onClearCart, onCharge }: OrderCartProps) {
-  const total = cart.reduce((sum: number, item: CartItem) => sum + (item.price * item.qty), 0);
+export default function OrderCart({
+  cart,
+  orderType,
+  deliveryCharge,
+  onOrderTypeChange,
+  onUpdateQty,
+  onRemoveItem,
+  onClearCart,
+  onCharge,
+}: OrderCartProps) {
+  const subtotal = cart.reduce((sum: number, item: CartItem) => sum + (item.price * item.qty), 0);
+  const appliedDelivery = orderType === 'Delivery' ? deliveryCharge : 0;
+  const total = subtotal + appliedDelivery;
 
   return (
     <div
@@ -123,18 +137,54 @@ export default function OrderCart({ cart, onUpdateQty, onRemoveItem, onClearCart
 
       {/* Footer */}
       <div style={{ padding: '16px 18px', background: '#FAFAF8', borderTop: '1px solid #EBEBEB' }}>
+        {/* Dine-in / Delivery toggle */}
+        <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
+          {(['Dine-in', 'Delivery'] as const).map(type => {
+            const active = orderType === type;
+            return (
+              <button
+                key={type}
+                onClick={() => onOrderTypeChange(type)}
+                style={{
+                  flex: 1,
+                  height: 36,
+                  borderRadius: 8,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  background: active ? '#F97316' : '#FFFFFF',
+                  color: active ? '#FFFFFF' : '#6B6B63',
+                  border: active ? '1px solid #F97316' : '1.5px solid #EBEBEB',
+                  transition: 'all 140ms',
+                }}
+              >
+                {type}
+              </button>
+            );
+          })}
+        </div>
+
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
           <span style={{ fontSize: 13, color: '#A3A39A' }}>Subtotal</span>
-          <span style={{ fontSize: 13, fontWeight: 500, color: '#111110' }}>Rs. {total.toLocaleString()}</span>
+          <span style={{ fontSize: 13, fontWeight: 500, color: '#111110' }}>Rs. {subtotal.toLocaleString()}</span>
         </div>
-        <div style={{
-          display: 'flex', justifyContent: 'space-between',
-          marginBottom: 14, paddingBottom: 14,
-          borderBottom: '1px solid #EBEBEB',
-        }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: orderType === 'Delivery' ? 8 : 14 }}>
           <span style={{ fontSize: 13, color: '#A3A39A' }}>Discount</span>
           <span style={{ fontSize: 13, fontWeight: 500, color: '#10B981' }}>- Rs. 0</span>
         </div>
+        {orderType === 'Delivery' && (
+          <div style={{
+            display: 'flex', justifyContent: 'space-between',
+            marginBottom: 14, paddingBottom: 14,
+            borderBottom: '1px solid #EBEBEB',
+          }}>
+            <span style={{ fontSize: 13, color: '#A3A39A' }}>Delivery Charge</span>
+            <span style={{ fontSize: 13, fontWeight: 500, color: '#111110' }}>Rs. {deliveryCharge.toLocaleString()}</span>
+          </div>
+        )}
+        {orderType !== 'Delivery' && (
+          <div style={{ borderBottom: '1px solid #EBEBEB', marginBottom: 14, paddingBottom: 14 }} />
+        )}
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
           <span style={{ fontSize: 16, fontWeight: 700, color: '#111110' }}>Total</span>
           <span style={{ fontSize: 16, fontWeight: 700, color: '#F97316' }}>Rs. {total.toLocaleString()}</span>

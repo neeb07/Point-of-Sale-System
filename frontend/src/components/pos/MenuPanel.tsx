@@ -28,11 +28,12 @@ interface Deal {
   price: number;
   image_url: string | null;
   active: number;
+  deal_group?: string;
   items: DealItem[];
 }
 
 interface MenuPanelProps {
-  onAddToCart: (item: { id: number; name: string; price: number; isDeal?: boolean }) => void;
+  onAddToCart: (item: { id: number; name: string; price: number; isDeal?: boolean; variant_id?: number | null }) => void;
   search: string;
 }
 
@@ -53,9 +54,21 @@ function getFoodImage(name: string): string {
   return `https://image.pollinations.ai/prompt/${prompt}?width=300&height=200&nologo=true&seed=${seed}`;
 }
 
+const DEAL_GROUPS = [
+  'All Deals',
+  '1 Person Deals',
+  '2 Person Deals',
+  'Student Deal',
+  'Special Pizza Deal',
+  'Family Deal',
+  'Lunch & Midnight Deal',
+  'Broast Deal',
+];
+
 export default function MenuPanel({ onAddToCart, search }: MenuPanelProps) {
   const { menuItems } = usePOS();
   const [activeCategory, setActiveCategory] = useState('All');
+  const [activeDealGroup, setActiveDealGroup] = useState('All Deals');
   const [deals, setDeals] = useState<Deal[]>([]);
   const [dealsLoading, setDealsLoading] = useState(true);
   const [selectedVariantItem, setSelectedVariantItem] = useState<MenuItem | null>(null);
@@ -84,11 +97,17 @@ export default function MenuPanel({ onAddToCart, search }: MenuPanelProps) {
     return activeCategory === 'All' || item.category === activeCategory;
   });
 
-  const showDeals = activeCategory === 'All' || activeCategory === 'Deals';
+  const showDeals = activeCategory === 'Deals';
   const filteredDeals = deals.filter(deal => {
     if (search) return deal.name.toLowerCase().includes(search.toLowerCase());
-    return true;
+    if (activeDealGroup === 'All Deals') return true;
+    return deal.deal_group === activeDealGroup;
   });
+
+  const handleCategoryChange = (cat: string) => {
+    setActiveCategory(cat);
+    if (cat !== 'Deals') setActiveDealGroup('All Deals');
+  };
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -113,7 +132,7 @@ export default function MenuPanel({ onAddToCart, search }: MenuPanelProps) {
           return (
             <button
               key={cat}
-              onClick={() => setActiveCategory(cat)}
+              onClick={() => handleCategoryChange(cat)}
               style={{
                 padding: '5px 14px',
                 borderRadius: 7,
@@ -145,6 +164,61 @@ export default function MenuPanel({ onAddToCart, search }: MenuPanelProps) {
           );
         })}
       </div>
+
+      {/* Deal Sub-Categories — only visible inside Deals tab */}
+      {activeCategory === 'Deals' && (
+        <div
+          style={{
+            height: 38,
+            background: '#FAFAF8',
+            borderBottom: '1px solid #EBEBEB',
+            padding: '0 16px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 4,
+            overflowX: 'auto',
+            flexShrink: 0,
+            scrollbarWidth: 'none',
+          }}
+        >
+          {DEAL_GROUPS.map(group => {
+            const isActive = activeDealGroup === group;
+            return (
+              <button
+                key={group}
+                onClick={() => setActiveDealGroup(group)}
+                style={{
+                  padding: '3px 10px',
+                  borderRadius: 6,
+                  fontSize: 11,
+                  fontWeight: isActive ? 600 : 500,
+                  color: isActive ? '#F97316' : '#A3A39A',
+                  background: isActive ? '#FFF7ED' : 'transparent',
+                  border: isActive ? '1px solid #FED7AA' : '1px solid transparent',
+                  cursor: 'pointer',
+                  flexShrink: 0,
+                  transition: 'all 140ms',
+                  whiteSpace: 'nowrap',
+                }}
+                onMouseEnter={e => {
+                  if (!isActive) {
+                    e.currentTarget.style.color = '#6B6B63';
+                    e.currentTarget.style.background = '#F5F5F0';
+                  }
+                }}
+                onMouseLeave={e => {
+                  if (!isActive) {
+                    e.currentTarget.style.color = '#A3A39A';
+                    e.currentTarget.style.background = 'transparent';
+                  }
+                }}
+              >
+                {group}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Item Grid */}
       <div
@@ -254,7 +328,8 @@ export default function MenuPanel({ onAddToCart, search }: MenuPanelProps) {
                     onAddToCart({
                       id: selectedVariantItem.id,
                       name: `${selectedVariantItem.name} (${variant.label})${toppingText}`,
-                      price: variant.price + selectedTopping
+                      price: variant.price + selectedTopping,
+                      variant_id: variant.id
                     });
                     setSelectedVariantItem(null);
                     setSelectedTopping(0);

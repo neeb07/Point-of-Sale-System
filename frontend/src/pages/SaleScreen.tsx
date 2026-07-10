@@ -1,10 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import TopBar from '@/components/pos/TopBar';
 import MenuPanel from '@/components/pos/MenuPanel';
 import OrderCart from '@/components/pos/OrderCart';
 import ReceiptModal from '@/components/pos/ReceiptModal';
 import Modal from '@/components/pos-ui/Modal';
-import { ordersAPI } from '@/api/index';
+import { ordersAPI, settingsAPI } from '@/api/index';
 import { Loader2, CreditCard } from 'lucide-react';
 import { usePOS } from '@/lib/POSContext';
 import { useAuth } from '@/context/AuthContext';
@@ -15,6 +15,16 @@ interface CartItem {
   name: string;
   price: number;
   qty: number;
+  isDeal?: boolean;
+  variant_id?: number | null;
+}
+
+interface RestaurantDetails {
+  name: string;
+  tagline: string;
+  address: string;
+  phone: string;
+  footerMessage: string;
 }
 
 interface ReceiptData {
@@ -25,22 +35,60 @@ interface ReceiptData {
     table: string;
     paymentMethod: string;
     cashier: string;
+    orderType: string;
   };
   items: { name: string; quantity: number; price: number }[];
   subtotal: number;
   discount: number;
+  deliveryCharge: number;
   total: number;
+  restaurant: RestaurantDetails;
 }
 
-export default function SaleScreen() {
+interface SaleScreenProps {
+  onNavigate?: (page: string) => void;
+}
+
+export default function SaleScreen({ onNavigate }: SaleScreenProps = {}) {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [search, setSearch] = useState('');
+  const [orderType, setOrderType] = useState<'Dine-in' | 'Delivery'>('Dine-in');
+  const [deliveryPrice, setDeliveryPrice] = useState(0);
+  const [restaurantDetails, setRestaurantDetails] = useState<RestaurantDetails>({
+    name: '',
+    tagline: '',
+    address: '',
+    phone: '',
+    footerMessage: 'Thank you for visiting!',
+  });
   const [receiptData, setReceiptData] = useState<ReceiptData | null>(null);
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
   const { loading } = usePOS();
   const { currentUser } = useAuth();
 
-  const handleAddToCart = (item: CartItem) => {
+  useEffect(() => {
+    const loadSettings = () => {
+      settingsAPI.getAll().then((data) => {
+        setDeliveryPrice(Number(data.delivery_price) || 0);
+        setRestaurantDetails({
+          name: data.restaurant_name || '',
+          tagline: data.restaurant_tagline || '',
+          address: data.restaurant_address || '',
+          phone: data.restaurant_phone || '',
+          footerMessage: data.receipt_footer || 'Thank you for visiting!',
+        });
+      }).catch(() => {});
+    };
+    loadSettings();
+    window.addEventListener('focus', loadSettings);
+    return () => window.removeEventListener('focus', loadSettings);
+  }, []);
+
+  const subtotal = cart.reduce((sum, item) => sum + item.price * item.qty, 0);
+  const deliveryCharge = orderType === 'Delivery' ? deliveryPrice : 0;
+  const total = subtotal + deliveryCharge;
+
+  const handleAddToCart = (item: { id: number; name: string; price: number; isDeal?: boolean; variant_id?: number | null }) => {
     setCart((prev: CartItem[]) => {
       const existing = prev.find((c: CartItem) => c.id === item.id && c.name === item.name);
       if (existing) {
@@ -48,7 +96,7 @@ export default function SaleScreen() {
           (c.id === item.id && c.name === item.name) ? { ...c, qty: c.qty + 1 } : c
         );
       }
-      return [...prev, { id: item.id, name: item.name, price: item.price, qty: 1 }];
+      return [...prev, { id: item.id, name: item.name, price: item.price, qty: 1, isDeal: item.isDeal, variant_id: item.variant_id }];
     });
   };
 
@@ -64,22 +112,36 @@ export default function SaleScreen() {
     setCart((prev: CartItem[]) => prev.filter((c: CartItem) => !(c.id === id && c.name === name)));
   };
 
-  const handleClearCart = () => setCart([]);
+  const resetOrder = () => {
+    setCart([]);
+    setOrderType('Dine-in');
+  };
+
+  const handleClearCart = () => resetOrder();
+
+  const handleOrderTypeChange = (type: 'Dine-in' | 'Delivery') => {
+    setOrderType(type);
+    if (type === 'Delivery') {
+      settingsAPI.getAll().then((data) => {
+        setDeliveryPrice(Number(data.delivery_price) || 0);
+      }).catch((err) => {
+        console.error('Failed to load delivery price from settings:', err);
+      });
+    }
+  };
 
   const handleCharge = () => setConfirmModalOpen(true);
 
   const confirmCharge = async () => {
     setConfirmModalOpen(false);
     try {
-      const total = cart.reduce(
-        (sum: number, item: CartItem) => sum + item.price * item.qty,
-        0
-      );
       const items = cart.map((c: CartItem) => ({
         id: c.id,
         name: c.name,
         price: c.price,
         quantity: c.qty,
+        is_deal: c.isDeal || false,
+        variant_id: c.variant_id || null,
       }));
 
       const order = await ordersAPI.create({
@@ -87,6 +149,8 @@ export default function SaleScreen() {
         total,
         discount: 0,
         payment_method: 'Cash',
+        order_type: orderType,
+        delivery_charge: deliveryCharge,
         cashier_id: currentUser?.id || null,
         cashier_name: currentUser?.name || 'Unknown',
       });
@@ -99,18 +163,21 @@ export default function SaleScreen() {
           table: '—',
           paymentMethod: 'Cash',
           cashier: currentUser?.name || 'Unknown',
+          orderType,
         },
         items: cart.map((c: CartItem) => ({
           name: c.name,
           quantity: c.qty,
           price: c.price,
         })),
-        subtotal: total,
+        subtotal,
         discount: 0,
+        deliveryCharge,
         total,
+        restaurant: restaurantDetails,
       });
 
-      setCart([]);
+      resetOrder();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Unknown error';
       console.error('Failed to charge order:', err);
@@ -128,11 +195,14 @@ export default function SaleScreen() {
 
   return (
     <div style={{ flex: 1, height: '100vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-      <TopBar search={search} onSearchChange={setSearch} />
+      <TopBar search={search} onSearchChange={setSearch} onNavigate={onNavigate} />
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
         <MenuPanel onAddToCart={handleAddToCart} search={search} />
         <OrderCart
           cart={cart}
+          orderType={orderType}
+          deliveryCharge={deliveryPrice}
+          onOrderTypeChange={handleOrderTypeChange}
           onUpdateQty={handleUpdateQty}
           onRemoveItem={handleRemoveItem}
           onClearCart={handleClearCart}
@@ -162,13 +232,23 @@ export default function SaleScreen() {
               <span style={{ fontSize: 13, fontWeight: 600, color: '#111110' }}>{cart.length}</span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+              <span style={{ fontSize: 13, color: '#A3A39A' }}>Order Type</span>
+              <span style={{ fontSize: 13, fontWeight: 600, color: '#111110' }}>{orderType}</span>
+            </div>
+            {deliveryCharge > 0 && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                <span style={{ fontSize: 13, color: '#A3A39A' }}>Delivery Charge</span>
+                <span style={{ fontSize: 13, fontWeight: 600, color: '#111110' }}>Rs. {deliveryCharge.toLocaleString()}</span>
+              </div>
+            )}
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
               <span style={{ fontSize: 13, color: '#A3A39A' }}>Payment Method</span>
               <span style={{ fontSize: 13, fontWeight: 600, color: '#111110' }}>Cash</span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 8, borderTop: '1px solid #EBEBEB' }}>
               <span style={{ fontSize: 14, fontWeight: 700, color: '#111110' }}>Total</span>
               <span style={{ fontSize: 16, fontWeight: 700, color: '#F97316' }}>
-                Rs. {cart.reduce((sum: number, item: CartItem) => sum + item.price * item.qty, 0).toLocaleString()}
+                Rs. {total.toLocaleString()}
               </span>
             </div>
           </div>

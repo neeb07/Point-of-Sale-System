@@ -1,12 +1,37 @@
-import React from 'react';
-import { Search, RefreshCw, Wifi, LayoutGrid } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Search, RefreshCw, Wifi, LayoutGrid, AlertTriangle } from 'lucide-react';
+import { useAuth } from '@/context/AuthContext';
 
 interface TopBarProps {
   search: string;
   onSearchChange: (value: string) => void;
+  onNavigate?: (page: string) => void;
 }
 
-export default function TopBar({ search, onSearchChange }: TopBarProps) {
+export default function TopBar({ search, onSearchChange, onNavigate }: TopBarProps) {
+  const [lowStockCount, setLowStockCount] = useState(0);
+  const { isAdmin } = useAuth();
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    const fetchLowStock = async () => {
+      try {
+        const res = await fetch('/api/inventory/low-stock');
+        const data = await res.json();
+        if (data.count !== undefined) {
+          setLowStockCount(data.count);
+        }
+      } catch (err) {
+        console.error('Failed to fetch low stock count:', err);
+      }
+    };
+    
+    fetchLowStock();
+    // Poll every 60 seconds
+    const interval = setInterval(fetchLowStock, 60000);
+    // Also add event listener to update after a sale if desired, or let polling handle it
+    return () => clearInterval(interval);
+  }, [isAdmin]);
   return (
     <div
       style={{
@@ -52,6 +77,26 @@ export default function TopBar({ search, onSearchChange }: TopBarProps) {
           />
         </div>
       </div>
+
+      {/* Middle / Warning */}
+      {lowStockCount > 0 && isAdmin && (
+        <button
+          onClick={() => onNavigate?.('inventory')}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            background: '#FEF2F2', border: '1px solid #FECACA',
+            padding: '6px 12px', borderRadius: 8, cursor: 'pointer',
+            transition: 'background 140ms'
+          }}
+          onMouseEnter={e => e.currentTarget.style.background = '#FEE2E2'}
+          onMouseLeave={e => e.currentTarget.style.background = '#FEF2F2'}
+        >
+          <AlertTriangle size={15} color="#EF4444" />
+          <span style={{ fontSize: 13, fontWeight: 600, color: '#DC2626' }}>
+            {lowStockCount} {lowStockCount === 1 ? 'item' : 'items'} low on stock
+          </span>
+        </button>
+      )}
 
       {/* Right */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>

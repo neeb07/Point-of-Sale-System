@@ -24,6 +24,7 @@ app.use('/api/settings', require('./routes/settings'));
 app.use('/api/staff', require('./routes/staff'));
 app.use('/api/deals', require('./routes/deals'));
 app.use('/api/whatsapp', require('./routes/whatsapp'));
+app.use('/api/inventory', require('./routes/inventory'));
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 

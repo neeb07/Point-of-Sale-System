@@ -1,12 +1,6 @@
 import React from 'react';
 
-const RestaurantDetails = {
-  name: 'Al-Madina Fast Food',
-  address: '123 Main Street, Food Avenue',
-  phone: '0300-1234567',
-};
-
-const ReceiptHeader = () => (
+const ReceiptHeader = ({ restaurant }) => (
   <div
     style={{
       background: 'linear-gradient(135deg, #F97316, #EA580C)',
@@ -35,14 +29,21 @@ const ReceiptHeader = () => (
         marginBottom: 12,
       }}
     >
-      {RestaurantDetails.name.charAt(0)}
+      {(restaurant?.name || 'R').charAt(0)}
     </div>
     <div style={{ fontWeight: 700, fontSize: 18, fontFamily: 'Inter, sans-serif', marginBottom: 4 }}>
-      {RestaurantDetails.name}
+      {restaurant?.name || 'Restaurant'}
     </div>
-    <div style={{ fontSize: 12, opacity: 0.9 }}>
-      {RestaurantDetails.address} &middot; {RestaurantDetails.phone}
-    </div>
+    {restaurant?.tagline && (
+      <div style={{ fontSize: 12, opacity: 0.9, marginBottom: 4, fontStyle: 'italic' }}>
+        {restaurant.tagline}
+      </div>
+    )}
+    {(restaurant?.address || restaurant?.phone) && (
+      <div style={{ fontSize: 12, opacity: 0.9 }}>
+        {[restaurant?.address, restaurant?.phone].filter(Boolean).join(' · ')}
+      </div>
+    )}
   </div>
 );
 
@@ -57,6 +58,7 @@ const ReceiptMeta = ({ orderInfo }) => (
       <div>Cashier: {orderInfo.cashier}</div>
       <div>Table: {orderInfo.table || '—'}</div>
       <div>Payment: {orderInfo.paymentMethod}</div>
+      {orderInfo.orderType && <div>Type: {orderInfo.orderType}</div>}
     </div>
   </div>
 );
@@ -95,7 +97,7 @@ const ReceiptItemsTable = ({ items }) => (
   </div>
 );
 
-const ReceiptTotals = ({ subtotal, discount, total }) => (
+const ReceiptTotals = ({ subtotal, discount, deliveryCharge, total, orderType }) => (
   <div style={{ display: 'flex', flexDirection: 'column' }}>
     <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 8, fontSize: 13, color: '#374151', fontWeight: 500 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -106,6 +108,12 @@ const ReceiptTotals = ({ subtotal, discount, total }) => (
         <div style={{ display: 'flex', justifyContent: 'space-between', color: '#EF4444' }}>
           <span>Discount</span>
           <span>-Rs.{discount}</span>
+        </div>
+      )}
+      {(deliveryCharge > 0 || orderType === 'Delivery') && (
+        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+          <span>Delivery Charge</span>
+          <span>Rs.{deliveryCharge}</span>
         </div>
       )}
     </div>
@@ -125,7 +133,7 @@ const ReceiptTotals = ({ subtotal, discount, total }) => (
   </div>
 );
 
-const ReceiptFooter = () => (
+const ReceiptFooter = ({ restaurant }) => (
   <div
     style={{
       background: '#F9FAFB',
@@ -139,15 +147,19 @@ const ReceiptFooter = () => (
       gap: 6,
     }}
   >
-    <div style={{ fontWeight: 600, fontSize: 14, color: '#4B5563' }}>Thank you for visiting!</div>
-    <div style={{ fontSize: 12, color: '#9CA3AF' }}>{RestaurantDetails.name}</div>
+    <div style={{ fontWeight: 600, fontSize: 14, color: '#4B5563' }}>
+      {restaurant?.footerMessage || 'Thank you for visiting!'}
+    </div>
+    {restaurant?.name && (
+      <div style={{ fontSize: 12, color: '#9CA3AF' }}>{restaurant.name}</div>
+    )}
     <div style={{ color: '#F97316', fontSize: 16, marginTop: 4, letterSpacing: 4 }}>
       ★ ★ ★ ★ ★
     </div>
   </div>
 );
 
-export default function Receipt({ orderInfo, items, subtotal, discount, total }) {
+export default function Receipt({ orderInfo, items, subtotal, discount, deliveryCharge, total, restaurant }) {
   return (
     <div
       style={{
@@ -162,13 +174,13 @@ export default function Receipt({ orderInfo, items, subtotal, discount, total })
         margin: '0 auto',
       }}
     >
-      <ReceiptHeader />
+      <ReceiptHeader restaurant={restaurant} />
       <ReceiptMeta orderInfo={orderInfo} />
       <ReceiptDivider />
       <ReceiptItemsTable items={items} />
       <ReceiptDivider />
-      <ReceiptTotals subtotal={subtotal} discount={discount} total={total} />
-      <ReceiptFooter />
+      <ReceiptTotals subtotal={subtotal} discount={discount} deliveryCharge={deliveryCharge || 0} total={total} orderType={orderInfo?.orderType} />
+      <ReceiptFooter restaurant={restaurant} />
     </div>
   );
 }

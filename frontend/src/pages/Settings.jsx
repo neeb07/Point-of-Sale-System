@@ -84,7 +84,8 @@ export default function Settings() {
   const [logoPreview, setLogoPreview] = useState(null);
   const fileInputRef = useRef(null);
 
-  const [tax, setTax] = useState({ rate: 0, currency: 'Rs.', position: 'before', enableTax: false });
+  const [tax, setTax] = useState({ rate: 0, currency: 'Rs.', position: 'before', enableTax: false, deliveryPrice: 0 });
+  const [taxOriginal, setTaxOriginal] = useState(null);
 
   const [receiptSettings, setReceiptSettings] = useState({
     autoPrint: true, showTax: true, showCashier: true, showOrderNumber: true, showPayment: true, paperSize: '80mm',
@@ -130,6 +131,14 @@ export default function Settings() {
         currency: data.currency_symbol || 'Rs.',
         position: data.currency_position || 'before',
         enableTax: Number(data.tax_rate) > 0,
+        deliveryPrice: Number(data.delivery_price) || 0,
+      });
+      setTaxOriginal({
+        rate: Number(data.tax_rate) || 0,
+        currency: data.currency_symbol || 'Rs.',
+        position: data.currency_position || 'before',
+        enableTax: Number(data.tax_rate) > 0,
+        deliveryPrice: Number(data.delivery_price) || 0,
       });
       setReceiptSettings({
         autoPrint: data.auto_print === 'true',
@@ -155,6 +164,7 @@ export default function Settings() {
   }, [shiftOpen, shiftStart]);
 
   const profileChanged = profileOriginal && JSON.stringify(profile) !== JSON.stringify(profileOriginal);
+  const taxChanged = taxOriginal && JSON.stringify(tax) !== JSON.stringify(taxOriginal);
 
   const handleSaveProfile = async () => {
     await settingsAPI.update({
@@ -166,6 +176,17 @@ export default function Settings() {
     });
     setProfileOriginal({ ...profile });
     setToast({ message: 'Settings saved successfully', type: 'success' });
+  };
+
+  const handleSaveTax = async () => {
+    await settingsAPI.update({
+      tax_rate: String(tax.enableTax ? tax.rate : 0),
+      currency_symbol: tax.currency,
+      currency_position: tax.position,
+      delivery_price: String(tax.deliveryPrice),
+    });
+    setTaxOriginal({ ...tax });
+    setToast({ message: 'Tax & pricing saved successfully', type: 'success' });
   };
 
   const handleLogoUpload = (e) => {
@@ -332,6 +353,30 @@ export default function Settings() {
             </button>
           ))}
         </div>
+      </div>
+      <div>
+        <FieldLabel label="Delivery Price" helper="Added to orders when Delivery is selected (e.g. Rs. 150)" />
+        <input
+          type="number"
+          min="0"
+          value={tax.deliveryPrice}
+          onChange={(e) => setTax({ ...tax, deliveryPrice: Number(e.target.value) })}
+          style={{ ...INPUT_STYLE, width: 160 }}
+        />
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        <button
+          onClick={handleSaveTax}
+          disabled={!taxChanged}
+          style={{
+            background: taxChanged ? '#F97316' : '#E5E7EB',
+            color: taxChanged ? '#FFFFFF' : '#9CA3AF',
+            height: 40, borderRadius: 8, fontWeight: 600, fontSize: 14, padding: '0 20px',
+            border: 'none', cursor: taxChanged ? 'pointer' : 'not-allowed',
+          }}
+        >
+          Save
+        </button>
       </div>
     </div>
   );
