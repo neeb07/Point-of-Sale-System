@@ -51,13 +51,13 @@ export default function Sidebar({ activePage, onNavigate }: SidebarProps) {
         width: 36,
         height: 36,
         borderRadius: 10,
-        background: '#F97316',
+        background: '#111111',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
         marginBottom: 20,
         flexShrink: 0,
-        boxShadow: '0 2px 8px rgba(249,115,22,0.28)',
+        boxShadow: '0 2px 8px rgba(17,17,17,0.22)',
       }}>
         <Utensils size={17} color="#FFFFFF" />
       </div>
@@ -80,7 +80,7 @@ export default function Sidebar({ activePage, onNavigate }: SidebarProps) {
                 flexDirection: 'column',
                 alignItems: 'center',
                 gap: 4,
-                background: isActive ? '#FFF7ED' : 'transparent',
+                background: isActive ? '#FEEFD0' : 'transparent',
                 borderRadius: 10,
                 border: 'none',
                 cursor: 'pointer',
@@ -104,17 +104,17 @@ export default function Sidebar({ activePage, onNavigate }: SidebarProps) {
                   width: 3,
                   height: 20,
                   borderRadius: '0 3px 3px 0',
-                  background: '#F97316',
+                  background: '#DC2626',
                 }} />
               )}
               <Icon
                 size={20}
-                style={{ color: isActive ? '#F97316' : '#BCBCB4' }}
+                style={{ color: isActive ? '#DC2626' : '#BCBCB4' }}
               />
               <span style={{
                 fontSize: 10,
                 fontWeight: isActive ? 600 : 500,
-                color: isActive ? '#F97316' : '#BCBCB4',
+                color: isActive ? '#DC2626' : '#BCBCB4',
                 letterSpacing: '0.1px',
               }}>
                 {label}

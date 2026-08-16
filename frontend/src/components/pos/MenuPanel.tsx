@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { usePOS } from '@/lib/POSContext';
 import { dealsAPI } from '@/api/index';
 import { Tag } from 'lucide-react';
+import { DEAL_GROUP_TABS } from '@/lib/constants';
 
 interface MenuItem {
   id: number;
@@ -19,6 +20,9 @@ interface DealItem {
   price: number;
   category: string;
   quantity: number;
+  variant_id?: number | null;
+  variant_label?: string | null;
+  variant_price?: number | null;
 }
 
 interface Deal {
@@ -54,16 +58,8 @@ function getFoodImage(name: string): string {
   return `https://image.pollinations.ai/prompt/${prompt}?width=300&height=200&nologo=true&seed=${seed}`;
 }
 
-const DEAL_GROUPS = [
-  'All Deals',
-  '1 Person Deals',
-  '2 Person Deals',
-  'Student Deal',
-  'Special Pizza Deal',
-  'Family Deal',
-  'Lunch & Midnight Deal',
-  'Broast Deal',
-];
+// DEAL_GROUPS previously lived here AND in Deals.tsx. Single source of
+// truth is now @/lib/constants so the two can never drift apart again.
 
 export default function MenuPanel({ onAddToCart, search }: MenuPanelProps) {
   const { menuItems } = usePOS();
@@ -138,9 +134,9 @@ export default function MenuPanel({ onAddToCart, search }: MenuPanelProps) {
                 borderRadius: 7,
                 fontSize: 13,
                 fontWeight: isActive ? 600 : 500,
-                color: isActive ? '#F97316' : '#A3A39A',
-                background: isActive ? '#FFF7ED' : 'transparent',
-                border: isActive ? '1.5px solid #FED7AA' : '1.5px solid transparent',
+                color: isActive ? '#DC2626' : '#A3A39A',
+                background: isActive ? '#FEEFD0' : 'transparent',
+                border: isActive ? '1.5px solid #F2D9A0' : '1.5px solid transparent',
                 cursor: 'pointer',
                 flexShrink: 0,
                 transition: 'all 140ms',
@@ -181,7 +177,7 @@ export default function MenuPanel({ onAddToCart, search }: MenuPanelProps) {
             scrollbarWidth: 'none',
           }}
         >
-          {DEAL_GROUPS.map(group => {
+          {DEAL_GROUP_TABS.map(group => {
             const isActive = activeDealGroup === group;
             return (
               <button
@@ -192,9 +188,9 @@ export default function MenuPanel({ onAddToCart, search }: MenuPanelProps) {
                   borderRadius: 6,
                   fontSize: 11,
                   fontWeight: isActive ? 600 : 500,
-                  color: isActive ? '#F97316' : '#A3A39A',
-                  background: isActive ? '#FFF7ED' : 'transparent',
-                  border: isActive ? '1px solid #FED7AA' : '1px solid transparent',
+                  color: isActive ? '#DC2626' : '#A3A39A',
+                  background: isActive ? '#FEEFD0' : 'transparent',
+                  border: isActive ? '1px solid #F2D9A0' : '1px solid transparent',
                   cursor: 'pointer',
                   flexShrink: 0,
                   transition: 'all 140ms',
@@ -301,9 +297,9 @@ export default function MenuPanel({ onAddToCart, search }: MenuPanelProps) {
                         borderRadius: 999,
                         fontSize: 13,
                         fontWeight: 600,
-                        border: `1.5px solid ${selectedTopping === top.price ? '#F97316' : '#EBEBEB'}`,
-                        background: selectedTopping === top.price ? '#FFF7ED' : '#FFFFFF',
-                        color: selectedTopping === top.price ? '#F97316' : '#6B6B63',
+                        border: `1.5px solid ${selectedTopping === top.price ? '#DC2626' : '#EBEBEB'}`,
+                        background: selectedTopping === top.price ? '#FEEFD0' : '#FFFFFF',
+                        color: selectedTopping === top.price ? '#DC2626' : '#6B6B63',
                         cursor: 'pointer',
                         transition: 'all 0.2s',
                       }}
@@ -346,8 +342,8 @@ export default function MenuPanel({ onAddToCart, search }: MenuPanelProps) {
                     transition: 'all 0.2s ease',
                   }}
                   onMouseEnter={e => {
-                    e.currentTarget.style.borderColor = '#F97316';
-                    e.currentTarget.style.backgroundColor = '#FFF7ED';
+                    e.currentTarget.style.borderColor = '#DC2626';
+                    e.currentTarget.style.backgroundColor = '#FEEFD0';
                   }}
                   onMouseLeave={e => {
                     e.currentTarget.style.borderColor = '#EBEBEB';
@@ -355,7 +351,7 @@ export default function MenuPanel({ onAddToCart, search }: MenuPanelProps) {
                   }}
                 >
                   <span style={{ fontSize: 15, fontWeight: 500, color: '#111110' }}>{variant.label}</span>
-                  <span style={{ fontSize: 15, fontWeight: 700, color: '#F97316' }}>Rs. {variant.price.toLocaleString()}</span>
+                  <span style={{ fontSize: 15, fontWeight: 700, color: '#DC2626' }}>Rs. {variant.price.toLocaleString()}</span>
                 </button>
               ))}
             </div>
@@ -397,7 +393,7 @@ function ItemCard({ item, onAdd }: ItemCardProps) {
       }}
       onMouseEnter={e => {
         e.currentTarget.style.boxShadow = '0 4px 14px rgba(0,0,0,0.09)';
-        e.currentTarget.style.borderColor = 'rgba(249,115,22,0.30)';
+        e.currentTarget.style.borderColor = 'rgba(220,38,38,0.30)';
         if (!pressed) e.currentTarget.style.transform = 'translateY(-2px)';
       }}
       onMouseLeave={e => {
@@ -469,13 +465,13 @@ function ItemCard({ item, onAdd }: ItemCardProps) {
         {item.has_variants === 1 ? (
           <div style={{
             fontSize: 11, fontWeight: 700, color: '#FFFFFF', textAlign: 'center',
-            background: '#F97316', padding: '2px 8px', borderRadius: 9999, alignSelf: 'center',
+            background: '#DC2626', padding: '2px 8px', borderRadius: 9999, alignSelf: 'center',
             marginTop: 2
           }}>
             {item.category === 'Ice Cream' ? 'Select Scoop' : 'Select Size'}
           </div>
         ) : (
-          <div style={{ fontSize: 13, fontWeight: 700, color: '#F97316', textAlign: 'center' }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: '#DC2626', textAlign: 'center' }}>
             Rs. {item.price.toLocaleString()}
           </div>
         )}
@@ -495,7 +491,10 @@ function DealCard({ deal, onAdd }: DealCardProps) {
     setTimeout(() => setPressed(false), 150);
   };
 
-  const originalTotal = deal.items.reduce((s, i) => s + i.price * i.quantity, 0);
+  const originalTotal = deal.items.reduce(
+    (s, i) => s + (i.variant_id != null && i.variant_price != null ? i.variant_price : i.price) * i.quantity,
+    0
+  );
   const savingsPct = originalTotal > 0 ? Math.round(((originalTotal - deal.price) / originalTotal) * 100) : 0;
 
   return (
@@ -519,7 +518,7 @@ function DealCard({ deal, onAdd }: DealCardProps) {
       }}
       onMouseEnter={e => {
         e.currentTarget.style.boxShadow = '0 4px 14px rgba(0,0,0,0.09)';
-        e.currentTarget.style.borderColor = 'rgba(249,115,22,0.30)';
+        e.currentTarget.style.borderColor = 'rgba(220,38,38,0.30)';
         if (!pressed) e.currentTarget.style.transform = 'translateY(-2px)';
       }}
       onMouseLeave={e => {
@@ -534,7 +533,7 @@ function DealCard({ deal, onAdd }: DealCardProps) {
           position: 'absolute',
           top: 8,
           left: 8,
-          background: '#F97316',
+          background: '#DC2626',
           color: '#FFFFFF',
           padding: '2px 8px',
           borderRadius: 9999,
@@ -554,7 +553,7 @@ function DealCard({ deal, onAdd }: DealCardProps) {
       <div
         style={{
           height: 118, width: '100%',
-          background: '#FFF7ED',
+          background: '#FEEFD0',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           position: 'relative',
         }}
@@ -562,19 +561,19 @@ function DealCard({ deal, onAdd }: DealCardProps) {
         {!imgLoaded && !imgError && (
           <div style={{
             width: 88, height: 88, borderRadius: 9999,
-            background: '#FED7AA',
+            background: '#F2D9A0',
             position: 'absolute',
           }} />
         )}
         {imgError ? (
           <div style={{
             width: 88, height: 88, borderRadius: 9999,
-            background: '#FFF7ED',
+            background: '#FEEFD0',
             border: '3px solid #FFFFFF',
             boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}>
-            <Tag size={32} color="#F97316" />
+            <Tag size={32} color="#DC2626" />
           </div>
         ) : (
           <img
@@ -610,7 +609,7 @@ function DealCard({ deal, onAdd }: DealCardProps) {
           {deal.name}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: '#F97316' }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: '#DC2626' }}>
             Rs. {deal.price.toLocaleString()}
           </div>
           {savingsPct > 0 && (

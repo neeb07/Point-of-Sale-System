@@ -124,7 +124,7 @@ if (!gotTheLock) {
         contextIsolation: true,
         webSecurity: false,
       },
-      title: 'Restro POS',
+      title: 'Blaze POS',
       autoHideMenuBar: true,
       show: false,
     });

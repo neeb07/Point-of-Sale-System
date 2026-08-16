@@ -44,7 +44,7 @@ export default function Home() {
             overflow: 'hidden',
             display: 'flex',
             flexDirection: 'row',
-            background: '#F5F5F0',
+            background: '#F5F2EA',
             fontFamily: "'Inter', sans-serif",
           }}
         >
@@ -67,7 +67,7 @@ export default function Home() {
           overflow: 'hidden',
           display: 'flex',
           flexDirection: 'row',
-          background: '#F5F5F0',
+          background: '#F5F2EA',
           fontFamily: "'Inter', sans-serif",
         }}
       >

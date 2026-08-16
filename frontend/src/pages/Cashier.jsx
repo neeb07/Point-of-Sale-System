@@ -7,7 +7,7 @@ import Modal from '@/components/pos-ui/Modal';
 import Toast from '@/components/pos-ui/Toast';
 import { staffAPI } from '@/api/index';
 
-const AVATAR_COLORS = ['#F97316', '#8B5CF6', '#3B82F6', '#10B981', '#EF4444', '#F59E0B'];
+const AVATAR_COLORS = ['#DC2626', '#8B5CF6', '#3B82F6', '#10B981', '#EF4444', '#F59E0B'];
 
 const CARD_STYLE = {
   background: '#FFFFFF',
@@ -57,7 +57,7 @@ function PinInput({ value, onChange, length = 4 }) {
             width: 48, height: 52, textAlign: 'center', fontSize: 20, fontWeight: 700,
             border: '2px solid #E5E7EB', borderRadius: 10, outline: 'none',
           }}
-          onFocus={(e) => { e.target.style.borderColor = '#F97316'; }}
+          onFocus={(e) => { e.target.style.borderColor = '#DC2626'; }}
           onBlur={(e) => { e.target.style.borderColor = '#E5E7EB'; }}
         />
       ))}
@@ -67,7 +67,7 @@ function PinInput({ value, onChange, length = 4 }) {
 
 function StaffCard({ staff, onEdit, onResetPin, onToggleActive, menuOpen, onMenuToggle }) {
   const isActive = staff.status === 'Active' || staff.active === 1;
-  const color = staff.color || '#F97316';
+  const color = staff.color || '#DC2626';
 
   return (
     <div style={{ ...CARD_STYLE, padding: 20, position: 'relative' }}>
@@ -147,7 +147,7 @@ export default function Cashier() {
   const [toast, setToast] = useState(null);
   const [perfDate, setPerfDate] = useState('today');
   const [performance, setPerformance] = useState([]);
-  const [form, setForm] = useState({ name: '', role: 'Cashier', color: '#F97316', pin: '', confirmPin: '' });
+  const [form, setForm] = useState({ name: '', role: 'Cashier', color: '#DC2626', pin: '', confirmPin: '' });
   const [errors, setErrors] = useState({});
 
   const loadStaff = async () => {
@@ -156,7 +156,7 @@ export default function Cashier() {
       setStaff(data.map((s) => ({
         ...s,
         status: s.active ? 'Active' : 'Inactive',
-        color: s.color || '#F97316',
+        color: s.color || '#DC2626',
       })));
     } catch {
       setStaff([]);
@@ -197,14 +197,14 @@ export default function Cashier() {
 
   const openAdd = () => {
     setEditingStaff(null);
-    setForm({ name: '', role: 'Cashier', color: '#F97316', pin: '', confirmPin: '' });
+    setForm({ name: '', role: 'Cashier', color: '#DC2626', pin: '', confirmPin: '' });
     setErrors({});
     setModalOpen(true);
   };
 
   const openEdit = (s) => {
     setEditingStaff(s);
-    setForm({ name: s.name, role: s.role, color: s.color || '#F97316', pin: '', confirmPin: '' });
+    setForm({ name: s.name, role: s.role, color: s.color || '#DC2626', pin: '', confirmPin: '' });
     setErrors({});
     setModalOpen(true);
   };
@@ -251,7 +251,7 @@ export default function Cashier() {
       render: (row) => (
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <div style={{
-            width: 32, height: 32, borderRadius: 9999, background: '#F97316',
+            width: 32, height: 32, borderRadius: 9999, background: '#DC2626',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             color: '#FFFFFF', fontWeight: 700, fontSize: 12,
           }}>
@@ -297,8 +297,8 @@ export default function Cashier() {
               style={{
                 padding: '10px 20px', fontSize: 14, fontWeight: 500, cursor: 'pointer',
                 border: 'none', background: 'transparent',
-                color: activeTab === tab.id ? '#F97316' : '#6B7280',
-                borderBottom: activeTab === tab.id ? '2px solid #F97316' : '2px solid transparent',
+                color: activeTab === tab.id ? '#DC2626' : '#6B7280',
+                borderBottom: activeTab === tab.id ? '2px solid #DC2626' : '2px solid transparent',
               }}
             >
               {tab.label}
@@ -331,7 +331,7 @@ export default function Cashier() {
                   onClick={() => setPerfDate(chip.id)}
                   style={{
                     padding: '6px 14px', borderRadius: 9999, fontSize: 13, fontWeight: 500, cursor: 'pointer',
-                    background: perfDate === chip.id ? '#F97316' : '#FFFFFF',
+                    background: perfDate === chip.id ? '#DC2626' : '#FFFFFF',
                     color: perfDate === chip.id ? '#FFFFFF' : '#6B7280',
                     border: perfDate === chip.id ? 'none' : '1px solid #E5E7EB',
                   }}
@@ -355,7 +355,7 @@ export default function Cashier() {
                     <div style={{ flex: 1, height: 28, background: '#F3F4F6', borderRadius: 6, overflow: 'hidden' }}>
                       <div style={{
                         height: '100%', width: `${pct}%`,
-                        background: 'linear-gradient(90deg, #F97316, #FB923C)',
+                        background: 'linear-gradient(90deg, #DC2626, #FB923C)',
                         borderRadius: 6, transition: 'width 600ms ease',
                       }} />
                     </div>
@@ -387,9 +387,9 @@ export default function Cashier() {
                   onClick={() => setForm({ ...form, role: r })}
                   style={{
                     padding: '8px 16px', borderRadius: 8, fontSize: 14, cursor: 'pointer',
-                    background: form.role === r ? '#F97316' : '#FFFFFF',
+                    background: form.role === r ? '#DC2626' : '#FFFFFF',
                     color: form.role === r ? '#FFFFFF' : '#374151',
-                    border: form.role === r ? '1px solid #F97316' : '1px solid #E5E7EB',
+                    border: form.role === r ? '1px solid #DC2626' : '1px solid #E5E7EB',
                   }}
                 >
                   {r}
@@ -441,7 +441,7 @@ export default function Cashier() {
               onClick={handleSave}
               style={{
                 flex: 1, height: 40, borderRadius: 8, border: 'none', fontWeight: 600,
-                background: isFormValid ? '#F97316' : '#E5E7EB',
+                background: isFormValid ? '#DC2626' : '#E5E7EB',
                 color: isFormValid ? '#FFFFFF' : '#9CA3AF',
                 cursor: isFormValid ? 'pointer' : 'not-allowed',
               }}

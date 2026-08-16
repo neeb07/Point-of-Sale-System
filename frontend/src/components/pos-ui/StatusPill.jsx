@@ -2,14 +2,14 @@ import React from 'react';
 
 const STATUS_STYLES = {
   Completed: { bg: '#DCFCE7', text: '#16A34A' },
-  Held: { bg: '#FFF7ED', text: '#EA580C' },
+  Held: { bg: '#FEEFD0', text: '#EA580C' },
   Voided: { bg: '#FEE2E2', text: '#DC2626' },
   Active: { bg: '#DCFCE7', text: '#16A34A' },
   Inactive: { bg: '#F3F4F6', text: '#6B7280' },
   Cash: { bg: '#F3F4F6', text: '#374151' },
   Card: { bg: '#EFF6FF', text: '#2563EB' },
   completed: { bg: '#DCFCE7', text: '#16A34A' },
-  held: { bg: '#FFF7ED', text: '#EA580C' },
+  held: { bg: '#FEEFD0', text: '#EA580C' },
   voided: { bg: '#FEE2E2', text: '#DC2626' },
 };
 

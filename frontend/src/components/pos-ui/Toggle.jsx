@@ -16,7 +16,7 @@ export default function Toggle({ value, onChange, label, hint }) {
           width: 44,
           height: 24,
           borderRadius: 9999,
-          background: value ? '#F97316' : '#E5E7EB',
+          background: value ? '#DC2626' : '#E5E7EB',
           position: 'relative',
           transition: 'background 200ms',
           flexShrink: 0,

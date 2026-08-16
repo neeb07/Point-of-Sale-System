@@ -26,8 +26,8 @@ router.post('/', async (req, res) => {
   try {
     const hashedPin = await bcrypt.hash(String(pin), saltRounds);
     const insert = db.prepare('INSERT INTO staff (name, role, pin, color, active) VALUES (?, ?, ?, ?, 1)');
-    const info = insert.run(name, role || 'Cashier', hashedPin, color || '#F97316');
-    res.json({ id: info.lastInsertRowid, name, role, color: color || '#F97316', active: 1 });
+    const info = insert.run(name, role || 'Cashier', hashedPin, color || '#DC2626');
+    res.json({ id: info.lastInsertRowid, name, role, color: color || '#DC2626', active: 1 });
   } catch (err) {
     if (err.message.includes('UNIQUE constraint')) {
       return res.status(400).json({ error: 'PIN already in use by another staff member' });

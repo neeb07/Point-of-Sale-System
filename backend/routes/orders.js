@@ -4,31 +4,62 @@ const db = require('../db/database');
 
 // Create a new completed order
 router.post('/', (req, res) => {
-  const { items, total, discount, payment_method, cashier_id, cashier_name, order_type, delivery_charge } = req.body;
-
-  console.log('Creating order:', { items, total, discount, payment_method, cashier_id, cashier_name, order_type, delivery_charge });
+  const {
+    items, total, discount, payment_method, cashier_id, cashier_name,
+    order_type, delivery_charge, table_number,
+  } = req.body;
 
   if (!items || items.length === 0) {
     return res.status(400).json({ error: 'Order must have at least one item' });
   }
 
+  // FIX (Bug 6): discount and payment_method were always sent as 0/'Cash'
+  // from the UI. Now that the client sends real values, validate them here
+  // so a bad payload can't write a negative or nonsensical order.
+  const VALID_PAYMENTS = ['Cash', 'Card', 'Online'];
+  const paymentMethod = VALID_PAYMENTS.includes(payment_method) ? payment_method : 'Cash';
+
+  const safeDiscount = Math.max(0, Number(discount) || 0);
+  const safeDelivery = Math.max(0, Number(delivery_charge) || 0);
+
+  // Recompute the total server-side rather than trusting the client.
+  const itemsSubtotal = items.reduce(
+    (sum, i) => sum + (Number(i.price) || 0) * (Number(i.quantity) || 0), 0
+  );
+  const cappedDiscount = Math.min(safeDiscount, itemsSubtotal);
+  const computedTotal = Math.max(0, itemsSubtotal - cappedDiscount + safeDelivery);
+
+  // Trust the server figure; log when the client disagreed.
+  if (Number(total) !== computedTotal) {
+    console.warn(`Order total mismatch — client sent ${total}, server computed ${computedTotal}. Using server value.`);
+  }
+
   // Insert order in a transaction so it is atomic
   const createOrder = db.transaction(() => {
+    // FIX (Bug 5): attach the order to the open shift so shift totals are
+    // derived from real sales instead of hardcoded demo numbers.
+    const openShift = db.prepare(
+      "SELECT id FROM shifts WHERE status = 'open' ORDER BY opened_at DESC LIMIT 1"
+    ).get();
+
     const orderResult = db.prepare(
-      `INSERT INTO orders (total, discount, payment_method, status, cashier_id, cashier_name, order_type, delivery_charge)
-       VALUES (?, ?, ?, 'completed', ?, ?, ?, ?)`
+      `INSERT INTO orders
+         (total, discount, payment_method, status, cashier_id, cashier_name,
+          order_type, delivery_charge, table_number, shift_id)
+       VALUES (?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?)`
     ).run(
-      total,
-      discount || 0,
-      payment_method || 'Cash',
+      computedTotal,
+      cappedDiscount,
+      paymentMethod,
       cashier_id || null,
       cashier_name || 'Unknown',
       order_type || 'Dine-in',
-      delivery_charge || 0
+      safeDelivery,
+      table_number || null,
+      openShift ? openShift.id : null
     );
 
     const orderId = orderResult.lastInsertRowid;
-    console.log('Order created with ID:', orderId);
 
     const insertItem = db.prepare(
       'INSERT INTO order_items (order_id, menu_item_id, name, price, quantity) VALUES (?, ?, ?, ?, ?)'
@@ -46,7 +77,6 @@ router.post('/', (req, res) => {
 
     items.forEach(item => {
       insertItem.run(orderId, item.id, item.name, item.price, item.quantity);
-      console.log('Item inserted:', item.name);
 
       // --- INVENTORY DEDUCTION ---
       // NOTE: Deal deduction is intentionally deferred for now. Do not attempt to explode deals
@@ -71,8 +101,7 @@ router.post('/', (req, res) => {
 
   try {
     const orderId = createOrder();
-    console.log('Transaction completed, order ID:', orderId);
-    res.status(201).json({ success: true, id: orderId });
+    res.status(201).json({ success: true, id: orderId, total: computedTotal, discount: cappedDiscount });
   } catch (err) {
     console.error('Error creating order:', err);
     res.status(500).json({ error: err.message });

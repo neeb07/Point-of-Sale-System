@@ -144,7 +144,7 @@ export default function Orders() {
       render: (row) => (
         <button
           onClick={() => openDrawer(row)}
-          style={{ background: 'none', border: 'none', color: '#F97316', fontWeight: 700, fontSize: 14, cursor: 'pointer' }}
+          style={{ background: 'none', border: 'none', color: '#DC2626', fontWeight: 700, fontSize: 14, cursor: 'pointer' }}
         >
           #{String(row.id).padStart(4, '0')}
         </button>
@@ -220,7 +220,8 @@ export default function Orders() {
         date: moment(order.created_at).format('DD/MM/YYYY'),
         time: moment(order.created_at).format('HH:mm A'),
         orderNumber: `#${order.id}`,
-        table: '—',
+        // FIX (Bug 6): reprints now show the table the order was placed on.
+        table: order.table_number || '—',
         paymentMethod: order.payment_method || 'Cash',
         cashier: order.cashier_name || 'Unknown',
         orderType: order.order_type || 'Dine-in',
@@ -256,7 +257,7 @@ export default function Orders() {
                 onClick={() => setFilters({ ...filters, dateRange: chip.id })}
                 style={{
                   padding: '6px 14px', borderRadius: 9999, fontSize: 13, fontWeight: 500, cursor: 'pointer',
-                  background: filters.dateRange === chip.id ? '#F97316' : '#FFFFFF',
+                  background: filters.dateRange === chip.id ? '#DC2626' : '#FFFFFF',
                   color: filters.dateRange === chip.id ? '#FFFFFF' : '#6B7280',
                   border: filters.dateRange === chip.id ? 'none' : '1px solid #E5E7EB',
                 }}
@@ -408,7 +409,7 @@ export default function Orders() {
               )}
               <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 12 }}>
                 <span style={{ fontSize: 15, fontWeight: 700, color: '#111827' }}>TOTAL</span>
-                <span style={{ fontSize: 18, fontWeight: 700, color: '#F97316' }}>{formatCurrency(selectedOrder.total)}</span>
+                <span style={{ fontSize: 18, fontWeight: 700, color: '#DC2626' }}>{formatCurrency(selectedOrder.total)}</span>
               </div>
             </div>
 

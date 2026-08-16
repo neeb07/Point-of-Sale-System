@@ -4,7 +4,7 @@ import { CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
 const ICONS = {
   success: { icon: CheckCircle, border: '#22C55E', color: '#16A34A' },
   error: { icon: XCircle, border: '#EF4444', color: '#DC2626' },
-  warning: { icon: AlertTriangle, border: '#F97316', color: '#EA580C' },
+  warning: { icon: AlertTriangle, border: '#DC2626', color: '#EA580C' },
 };
 
 export default function Toast({ message, type = 'success', onClose }) {

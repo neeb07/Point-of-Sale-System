@@ -16,11 +16,18 @@ pnpm-lock.yaml
 
 # Database files
 *.db
+*.db-wal
+*.db-shm
 *.sqlite
 *.sqlite3
 backend/db/*.db
 backend/db/*.sqlite
 backend/db/*.sqlite3
+backend/backups/
+
+# Bundled binaries — never commit these
+frontend/electron/node.exe
+*.exe
 
 # Build outputs
 dist/

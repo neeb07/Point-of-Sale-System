@@ -1,12 +1,22 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Plus, Pencil, Trash2, Tag, X, Upload, Package, ChevronDown } from 'lucide-react';
 import { dealsAPI, menuAPI } from '../api/index';
+import { DEAL_GROUPS } from '@/lib/constants';
+
+interface Variant {
+  id: number;
+  label: string;
+  price: number;
+  sort_order: number;
+}
 
 interface MenuItem {
   id: number;
   name: string;
   category: string;
   price: number;
+  has_variants?: number;
+  variants?: Variant[];
 }
 
 interface DealItem {
@@ -15,6 +25,11 @@ interface DealItem {
   price: number;
   category: string;
   quantity: number;
+  has_variants?: number;
+  /** FIX (Bug 1): a deal item can pin a specific size/variant. */
+  variant_id?: number | null;
+  variant_label?: string | null;
+  variant_price?: number | null;
 }
 
 interface Deal {
@@ -24,12 +39,26 @@ interface Deal {
   price: number;
   image_url: string | null;
   active: number;
+  /** FIX (Bug 1): the sub-tab this deal belongs to. */
+  deal_group?: string | null;
   items: DealItem[];
 }
 
-const ORANGE = '#F97316';
-const ORANGE_LIGHT = '#FFF7ED';
-const ORANGE_BORDER = '#FED7AA';
+/** Composite key — the same menu item can appear twice under two variants. */
+const itemKey = (menuItemId: number, variantId?: number | null) =>
+  `${menuItemId}::${variantId ?? 'base'}`;
+
+/** The unit price actually charged for a deal line. */
+const lineUnitPrice = (i: DealItem) =>
+  i.variant_id != null && i.variant_price != null ? i.variant_price : i.price;
+
+/** Display name including the variant label when present. */
+const lineName = (i: DealItem) =>
+  i.variant_label ? `${i.name} (${i.variant_label})` : i.name;
+
+const ORANGE = '#DC2626';
+const ORANGE_LIGHT = '#FEEFD0';
+const ORANGE_BORDER = '#F2D9A0';
 const GRAY_BORDER = '#E5E7EB';
 const TEXT_DARK = '#111827';
 const TEXT_GRAY = '#6B7280';
@@ -52,7 +81,10 @@ export default function Deals() {
   const [formPrice, setFormPrice] = useState('');
   const [formImage, setFormImage] = useState<string | null>(null);
   const [formItems, setFormItems] = useState<DealItem[]>([]);
+  const [formDealGroup, setFormDealGroup] = useState<string>('');
   const [itemPickerOpen, setItemPickerOpen] = useState(false);
+  /** Item awaiting a size choice before it can be added to the deal. */
+  const [variantPickerItem, setVariantPickerItem] = useState<MenuItem | null>(null);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -84,6 +116,7 @@ export default function Deals() {
     setFormPrice('');
     setFormImage(null);
     setFormItems([]);
+    setFormDealGroup('');
     setFormError('');
     setModalOpen(true);
   };
@@ -95,6 +128,9 @@ export default function Deals() {
     setFormPrice(String(deal.price));
     setFormImage(deal.image_url);
     setFormItems(deal.items.map(i => ({ ...i })));
+    // FIX (Bug 1): carry the existing group into the form so saving an edit
+    // no longer drops the deal out of its sub-tab.
+    setFormDealGroup(deal.deal_group || '');
     setFormError('');
     setModalOpen(true);
   };
@@ -107,11 +143,27 @@ export default function Deals() {
     reader.readAsDataURL(file);
   };
 
+  /**
+   * FIX (Bug 1): items with variants used to be added with no size at all,
+   * so a deal could only ever reference the base item. Picking such an item
+   * now opens a size chooser first.
+   */
   const addItemToDeal = (menuItem: MenuItem) => {
-    const existing = formItems.find(i => i.menu_item_id === menuItem.id);
+    if (menuItem.has_variants === 1 && menuItem.variants && menuItem.variants.length > 0) {
+      setVariantPickerItem(menuItem);
+      setItemPickerOpen(false);
+      return;
+    }
+    commitItem(menuItem, null);
+  };
+
+  const commitItem = (menuItem: MenuItem, variant: Variant | null) => {
+    const key = itemKey(menuItem.id, variant?.id ?? null);
+    const existing = formItems.find(i => itemKey(i.menu_item_id, i.variant_id) === key);
+
     if (existing) {
       setFormItems(prev => prev.map(i =>
-        i.menu_item_id === menuItem.id ? { ...i, quantity: i.quantity + 1 } : i
+        itemKey(i.menu_item_id, i.variant_id) === key ? { ...i, quantity: i.quantity + 1 } : i
       ));
     } else {
       setFormItems(prev => [...prev, {
@@ -120,17 +172,24 @@ export default function Deals() {
         price: menuItem.price,
         category: menuItem.category,
         quantity: 1,
+        has_variants: menuItem.has_variants,
+        variant_id: variant?.id ?? null,
+        variant_label: variant?.label ?? null,
+        variant_price: variant?.price ?? null,
       }]);
     }
+
     setItemPickerOpen(false);
+    setVariantPickerItem(null);
   };
 
-  const updateItemQty = (menu_item_id: number, qty: number) => {
+  const updateItemQty = (menu_item_id: number, variant_id: number | null | undefined, qty: number) => {
+    const key = itemKey(menu_item_id, variant_id);
     if (qty <= 0) {
-      setFormItems(prev => prev.filter(i => i.menu_item_id !== menu_item_id));
+      setFormItems(prev => prev.filter(i => itemKey(i.menu_item_id, i.variant_id) !== key));
     } else {
       setFormItems(prev => prev.map(i =>
-        i.menu_item_id === menu_item_id ? { ...i, quantity: qty } : i
+        itemKey(i.menu_item_id, i.variant_id) === key ? { ...i, quantity: qty } : i
       ));
     }
   };
@@ -148,7 +207,13 @@ export default function Deals() {
         description: formDescription.trim(),
         price: Number(formPrice),
         image_url: formImage,
-        items: formItems.map(i => ({ menu_item_id: i.menu_item_id, quantity: i.quantity })),
+        // FIX (Bug 1): deal_group and variant_id are now persisted.
+        deal_group: formDealGroup || null,
+        items: formItems.map(i => ({
+          menu_item_id: i.menu_item_id,
+          quantity: i.quantity,
+          variant_id: i.variant_id ?? null,
+        })),
       };
 
       if (editingDeal) {
@@ -176,7 +241,7 @@ export default function Deals() {
     }
   };
 
-  const originalPrice = formItems.reduce((s, i) => s + i.price * i.quantity, 0);
+  const originalPrice = formItems.reduce((s, i) => s + lineUnitPrice(i) * i.quantity, 0);
   const savings = originalPrice - Number(formPrice || 0);
 
   return (
@@ -246,7 +311,7 @@ export default function Deals() {
       {!loading && deals.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           {deals.map(deal => {
-            const originalTotal = deal.items.reduce((s, i) => s + i.price * i.quantity, 0);
+            const originalTotal = deal.items.reduce((s, i) => s + lineUnitPrice(i) * i.quantity, 0);
             const savingsAmt = originalTotal - deal.price;
             const savingsPct = originalTotal > 0 ? Math.round((savingsAmt / originalTotal) * 100) : 0;
 
@@ -285,6 +350,15 @@ export default function Deals() {
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                     <span style={{ fontSize: 16, fontWeight: 700, color: TEXT_DARK }}>{deal.name}</span>
+                    {deal.deal_group && (
+                      <span style={{
+                        padding: '2px 8px', borderRadius: 9999, fontSize: 11, fontWeight: 600,
+                        background: ORANGE_LIGHT, color: '#92400E',
+                        border: `1px solid ${ORANGE_BORDER}`,
+                      }}>
+                        {deal.deal_group}
+                      </span>
+                    )}
                     {savingsPct > 0 && (
                       <span style={{
                         padding: '2px 8px', borderRadius: 9999, fontSize: 11, fontWeight: 700,
@@ -309,7 +383,7 @@ export default function Deals() {
                         background: '#F3F4F6', color: TEXT_GRAY,
                         border: `1px solid ${GRAY_BORDER}`,
                       }}>
-                        {item.quantity > 1 ? `${item.quantity}x ` : ''}{item.name}
+                        {item.quantity > 1 ? `${item.quantity}x ` : ''}{lineName(item)}
                       </span>
                     ))}
                   </div>
@@ -536,6 +610,36 @@ export default function Deals() {
                 />
               </div>
 
+              {/* Deal Group — FIX (Bug 1): was never captured, so deals fell
+                  out of their sub-tab on the Sale screen after any edit. */}
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: TEXT_GRAY, textTransform: 'uppercase', letterSpacing: '0.8px', marginBottom: 8 }}>
+                  Deal Group
+                </label>
+                <select
+                  value={formDealGroup}
+                  onChange={e => setFormDealGroup(e.target.value)}
+                  style={{
+                    width: '100%', height: 44, borderRadius: 10,
+                    border: `1px solid ${GRAY_BORDER}`,
+                    padding: '0 12px', fontSize: 14, color: TEXT_DARK,
+                    fontFamily: 'Inter, sans-serif',
+                    background: WHITE, outline: 'none',
+                    boxSizing: 'border-box', cursor: 'pointer',
+                  }}
+                  onFocus={e => (e.target.style.borderColor = ORANGE)}
+                  onBlur={e => (e.target.style.borderColor = GRAY_BORDER)}
+                >
+                  <option value="">Ungrouped</option>
+                  {DEAL_GROUPS.map(g => (
+                    <option key={g} value={g}>{g}</option>
+                  ))}
+                </select>
+                <div style={{ marginTop: 6, fontSize: 12, color: TEXT_LIGHT }}>
+                  Controls which sub-tab this deal appears under on the Sale screen.
+                </div>
+              </div>
+
               {/* Deal Price */}
               <div style={{ marginBottom: 20 }}>
                 <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: TEXT_GRAY, textTransform: 'uppercase', letterSpacing: '0.8px', marginBottom: 8 }}>
@@ -620,7 +724,7 @@ export default function Deals() {
                               <div style={{ fontSize: 11, color: TEXT_GRAY }}>{item.category}</div>
                             </div>
                             <div style={{ fontSize: 13, fontWeight: 700, color: ORANGE }}>
-                              {item.has_variants === 1 ? 'Variant Item' : `Rs. ${item.price}`}
+                              {item.has_variants === 1 ? 'Choose size' : `Rs. ${item.price}`}
                             </div>
                           </div>
                         ))}
@@ -641,22 +745,22 @@ export default function Deals() {
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                     {formItems.map(item => (
-                      <div key={item.menu_item_id} style={{
+                      <div key={itemKey(item.menu_item_id, item.variant_id)} style={{
                         display: 'flex', alignItems: 'center', gap: 12,
                         padding: '10px 14px', borderRadius: 10,
                         background: '#F9FAFB', border: `1px solid ${GRAY_BORDER}`,
                       }}>
                         <div style={{ flex: 1 }}>
-                          <div style={{ fontSize: 13, fontWeight: 600, color: TEXT_DARK }}>{item.name}</div>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: TEXT_DARK }}>{lineName(item)}</div>
                           <div style={{ fontSize: 12, color: TEXT_GRAY }}>
-                            {item.has_variants === 1 ? 'Price depends on variant' : `Rs. ${item.price} each`}
+                            Rs. {lineUnitPrice(item).toLocaleString()} each
                           </div>
                         </div>
 
                         {/* Qty controls */}
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                           <button
-                            onClick={() => updateItemQty(item.menu_item_id, item.quantity - 1)}
+                            onClick={() => updateItemQty(item.menu_item_id, item.variant_id, item.quantity - 1)}
                             style={{
                               width: 28, height: 28, borderRadius: '50%',
                               background: WHITE, border: `1px solid ${GRAY_BORDER}`,
@@ -668,7 +772,7 @@ export default function Deals() {
                             {item.quantity}
                           </span>
                           <button
-                            onClick={() => updateItemQty(item.menu_item_id, item.quantity + 1)}
+                            onClick={() => updateItemQty(item.menu_item_id, item.variant_id, item.quantity + 1)}
                             style={{
                               width: 28, height: 28, borderRadius: '50%',
                               background: WHITE, border: `1px solid ${GRAY_BORDER}`,
@@ -679,11 +783,11 @@ export default function Deals() {
                         </div>
 
                         <div style={{ fontSize: 13, fontWeight: 700, color: TEXT_DARK, minWidth: 70, textAlign: 'right' }}>
-                          {item.has_variants === 1 ? '-' : `Rs. ${(item.price * item.quantity).toLocaleString()}`}
+                          Rs. {(lineUnitPrice(item) * item.quantity).toLocaleString()}
                         </div>
 
                         <button
-                          onClick={() => updateItemQty(item.menu_item_id, 0)}
+                          onClick={() => updateItemQty(item.menu_item_id, item.variant_id, 0)}
                           style={{
                             width: 28, height: 28, borderRadius: '50%',
                             background: 'transparent', border: 'none',
@@ -746,7 +850,7 @@ export default function Deals() {
                 disabled={saving}
                 style={{
                   flex: 2, height: 44, borderRadius: 10,
-                  background: saving ? '#FED7AA' : ORANGE,
+                  background: saving ? '#F2D9A0' : ORANGE,
                   border: 'none', color: WHITE,
                   fontSize: 14, fontWeight: 700, cursor: saving ? 'not-allowed' : 'pointer',
                   display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
@@ -769,6 +873,71 @@ export default function Deals() {
       <style>{`
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
       `}</style>
+      {/* Variant picker — FIX (Bug 1): lets a deal pin a specific size
+          (e.g. "Chicken Tikka Pizza (Small)") instead of the bare item. */}
+      {variantPickerItem && (
+        <div
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(17,17,17,0.5)',
+            zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+          onClick={() => setVariantPickerItem(null)}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              background: WHITE, borderRadius: 16, padding: 24,
+              width: '90%', maxWidth: 380,
+              boxShadow: '0 10px 25px rgba(17,17,17,0.14)',
+              display: 'flex', flexDirection: 'column', gap: 14,
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ fontSize: 17, fontWeight: 700, color: TEXT_DARK, margin: 0 }}>
+                {variantPickerItem.name}
+              </h3>
+              <button
+                onClick={() => setVariantPickerItem(null)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: TEXT_LIGHT, padding: 4 }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <p style={{ fontSize: 13, color: TEXT_GRAY, margin: 0 }}>
+              Select which size to include in this deal:
+            </p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {variantPickerItem.variants?.map(v => (
+                <button
+                  key={v.id}
+                  onClick={() => commitItem(variantPickerItem, v)}
+                  style={{
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    padding: '12px 16px', borderRadius: 10,
+                    border: `1px solid ${GRAY_BORDER}`, background: WHITE,
+                    cursor: 'pointer', transition: 'all 150ms',
+                  }}
+                  onMouseEnter={e => {
+                    e.currentTarget.style.borderColor = ORANGE;
+                    e.currentTarget.style.background = ORANGE_LIGHT;
+                  }}
+                  onMouseLeave={e => {
+                    e.currentTarget.style.borderColor = GRAY_BORDER;
+                    e.currentTarget.style.background = WHITE;
+                  }}
+                >
+                  <span style={{ fontSize: 14, fontWeight: 600, color: TEXT_DARK }}>{v.label}</span>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: ORANGE }}>
+                    Rs. {v.price.toLocaleString()}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

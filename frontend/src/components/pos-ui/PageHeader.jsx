@@ -12,7 +12,7 @@ export default function PageHeader({ title, subtitle, actionLabel, actionIcon: A
           onClick={onAction}
           className="flex items-center gap-2"
           style={{
-            background: '#F97316',
+            background: '#DC2626',
             color: '#FFFFFF',
             height: 40,
             borderRadius: 8,
@@ -23,7 +23,7 @@ export default function PageHeader({ title, subtitle, actionLabel, actionIcon: A
             cursor: 'pointer',
           }}
           onMouseEnter={(e) => { e.currentTarget.style.background = '#EA580C'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = '#F97316'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = '#DC2626'; }}
         >
           {ActionIcon && <ActionIcon size={16} />}
           {actionLabel}

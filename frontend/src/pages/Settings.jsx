@@ -5,7 +5,8 @@ import PageHeader from '@/components/pos-ui/PageHeader';
 import Toggle from '@/components/pos-ui/Toggle';
 import Toast from '@/components/pos-ui/Toast';
 import Modal from '@/components/pos-ui/Modal';
-import { settingsAPI, reportsAPI } from '@/api/index';
+import { settingsAPI, reportsAPI, shiftsAPI } from '@/api/index';
+import { useAuth } from '@/context/AuthContext';
 
 const NAV_ITEMS = [
   { id: 'restaurant', label: 'Restaurant', icon: Store },
@@ -50,9 +51,9 @@ function SegmentedButton({ options, value, onChange }) {
               fontSize: 14,
               fontWeight: 500,
               cursor: 'pointer',
-              background: active ? '#F97316' : '#FFFFFF',
+              background: active ? '#DC2626' : '#FFFFFF',
               color: active ? '#FFFFFF' : '#374151',
-              border: active ? '1px solid #F97316' : '1px solid #E5E7EB',
+              border: active ? '1px solid #DC2626' : '1px solid #E5E7EB',
             }}
           >
             {opt.label}
@@ -73,6 +74,7 @@ function FieldLabel({ label, helper }) {
 }
 
 export default function Settings() {
+  const { currentUser } = useAuth();
   const [activeSection, setActiveSection] = useState('restaurant');
   const [toast, setToast] = useState(null);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
@@ -93,24 +95,34 @@ export default function Settings() {
 
   const [printerType, setPrinterType] = useState('USB');
   const [printerIP, setPrinterIP] = useState('');
-  const [printerConnected, setPrinterConnected] = useState(false);
 
-  const [shiftOpen, setShiftOpen] = useState(false);
-  const [shiftStart, setShiftStart] = useState(null);
-  const [shiftOrders, setShiftOrders] = useState(23);
-  const [shiftRevenue, setShiftRevenue] = useState(12400);
+  /**
+   * FIX (Bug 5): shift state used to be pure fiction — `shiftOrders = 23`,
+   * `shiftRevenue = 12400` and three invented history rows that lived only in
+   * React state and vanished on refresh. Everything below now comes from
+   * /api/shifts, where totals are computed from real orders.
+   */
+  const [currentShift, setCurrentShift] = useState(null);
+  const [shiftHistory, setShiftHistory] = useState([]);
+  const [shiftLoading, setShiftLoading] = useState(true);
+  const [shiftBusy, setShiftBusy] = useState(false);
   const [openShiftModal, setOpenShiftModal] = useState(false);
   const [closeShiftModal, setCloseShiftModal] = useState(false);
   const [openingCash, setOpeningCash] = useState('');
   const [actualCash, setActualCash] = useState('');
-  const [shiftHistory, setShiftHistory] = useState([
-    { id: 1, date: 'Jun 23, 2026', start: '9:00 AM', end: '5:30 PM', orders: 45, revenue: 28500 },
-    { id: 2, date: 'Jun 22, 2026', start: '9:00 AM', end: '6:00 PM', orders: 52, revenue: 31200 },
-    { id: 3, date: 'Jun 21, 2026', start: '10:00 AM', end: '4:00 PM', orders: 38, revenue: 22100 },
-  ]);
   const [duration, setDuration] = useState('0h 0m');
 
+  const shiftOpen = !!currentShift;
+  const shiftStart = currentShift?.opened_at
+    ? new Date(currentShift.opened_at.replace(' ', 'T') + 'Z').getTime()
+    : null;
+  const shiftOrders = Number(currentShift?.total_orders || 0);
+  const shiftRevenue = Number(currentShift?.total_revenue || 0);
+  const shiftCashRevenue = Number(currentShift?.cash_revenue || 0);
+  const shiftDiscounts = Number(currentShift?.total_discounts || 0);
+
   const [lastBackup, setLastBackup] = useState('Never');
+  const [restoring, setRestoring] = useState(false);
   const [resetModal, setResetModal] = useState(false);
   const [resetConfirm, setResetConfirm] = useState('');
   const restoreInputRef = useRef(null);
@@ -118,7 +130,7 @@ export default function Settings() {
   useEffect(() => {
     settingsAPI.getAll().then((data) => {
       const p = {
-        name: data.restaurant_name || 'Al-Madina Fast Food',
+        name: data.restaurant_name || 'Blaze',
         tagline: data.restaurant_tagline || '',
         address: data.restaurant_address || '',
         phone: data.restaurant_phone || '',
@@ -151,6 +163,33 @@ export default function Settings() {
       if (data.last_backup) setLastBackup(data.last_backup);
     }).catch(() => {});
   }, []);
+
+  /** FIX (Bug 5): load the real shift state from the backend. */
+  const loadShiftData = async () => {
+    try {
+      const [current, history] = await Promise.all([
+        shiftsAPI.current(),
+        shiftsAPI.history(5),
+      ]);
+      setCurrentShift(current);
+      setShiftHistory(Array.isArray(history) ? history : []);
+    } catch (err) {
+      console.error('Failed to load shift data:', err);
+    } finally {
+      setShiftLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadShiftData();
+  }, []);
+
+  // Keep the open shift's live totals fresh while the screen is showing.
+  useEffect(() => {
+    if (activeSection !== 'shift') return;
+    const poll = setInterval(loadShiftData, 30000);
+    return () => clearInterval(poll);
+  }, [activeSection]);
 
   useEffect(() => {
     if (!shiftOpen || !shiftStart) return;
@@ -198,6 +237,35 @@ export default function Settings() {
     }
   };
 
+  /**
+   * FIX (Bug 5): the "Choose Backup File" button opened a file picker whose
+   * <input> had no onChange handler at all — selecting a file did nothing
+   * whatsoever, silently. This is the handler that was missing.
+   */
+  const handleRestoreFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    const ok = window.confirm(
+      `Restore from "${file.name}"?\n\n` +
+      'This replaces ALL current data — orders, menu, staff and settings.\n' +
+      'A safety copy of your current database is saved first, and the restore ' +
+      'is applied the next time Blaze POS starts.'
+    );
+    if (!ok) return;
+
+    setRestoring(true);
+    try {
+      const result = await settingsAPI.restore(file);
+      setToast({ message: result.message || 'Backup restored', type: 'success' });
+    } catch (err) {
+      setToast({ message: err.message || 'Restore failed', type: 'error' });
+    } finally {
+      setRestoring(false);
+    }
+  };
+
   const handleBackup = async () => {
     try {
       await settingsAPI.backup();
@@ -209,32 +277,58 @@ export default function Settings() {
     }
   };
 
-  const handleStartShift = () => {
-    setShiftOpen(true);
-    setShiftStart(Date.now());
-    setOpenShiftModal(false);
-    setOpeningCash('');
-    setToast({ message: 'Shift started', type: 'success' });
+  /**
+   * FIX (Bug 5): these used to only mutate local React state, so a shift
+   * "existed" until you refreshed the page. Both now hit the API.
+   */
+  const handleStartShift = async () => {
+    setShiftBusy(true);
+    try {
+      await shiftsAPI.open({
+        opening_cash: Number(openingCash) || 0,
+        staff_id: currentUser?.id || null,
+        staff_name: currentUser?.name || 'Unknown',
+      });
+      await loadShiftData();
+      setOpenShiftModal(false);
+      setOpeningCash('');
+      setToast({ message: 'Shift started', type: 'success' });
+    } catch (err) {
+      setToast({ message: err.message || 'Could not start shift', type: 'error' });
+    } finally {
+      setShiftBusy(false);
+    }
   };
 
-  const handleCloseShift = () => {
-    const now = new Date();
-    setShiftHistory((prev) => [{
-      id: Date.now(),
-      date: now.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-      start: shiftStart ? new Date(shiftStart).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : '9:00 AM',
-      end: now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }),
-      orders: shiftOrders,
-      revenue: shiftRevenue,
-    }, ...prev].slice(0, 5));
-    setShiftOpen(false);
-    setShiftStart(null);
-    setCloseShiftModal(false);
-    setActualCash('');
-    setToast({ message: 'Shift closed', type: 'success' });
+  const handleCloseShift = async () => {
+    setShiftBusy(true);
+    try {
+      const closed = await shiftsAPI.close({ closing_cash: Number(actualCash) || 0 });
+      await loadShiftData();
+      setCloseShiftModal(false);
+      setActualCash('');
+      const variance = Number(closed?.variance || 0);
+      setToast({
+        message: variance === 0
+          ? 'Shift closed — drawer balanced'
+          : `Shift closed — drawer ${variance > 0 ? 'over' : 'short'} by Rs. ${Math.abs(variance).toLocaleString()}`,
+        type: variance === 0 ? 'success' : 'error',
+      });
+    } catch (err) {
+      setToast({ message: err.message || 'Could not close shift', type: 'error' });
+    } finally {
+      setShiftBusy(false);
+    }
   };
 
-  const expectedCash = shiftOpen ? (Number(openingCash) || 0) + shiftRevenue : 0;
+  /**
+   * Expected drawer = opening float + CASH sales only. Card and online sales
+   * never touch the till, so counting them was part of why the old figure was
+   * meaningless. Computed server-side too; this is just the live preview.
+   */
+  const expectedCash = shiftOpen
+    ? Number(currentShift?.opening_cash || 0) + shiftCashRevenue
+    : 0;
   const cashDiff = Number(actualCash) - expectedCash;
 
   const renderRestaurant = () => (
@@ -257,7 +351,7 @@ export default function Settings() {
           <button
             onClick={() => fileInputRef.current?.click()}
             style={{
-              background: '#FFFFFF', border: '1px solid #F97316', color: '#F97316',
+              background: '#FFFFFF', border: '1px solid #DC2626', color: '#DC2626',
               height: 40, borderRadius: 8, fontWeight: 600, fontSize: 14, padding: '0 20px', cursor: 'pointer',
             }}
           >
@@ -294,7 +388,7 @@ export default function Settings() {
           onClick={handleSaveProfile}
           disabled={!profileChanged}
           style={{
-            background: profileChanged ? '#F97316' : '#E5E7EB',
+            background: profileChanged ? '#DC2626' : '#E5E7EB',
             color: profileChanged ? '#FFFFFF' : '#9CA3AF',
             height: 40, borderRadius: 8, fontWeight: 600, fontSize: 14, padding: '0 20px',
             border: 'none', cursor: profileChanged ? 'pointer' : 'not-allowed',
@@ -344,9 +438,9 @@ export default function Settings() {
               onClick={() => setTax({ ...tax, position: opt.value })}
               style={{
                 padding: '10px 16px', borderRadius: 8, fontSize: 13, cursor: 'pointer',
-                background: tax.position === opt.value ? '#F97316' : '#FFFFFF',
+                background: tax.position === opt.value ? '#DC2626' : '#FFFFFF',
                 color: tax.position === opt.value ? '#FFFFFF' : '#374151',
-                border: tax.position === opt.value ? '1px solid #F97316' : '1px solid #E5E7EB',
+                border: tax.position === opt.value ? '1px solid #DC2626' : '1px solid #E5E7EB',
               }}
             >
               {opt.value === 'before' ? `Before amount (${opt.preview})` : `After amount (${opt.preview})`}
@@ -369,7 +463,7 @@ export default function Settings() {
           onClick={handleSaveTax}
           disabled={!taxChanged}
           style={{
-            background: taxChanged ? '#F97316' : '#E5E7EB',
+            background: taxChanged ? '#DC2626' : '#E5E7EB',
             color: taxChanged ? '#FFFFFF' : '#9CA3AF',
             height: 40, borderRadius: 8, fontWeight: 600, fontSize: 14, padding: '0 20px',
             border: 'none', cursor: taxChanged ? 'pointer' : 'not-allowed',
@@ -415,15 +509,29 @@ export default function Settings() {
           <input style={{ ...INPUT_STYLE, width: 200 }} placeholder="192.168.1.100" value={printerIP} onChange={(e) => setPrinterIP(e.target.value)} />
         </div>
       )}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <div style={{ width: 8, height: 8, borderRadius: 9999, background: printerConnected ? '#22C55E' : '#EF4444' }} />
-        <span style={{ fontSize: 13, color: '#374151' }}>{printerConnected ? 'Printer Connected' : 'No Printer Found'}</span>
+      {/* FIX (Bug 5): this used to be a status dot driven by `printerConnected`,
+          a state variable that was never once set to true — so it permanently
+          read "No Printer Found" regardless of your actual setup. Blaze POS
+          prints through the operating system's own print dialog, so there is
+          no connection to detect. Replaced with an accurate explanation. */}
+      <div style={{
+        display: 'flex', alignItems: 'flex-start', gap: 10,
+        background: '#FEEFD0', border: '1px solid #F2D9A0',
+        borderRadius: 8, padding: 12,
+      }}>
+        <Printer size={16} color="#92400E" style={{ marginTop: 1, flexShrink: 0 }} />
+        <div style={{ fontSize: 13, color: '#92400E', lineHeight: 1.5 }}>
+          Receipts print through your computer's print dialog, so any printer
+          installed in Windows will work — including USB and network thermal
+          printers. Set your receipt printer as the Windows default and choose
+          the matching paper size above.
+        </div>
       </div>
       <button
-        onClick={() => setToast({ message: 'Test print sent successfully', type: 'success' })}
+        onClick={() => window.print()}
         className="flex items-center gap-2"
         style={{
-          background: '#FFFFFF', border: '1px solid #F97316', color: '#F97316',
+          background: '#FFFFFF', border: '1px solid #DC2626', color: '#DC2626',
           height: 40, borderRadius: 8, fontWeight: 600, fontSize: 14, padding: '0 20px', cursor: 'pointer',
         }}
       >
@@ -446,7 +554,7 @@ export default function Settings() {
           <button
             onClick={() => setOpenShiftModal(true)}
             style={{
-              background: '#F97316', color: '#FFFFFF', height: 40, borderRadius: 8,
+              background: '#DC2626', color: '#FFFFFF', height: 40, borderRadius: 8,
               fontWeight: 600, fontSize: 14, padding: '0 20px', border: 'none', cursor: 'pointer',
             }}
           >
@@ -459,8 +567,16 @@ export default function Settings() {
             Shift Started: {shiftStart ? new Date(shiftStart).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : '9:00 AM'}
           </div>
           <div style={{ fontSize: 14, color: '#374151', marginBottom: 8 }}>Duration: {duration}</div>
+          <div style={{ fontSize: 14, color: '#374151', marginBottom: 8 }}>Opened by: {currentShift?.staff_name || '—'}</div>
+          <div style={{ fontSize: 14, color: '#374151', marginBottom: 8 }}>Opening float: Rs. {Number(currentShift?.opening_cash || 0).toLocaleString()}</div>
           <div style={{ fontSize: 14, color: '#374151', marginBottom: 8 }}>Orders so far: {shiftOrders}</div>
-          <div style={{ fontSize: 14, color: '#374151', marginBottom: 16 }}>Revenue so far: Rs. {shiftRevenue.toLocaleString()}</div>
+          <div style={{ fontSize: 14, color: '#374151', marginBottom: 8 }}>Revenue so far: Rs. {shiftRevenue.toLocaleString()}</div>
+          <div style={{ fontSize: 13, color: '#6B7280', marginBottom: 8 }}>
+            Cash: Rs. {shiftCashRevenue.toLocaleString()} · Card/Online: Rs. {Number(currentShift?.non_cash_revenue || 0).toLocaleString()}
+          </div>
+          <div style={{ fontSize: 13, color: '#6B7280', marginBottom: 16 }}>
+            Expected in drawer: Rs. {expectedCash.toLocaleString()}
+          </div>
           <button
             onClick={() => setCloseShiftModal(true)}
             style={{
@@ -468,20 +584,47 @@ export default function Settings() {
               height: 40, borderRadius: 8, fontWeight: 600, fontSize: 14, padding: '0 20px', cursor: 'pointer',
             }}
           >
-            Close Shift
+            {shiftBusy ? 'Closing…' : 'Close Shift'}
           </button>
         </div>
       )}
 
       <div style={{ fontSize: 14, fontWeight: 700, color: '#111827', marginBottom: 12 }}>Recent Shifts</div>
-      {shiftHistory.map((s) => (
-        <div key={s.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid #F3F4F6' }}>
-          <div style={{ fontSize: 13, color: '#374151' }}>
-            {s.date} · {s.start}–{s.end} · {s.orders} orders · Rs. {s.revenue.toLocaleString()}
-          </div>
-          <button style={{ background: 'none', border: 'none', color: '#F97316', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>View</button>
+      {shiftLoading && (
+        <div style={{ fontSize: 13, color: '#9CA3AF', padding: '10px 0' }}>Loading shifts…</div>
+      )}
+
+      {!shiftLoading && shiftHistory.length === 0 && (
+        <div style={{ fontSize: 13, color: '#9CA3AF', padding: '10px 0' }}>
+          No closed shifts yet.
         </div>
-      ))}
+      )}
+
+      {shiftHistory.map((sh) => {
+        const opened = sh.opened_at ? new Date(sh.opened_at.replace(' ', 'T') + 'Z') : null;
+        const closed = sh.closed_at ? new Date(sh.closed_at.replace(' ', 'T') + 'Z') : null;
+        const fmtTime = (d) => (d ? d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : '—');
+        const variance = Number(sh.variance || 0);
+        return (
+          <div key={sh.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid #F3F4F6' }}>
+            <div style={{ fontSize: 13, color: '#374151' }}>
+              {opened ? opened.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
+              {' · '}{fmtTime(opened)}–{fmtTime(closed)}
+              {' · '}{sh.total_orders} orders
+              {' · '}Rs. {Number(sh.total_revenue || 0).toLocaleString()}
+              {' · '}{sh.staff_name || '—'}
+            </div>
+            <div style={{
+              fontSize: 12, fontWeight: 700,
+              color: variance === 0 ? '#16A34A' : '#DC2626',
+            }}>
+              {variance === 0
+                ? 'Balanced'
+                : `${variance > 0 ? '+' : '−'}Rs. ${Math.abs(variance).toLocaleString()}`}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 
@@ -495,7 +638,7 @@ export default function Settings() {
           onClick={handleBackup}
           className="flex items-center gap-2"
           style={{
-            marginTop: 16, background: '#F97316', color: '#FFFFFF',
+            marginTop: 16, background: '#DC2626', color: '#FFFFFF',
             height: 40, borderRadius: 8, fontWeight: 600, fontSize: 14, padding: '0 20px', border: 'none', cursor: 'pointer',
           }}
         >
@@ -507,21 +650,29 @@ export default function Settings() {
         <div style={{ fontSize: 14, fontWeight: 700, color: '#111827' }}>Restore from Backup</div>
         <div style={{ fontSize: 13, color: '#6B7280', marginTop: 4 }}>Load data from a previous backup file</div>
         <div style={{
-          marginTop: 12, background: '#FFF7ED', border: '1px solid #FED7AA',
+          marginTop: 12, background: '#FEEFD0', border: '1px solid #F2D9A0',
           borderRadius: 8, padding: 12, fontSize: 13, color: '#92400E',
         }}>
           ⚠️ Restoring will replace all current data. This cannot be undone.
         </div>
         <button
           onClick={() => restoreInputRef.current?.click()}
+          disabled={restoring}
           style={{
-            marginTop: 16, background: '#FFFFFF', border: '1px solid #F97316', color: '#F97316',
-            height: 40, borderRadius: 8, fontWeight: 600, fontSize: 14, padding: '0 20px', cursor: 'pointer',
+            marginTop: 16, background: '#FFFFFF', border: '1px solid #DC2626', color: '#DC2626',
+            height: 40, borderRadius: 8, fontWeight: 600, fontSize: 14, padding: '0 20px',
+            cursor: restoring ? 'not-allowed' : 'pointer', opacity: restoring ? 0.6 : 1,
           }}
         >
-          Choose Backup File
+          {restoring ? 'Verifying backup…' : 'Choose Backup File'}
         </button>
-        <input ref={restoreInputRef} type="file" accept=".db" style={{ display: 'none' }} />
+        <input
+          ref={restoreInputRef}
+          type="file"
+          accept=".db"
+          onChange={handleRestoreFile}
+          style={{ display: 'none' }}
+        />
       </div>
 
       <div style={{
@@ -586,7 +737,7 @@ export default function Settings() {
       const doc = new jsPDF();
       
       // Header
-      doc.setFillColor(249, 115, 22); // Orange header
+      doc.setFillColor(220, 38, 38); // Brand red header
       doc.rect(0, 0, 210, 40, 'F');
       
       doc.setTextColor(255, 255, 255);
@@ -754,11 +905,11 @@ export default function Settings() {
                   style={{
                     width: '100%', gap: 10, padding: '10px 14px', borderRadius: 8,
                     fontSize: 14, fontWeight: 500, border: 'none', cursor: 'pointer',
-                    background: active ? '#FFF7ED' : 'transparent',
-                    color: active ? '#F97316' : '#6B7280',
+                    background: active ? '#FEEFD0' : 'transparent',
+                    color: active ? '#DC2626' : '#6B7280',
                   }}
                 >
-                  <Icon size={18} style={{ color: active ? '#F97316' : '#6B7280' }} />
+                  <Icon size={18} style={{ color: active ? '#DC2626' : '#6B7280' }} />
                   {label}
                 </button>
               );
@@ -778,12 +929,15 @@ export default function Settings() {
           <input style={INPUT_STYLE} type="number" value={openingCash} onChange={(e) => setOpeningCash(e.target.value)} />
           <button
             onClick={handleStartShift}
+            disabled={shiftBusy}
             style={{
-              marginTop: 20, background: '#F97316', color: '#FFFFFF',
+              marginTop: 20,
+              background: shiftBusy ? '#E5E7EB' : '#111111',
+              color: shiftBusy ? '#9CA3AF' : '#FFFFFF',
               height: 40, borderRadius: 8, fontWeight: 600, fontSize: 14, padding: '0 20px', border: 'none', cursor: 'pointer',
             }}
           >
-            Start Shift
+            {shiftBusy ? 'Starting…' : 'Start Shift'}
           </button>
         </div>
       </Modal>
@@ -794,8 +948,17 @@ export default function Settings() {
           <div style={{ fontSize: 14, color: '#374151' }}>End: {new Date().toLocaleTimeString()}</div>
           <div style={{ fontSize: 14, color: '#374151' }}>Total orders: {shiftOrders}</div>
           <div style={{ fontSize: 14, color: '#374151' }}>Total revenue: Rs. {shiftRevenue.toLocaleString()}</div>
-          <div style={{ fontSize: 14, color: '#374151' }}>Total discounts given: Rs. 0</div>
-          <div style={{ fontSize: 14, color: '#374151' }}>Expected cash in drawer: Rs. {expectedCash.toLocaleString()}</div>
+          <div style={{ fontSize: 14, color: '#374151' }}>Total discounts given: Rs. {shiftDiscounts.toLocaleString()}</div>
+          <div style={{ fontSize: 13, color: '#6B7280', paddingTop: 4, borderTop: '1px solid #F3F4F6' }}>
+            Opening float: Rs. {Number(currentShift?.opening_cash || 0).toLocaleString()}
+            {' + '}Cash sales: Rs. {shiftCashRevenue.toLocaleString()}
+          </div>
+          <div style={{ fontSize: 14, fontWeight: 600, color: '#111827' }}>
+            Expected cash in drawer: Rs. {expectedCash.toLocaleString()}
+          </div>
+          <div style={{ fontSize: 12, color: '#9CA3AF' }}>
+            Card and online sales are excluded — they never enter the till.
+          </div>
           <div>
             <FieldLabel label="Actual Cash Count" />
             <input style={INPUT_STYLE} type="number" value={actualCash} onChange={(e) => setActualCash(e.target.value)} />
@@ -807,8 +970,11 @@ export default function Settings() {
           )}
           <button
             onClick={handleCloseShift}
+            disabled={shiftBusy || actualCash === ''}
             style={{
-              marginTop: 8, background: '#EF4444', color: '#FFFFFF',
+              marginTop: 8,
+              background: shiftBusy || actualCash === '' ? '#E5E7EB' : '#111111',
+              color: shiftBusy || actualCash === '' ? '#9CA3AF' : '#FFFFFF',
               height: 40, borderRadius: 8, fontWeight: 600, fontSize: 14, padding: '0 20px', border: 'none', cursor: 'pointer',
             }}
           >

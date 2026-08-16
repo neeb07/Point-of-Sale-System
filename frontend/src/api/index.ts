@@ -89,6 +89,20 @@ export const reportsAPI = {
 export const settingsAPI = {
   getAll: () => request<Settings>('GET', '/settings'),
   update: (data: Settings) => request<Settings>('PUT', '/settings', data),
+  /** Upload a .db file to replace the live database. */
+  restore: async (file: File) => {
+    const buffer = await file.arrayBuffer();
+    const bytes = new Uint8Array(buffer);
+    let binary = '';
+    const CHUNK = 0x8000;
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+    }
+    return request<{ success: boolean; message: string }>('POST', '/settings/restore', {
+      filename: file.name,
+      data: btoa(binary),
+    });
+  },
   backup: async () => {
     const response = await fetch(`${BASE_URL}/backup`);
     if (!response.ok) throw new Error('Backup failed');
@@ -112,6 +126,43 @@ export const staffAPI = {
     const qs = new URLSearchParams(params).toString();
     return request<Record<string, unknown>>('GET', `/staff/performance${qs ? `?${qs}` : ''}`);
   },
+};
+
+interface Ingredient {
+  id: number;
+  name: string;
+  unit: string;
+  stock: number;
+  low_stock_threshold: number;
+  [key: string]: unknown;
+}
+
+/**
+ * FIX (Bug 3): TopBar.tsx and InventoryScreen.tsx used bare `fetch('/api/...')`.
+ * Those resolve against the Vite dev proxy in development but against
+ * `file://` in the packaged Electron build, where they fail silently — which
+ * meant Inventory was effectively dead in production. Everything now goes
+ * through `request()`, which uses the absolute BASE_URL.
+ */
+export const inventoryAPI = {
+  getAll: () => request<Ingredient[]>('GET', '/inventory'),
+  create: (data: { name: string; unit: string; stock?: number; low_stock_threshold?: number }) =>
+    request<Ingredient>('POST', '/inventory', data),
+  updateStock: (id: number, body: { action?: 'add' | 'subtract'; amount?: number; stock?: number }) =>
+    request<Ingredient>('PUT', `/inventory/${id}/stock`, body),
+  updateThreshold: (id: number, threshold: number) =>
+    request<Ingredient>('PUT', `/inventory/${id}/threshold`, { threshold }),
+  lowStock: () => request<{ count: number }>('GET', '/inventory/low-stock'),
+};
+
+export const shiftsAPI = {
+  current: () => request<Record<string, unknown> | null>('GET', '/shifts/current'),
+  history: (limit = 10) => request<Record<string, unknown>[]>('GET', `/shifts/history?limit=${limit}`),
+  open: (body: { opening_cash: number; staff_id?: number | null; staff_name?: string }) =>
+    request<Record<string, unknown>>('POST', '/shifts/open', body),
+  close: (body: { closing_cash: number }) =>
+    request<Record<string, unknown>>('POST', '/shifts/close', body),
+  summary: (id: number) => request<Record<string, unknown>>('GET', `/shifts/${id}/summary`),
 };
 
 export const dealsAPI = {

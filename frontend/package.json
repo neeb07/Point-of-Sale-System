@@ -1,9 +1,9 @@
 {
-  "name": "restro-pos",
+  "name": "blaze-pos",
   "private": true,
   "version": "1.0.0",
   "description": "Restaurant Point of Sale System",
-  "author": "Al-Madina Fast Food",
+  "author": "Blaze",
   "main": "electron/main.js",
   "scripts": {
     "dev": "vite",
@@ -102,11 +102,11 @@
     "wait-on": "^9.0.10"
   },
   "build": {
-    "appId": "com.restropos.app",
-    "productName": "Restro-POS",
+    "appId": "com.blazepos.app",
+    "productName": "Blaze-POS",
     "asar": false,
     "directories": {
-      "output": "C:\\POSBuild"
+      "output": "release"
     },
     "files": [
       "dist/**/*",
@@ -136,7 +136,7 @@
       "allowToChangeInstallationDirectory": false,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Restro POS"
+      "shortcutName": "Blaze POS"
     }
   }
 }

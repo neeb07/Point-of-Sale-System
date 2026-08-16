@@ -4,7 +4,7 @@ export default function DataTable({ columns, data, emptyIcon: EmptyIcon, emptyTi
   if (!data || data.length === 0) {
     return (
       <div style={{ textAlign: 'center', padding: '48px 24px' }}>
-        {EmptyIcon && <EmptyIcon size={48} style={{ color: '#F97316', margin: '0 auto 16px' }} />}
+        {EmptyIcon && <EmptyIcon size={48} style={{ color: '#DC2626', margin: '0 auto 16px' }} />}
         <div style={{ fontSize: 16, fontWeight: 700, color: '#111827' }}>{emptyTitle}</div>
         {emptySubtitle && <div style={{ fontSize: 13, color: '#6B7280', marginTop: 6 }}>{emptySubtitle}</div>}
       </div>
@@ -43,7 +43,7 @@ export default function DataTable({ columns, data, emptyIcon: EmptyIcon, emptyTi
               background: idx % 2 === 0 ? '#FFFFFF' : '#FAFAFA',
               borderBottom: '1px solid #F3F4F6',
             }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = '#FFF7ED'; }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = '#FEEFD0'; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = idx % 2 === 0 ? '#FFFFFF' : '#FAFAFA'; }}
           >
             {columns.map((col) => (

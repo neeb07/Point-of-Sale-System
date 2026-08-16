@@ -1,55 +1,52 @@
 // @ts-nocheck
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Plus, Pencil, Trash2, X, Pizza, Sandwich, Coffee, Package, Loader2, Drumstick, Soup, Utensils, Wheat, Droplet, Flame } from 'lucide-react';
 import { usePOS } from '@/lib/POSContext';
+import { MENU_CATEGORIES, DEFAULT_CATEGORY } from '@/lib/constants';
 
-export const categoriesList = [
-  'Starters', 'Fries', 'Wraps & Rolls', 'Sandwiches + Hotdogs', 'Burgers',
-  'Paratha/Spin Rolls', 'Specialities', 'Traditional Pizzas', 'Special Pizzas',
-  'Large Crust Filled Pizza', 'New York Calzone', 'Gravies', 'Gravies With Rice',
-  'Fried Rice/Biryani', 'Chowmein', 'Soups', 'Steaks', 'BBQ', 'Pakistan/Desi',
-  'Salads/Raita', 'Beverages', 'Roti/Naan'
-];
+/**
+ * FIX (Bug 2): this file used to declare 22 invented categories ('Starters',
+ * 'Chowmein', 'Steaks', 'Roti/Naan' ...) while the seeded database only ever
+ * used six. Anything added here landed in a category that did not exist on
+ * the Sale screen, producing an orphan tab with one item in it.
+ *
+ * The list now comes from @/lib/constants and is merged at render time with
+ * whatever categories are genuinely live in the database, so the two can
+ * never disagree again.
+ */
+export const categoriesList = MENU_CATEGORIES;
 
 const categoryIcon = {
-  'Starters': Drumstick,
-  'Fries': Package,
-  'Wraps & Rolls': Sandwich,
-  'Sandwiches + Hotdogs': Sandwich,
-  'Burgers': Sandwich,
-  'Paratha/Spin Rolls': Sandwich,
-  'Specialities': Utensils,
-  'Traditional Pizzas': Pizza,
-  'Special Pizzas': Pizza,
-  'Large Crust Filled Pizza': Pizza,
-  'New York Calzone': Pizza,
-  'Gravies': Soup,
-  'Gravies With Rice': Soup,
-  'Fried Rice/Biryani': Utensils,
-  'Chowmein': Utensils,
-  'Soups': Soup,
-  'Steaks': Utensils,
-  'BBQ': Flame,
-  'Pakistan/Desi': Utensils,
-  'Salads/Raita': Droplet,
-  'Beverages': Coffee,
-  'Roti/Naan': Wheat
+  'Burger': Sandwich,
+  'Chicken Rolls': Sandwich,
+  'Sides': Drumstick,
+  'Pizza': Pizza,
+  'Drinks': Coffee,
+  'Ice Cream': Droplet,
 };
 
+// Black/red/cream brand washes.
 const categoryGradient = {
-  'Starters': 'linear-gradient(135deg, rgba(245,158,11,0.3), rgba(234,88,12,0.2))',
-  'Traditional Pizzas': 'linear-gradient(135deg, rgba(239,68,68,0.3), rgba(245,158,11,0.2))',
-  'Special Pizzas': 'linear-gradient(135deg, rgba(239,68,68,0.3), rgba(245,158,11,0.2))',
-  'Large Crust Filled Pizza': 'linear-gradient(135deg, rgba(239,68,68,0.3), rgba(245,158,11,0.2))',
-  'New York Calzone': 'linear-gradient(135deg, rgba(239,68,68,0.3), rgba(245,158,11,0.2))',
-  'Burgers': 'linear-gradient(135deg, rgba(245,158,11,0.3), rgba(234,88,12,0.2))',
-  'Beverages': 'linear-gradient(135deg, rgba(16,185,129,0.3), rgba(6,182,212,0.2))',
+  'Burger':        'linear-gradient(135deg, rgba(220,38,38,0.28), rgba(17,17,17,0.18))',
+  'Chicken Rolls': 'linear-gradient(135deg, rgba(185,28,28,0.28), rgba(17,17,17,0.18))',
+  'Sides':         'linear-gradient(135deg, rgba(232,163,61,0.30), rgba(220,38,38,0.16))',
+  'Pizza':         'linear-gradient(135deg, rgba(220,38,38,0.32), rgba(127,29,29,0.20))',
+  'Drinks':        'linear-gradient(135deg, rgba(17,17,17,0.26), rgba(75,85,99,0.18))',
+  'Ice Cream':     'linear-gradient(135deg, rgba(254,239,208,0.90), rgba(220,38,38,0.14))',
+  'Extras':        'linear-gradient(135deg, rgba(17,17,17,0.20), rgba(220,38,38,0.14))',
 };
 
 export default function MenuManagement() {
   const { menuItems, addMenuItem, updateMenuItem, deleteMenuItem, loading } = usePOS();
   const [modalOpen, setModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
+
+  // FIX (Bug 2): merge the canonical list with categories actually present in
+  // the database, so a category added by a previous version still shows up.
+  const availableCategories = useMemo(() => {
+    const live = menuItems.map(i => i.category).filter(Boolean);
+    return Array.from(new Set([...MENU_CATEGORIES, ...live]));
+  }, [menuItems]);
 
   const openAdd = () => { setEditingItem(null); setModalOpen(true); };
   const openEdit = (item) => { setEditingItem(item); setModalOpen(true); };
@@ -60,7 +57,7 @@ export default function MenuManagement() {
   if (loading) {
     return (
       <div className="flex-1 h-full flex items-center justify-center" style={{ background: '#FFFFFF' }}>
-        <div className="animate-spin" style={{ color: '#EA6C0A' }}>
+        <div className="animate-spin" style={{ color: '#B91C1C' }}>
           <Loader2 size={32} />
         </div>
       </div>
@@ -72,13 +69,13 @@ export default function MenuManagement() {
       <div style={{ maxWidth: 900, margin: '0 auto' }}>
         {/* Header */}
         <div className="flex items-center justify-between" style={{ marginBottom: 24 }}>
-          <h1 style={{ color: '#EA6C0A', fontWeight: 700, fontSize: 24 }}>Menu Management</h1>
+          <h1 style={{ color: '#B91C1C', fontWeight: 700, fontSize: 24 }}>Menu Management</h1>
           <button
             onClick={openAdd}
             className="flex items-center gap-2 transition-all duration-150"
             style={{
               height: 40, padding: '0 20px', borderRadius: 10,
-              background: '#EA6C0A',
+              background: '#B91C1C',
               boxShadow: '0 4px 20px rgba(234, 108, 10, 0.4)',
               color: '#FFFFFF', fontSize: 14, fontWeight: 700,
               border: 'none', cursor: 'pointer',
@@ -99,7 +96,7 @@ export default function MenuManagement() {
               key={item.id}
               className="flex items-center"
               style={{
-                background: '#EA6C0A',
+                background: '#B91C1C',
                 borderRadius: 16,
                 boxShadow: '0 4px 12px rgba(234, 108, 10, 0.2)',
                 padding: 16, marginBottom: 10,
@@ -144,6 +141,7 @@ export default function MenuManagement() {
       {modalOpen && (
         <ItemModal
           item={editingItem}
+          categories={availableCategories}
           onClose={() => setModalOpen(false)}
           onSave={(data) => {
             if (editingItem) {
@@ -183,11 +181,15 @@ function IconBtn({ icon: Icon, hoverBg, hoverColor, defaultColor, onClick }) {
   );
 }
 
-function ItemModal({ item, onClose, onSave }) {
+function ItemModal({ item, categories = MENU_CATEGORIES, onClose, onSave }) {
   const [name, setName] = useState(item?.name || '');
   const [price, setPrice] = useState(item?.price || '');
-  const [category, setCategory] = useState(item?.category || 'Starters');
+  // FIX (Bug 2): the default was 'Starters', a category that does not exist.
+  const [category, setCategory] = useState(item?.category || DEFAULT_CATEGORY);
   const [imageUrl, setImageUrl] = useState(item?.image_url || '');
+  // Lets staff introduce a genuinely new category without a code change.
+  const [addingCategory, setAddingCategory] = useState(false);
+  const [newCategory, setNewCategory] = useState('');
 
   const handleImageUpload = (e) => {
     const file = e.target.files?.[0];
@@ -202,7 +204,16 @@ function ItemModal({ item, onClose, onSave }) {
 
   const handleSave = () => {
     if (!name.trim() || (item?.has_variants !== 1 && !price)) return;
-    onSave({ name: name.trim(), price: Number(price) || 0, category, image_url: imageUrl });
+    const finalCategory = addingCategory && newCategory.trim()
+      ? newCategory.trim()
+      : category;
+    if (!finalCategory) return;
+    onSave({
+      name: name.trim(),
+      price: Number(price) || 0,
+      category: finalCategory,
+      image_url: imageUrl,
+    });
   };
 
   const inputStyle = {
@@ -224,10 +235,10 @@ function ItemModal({ item, onClose, onSave }) {
         onClick={e => e.stopPropagation()}
         style={{
           width: 460, padding: 28,
-          background: '#EA6C0A',
-          border: '1px solid #EA6C0A',
+          background: '#111111',
+          border: '1px solid #DC2626',
           borderRadius: 16,
-          boxShadow: '0 8px 32px rgba(234, 108, 10, 0.3)',
+          boxShadow: '0 10px 25px rgba(17,17,17,0.45)',
         }}
       >
         {/* Modal Header */}
@@ -275,8 +286,16 @@ function ItemModal({ item, onClose, onSave }) {
         {/* Category */}
         <label style={{ color: '#FFFFFF', fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 6 }}>Category</label>
         <select
-          value={category}
-          onChange={e => setCategory(e.target.value)}
+          value={addingCategory ? '__new__' : category}
+          onChange={e => {
+            if (e.target.value === '__new__') {
+              setAddingCategory(true);
+            } else {
+              setAddingCategory(false);
+              setNewCategory('');
+              setCategory(e.target.value);
+            }
+          }}
           style={{
             ...inputStyle, marginBottom: 16,
             appearance: 'none',
@@ -287,10 +306,23 @@ function ItemModal({ item, onClose, onSave }) {
           onFocus={e => { e.currentTarget.style.border = '1px solid #FFFFFF'; }}
           onBlur={e => { e.currentTarget.style.border = '1px solid #E5E7EB'; }}
         >
-          {categoriesList.map(cat => (
+          {categories.map(cat => (
             <option key={cat} value={cat}>{cat}</option>
           ))}
+          <option value="__new__">+ Add new category…</option>
         </select>
+
+        {addingCategory && (
+          <input
+            value={newCategory}
+            onChange={e => setNewCategory(e.target.value)}
+            placeholder="New category name"
+            autoFocus
+            style={{ ...inputStyle, marginBottom: 16 }}
+            onFocus={e => { e.currentTarget.style.border = '1px solid #FFFFFF'; }}
+            onBlur={e => { e.currentTarget.style.border = '1px solid #E5E7EB'; }}
+          />
+        )}
 
         {/* Image Upload */}
         <label style={{ color: '#FFFFFF', fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 6 }}>Item Image</label>
@@ -332,7 +364,7 @@ function ItemModal({ item, onClose, onSave }) {
               height: 42, borderRadius: 10,
               background: '#FFFFFF',
               boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-              border: 'none', color: '#EA6C0A', fontSize: 14, fontWeight: 700,
+              border: 'none', color: '#B91C1C', fontSize: 14, fontWeight: 700,
               cursor: 'pointer', fontFamily: 'Inter, sans-serif',
             }}
           >

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Package, Edit2, AlertCircle } from 'lucide-react';
+import { inventoryAPI } from '@/api/index';
 
 interface Ingredient {
   id: number;
@@ -31,10 +32,15 @@ export default function InventoryScreen() {
     fetchInventory();
   }, []);
 
+  /**
+   * FIX (Bug 3): every call in this file used a bare relative `/api/...` URL.
+   * Those work through the Vite dev proxy but resolve against `file://` in the
+   * packaged Electron app, so Inventory silently did nothing in production.
+   * All four call sites now go through inventoryAPI (absolute BASE_URL).
+   */
   const fetchInventory = async () => {
     try {
-      const res = await fetch('/api/inventory');
-      const data = await res.json();
+      const data = await inventoryAPI.getAll();
       setIngredients(data);
     } catch (err) {
       console.error('Failed to fetch inventory:', err);
@@ -48,28 +54,20 @@ export default function InventoryScreen() {
     if (!addName) return;
 
     try {
-      const res = await fetch('/api/inventory', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: addName,
-          unit: addUnit,
-          stock: parseFloat(addStock) || 0,
-          low_stock_threshold: parseFloat(addThreshold) || 0
-        })
+      await inventoryAPI.create({
+        name: addName,
+        unit: addUnit,
+        stock: parseFloat(addStock) || 0,
+        low_stock_threshold: parseFloat(addThreshold) || 0,
       });
-      if (res.ok) {
-        setShowAddModal(false);
-        setAddName('');
-        setAddStock('0');
-        setAddThreshold('0');
-        fetchInventory();
-      } else {
-        const error = await res.json();
-        alert(error.error || 'Failed to add ingredient');
-      }
+      setShowAddModal(false);
+      setAddName('');
+      setAddStock('0');
+      setAddThreshold('0');
+      fetchInventory();
     } catch (err) {
       console.error(err);
+      alert(err instanceof Error ? err.message : 'Failed to add ingredient');
     }
   };
 
@@ -90,29 +88,18 @@ export default function InventoryScreen() {
       if (editAmount !== '') {
         const amt = parseFloat(editAmount);
         if (!isNaN(amt)) {
-          let payload: any = {};
-          if (editAction === 'set') {
-            payload = { stock: amt };
-          } else {
-            payload = { action: editAction, amount: amt };
-          }
+          const payload = editAction === 'set'
+            ? { stock: amt }
+            : { action: editAction, amount: amt };
 
-          await fetch(`/api/inventory/${selectedIngredient.id}/stock`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-          });
+          await inventoryAPI.updateStock(selectedIngredient.id, payload);
         }
       }
 
       // 2. Update threshold if changed
       const currentThreshold = parseFloat(editThreshold);
       if (!isNaN(currentThreshold) && currentThreshold !== selectedIngredient.low_stock_threshold) {
-        await fetch(`/api/inventory/${selectedIngredient.id}/threshold`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ threshold: currentThreshold })
-        });
+        await inventoryAPI.updateThreshold(selectedIngredient.id, currentThreshold);
       }
 
       setShowEditModal(false);
@@ -123,7 +110,7 @@ export default function InventoryScreen() {
   };
 
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100vh', background: '#F5F5F0', overflow: 'hidden' }}>
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100vh', background: '#F5F2EA', overflow: 'hidden' }}>
       {/* Header */}
       <div style={{
         padding: '24px 32px',
@@ -135,10 +122,10 @@ export default function InventoryScreen() {
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <div style={{
-            width: 40, height: 40, borderRadius: 10, background: '#FFF7ED',
+            width: 40, height: 40, borderRadius: 10, background: '#FEEFD0',
             display: 'flex', alignItems: 'center', justifyContent: 'center'
           }}>
-            <Package size={20} color="#F97316" />
+            <Package size={20} color="#DC2626" />
           </div>
           <div>
             <h1 style={{ fontSize: 24, fontWeight: 700, color: '#111827', margin: 0 }}>Inventory Management</h1>
@@ -149,9 +136,9 @@ export default function InventoryScreen() {
           onClick={() => setShowAddModal(true)}
           style={{
             display: 'flex', alignItems: 'center', gap: 8,
-            padding: '10px 16px', background: '#F97316', color: '#FFF',
+            padding: '10px 16px', background: '#DC2626', color: '#FFF',
             borderRadius: 8, border: 'none', fontWeight: 600, fontSize: 14,
-            cursor: 'pointer', boxShadow: '0 2px 4px rgba(249,115,22,0.2)'
+            cursor: 'pointer', boxShadow: '0 2px 4px rgba(220,38,38,0.2)'
           }}
         >
           <Plus size={18} /> New Ingredient
@@ -252,7 +239,7 @@ export default function InventoryScreen() {
               </div>
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
                 <button type="button" onClick={() => setShowAddModal(false)} style={{ padding: '10px 16px', background: '#F3F4F6', color: '#374151', borderRadius: 8, border: 'none', fontWeight: 500, cursor: 'pointer' }}>Cancel</button>
-                <button type="submit" style={{ padding: '10px 16px', background: '#F97316', color: '#FFF', borderRadius: 8, border: 'none', fontWeight: 600, cursor: 'pointer' }}>Add Ingredient</button>
+                <button type="submit" style={{ padding: '10px 16px', background: '#DC2626', color: '#FFF', borderRadius: 8, border: 'none', fontWeight: 600, cursor: 'pointer' }}>Add Ingredient</button>
               </div>
             </form>
           </div>
@@ -313,7 +300,7 @@ export default function InventoryScreen() {
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
                 <button type="button" onClick={() => setShowEditModal(false)} style={{ padding: '10px 16px', background: '#F3F4F6', color: '#374151', borderRadius: 8, border: 'none', fontWeight: 500, cursor: 'pointer' }}>Cancel</button>
-                <button type="submit" style={{ padding: '10px 16px', background: '#F97316', color: '#FFF', borderRadius: 8, border: 'none', fontWeight: 600, cursor: 'pointer' }}>Save Changes</button>
+                <button type="submit" style={{ padding: '10px 16px', background: '#DC2626', color: '#FFF', borderRadius: 8, border: 'none', fontWeight: 600, cursor: 'pointer' }}>Save Changes</button>
               </div>
             </form>
           </div>

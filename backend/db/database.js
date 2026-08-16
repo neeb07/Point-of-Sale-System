@@ -12,6 +12,24 @@ if (!fs.existsSync(userDataDir)) {
 const DB_PATH = path.join(userDataDir, 'pos_database.db');
 console.log('Using database at:', DB_PATH);
 
+// FIX (Bug 5): apply a pending restore before opening the database. The
+// restore endpoint stages the verified file here rather than swapping it
+// underneath a live connection, which would corrupt open handles.
+const PENDING_RESTORE = path.join(userDataDir, 'pending_restore.db');
+if (fs.existsSync(PENDING_RESTORE)) {
+  try {
+    ['-wal', '-shm'].forEach((suffix) => {
+      const sidecar = DB_PATH + suffix;
+      if (fs.existsSync(sidecar)) fs.unlinkSync(sidecar);
+    });
+    fs.copyFileSync(PENDING_RESTORE, DB_PATH);
+    fs.unlinkSync(PENDING_RESTORE);
+    console.log('Restore applied from pending_restore.db');
+  } catch (e) {
+    console.error('Restore failed, keeping existing database:', e.message);
+  }
+}
+
 const db = new Database(DB_PATH);
 
 // Crash protection + performance
@@ -109,6 +127,22 @@ db.exec(`
     FOREIGN KEY (variant_id) REFERENCES item_variants(id) ON DELETE CASCADE
   );
 
+  -- FIX (Bug 5): Shift Management in Settings was entirely client-side fake
+  -- data (hardcoded 23 orders / Rs. 12,400 and three invented history rows).
+  -- This table makes it real and auditable.
+  CREATE TABLE IF NOT EXISTS shifts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    staff_id INTEGER,
+    staff_name TEXT,
+    opening_cash REAL DEFAULT 0,
+    closing_cash REAL DEFAULT NULL,
+    expected_cash REAL DEFAULT NULL,
+    variance REAL DEFAULT NULL,
+    opened_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    closed_at DATETIME DEFAULT NULL,
+    status TEXT DEFAULT 'open'
+  );
+
   CREATE TABLE IF NOT EXISTS recipe_ingredients (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     recipe_id INTEGER NOT NULL,
@@ -122,7 +156,7 @@ db.exec(`
 // Migrations
 try { db.exec("ALTER TABLE orders ADD COLUMN cashier_name TEXT DEFAULT 'Admin';"); } catch(e) {}
 try { db.exec("ALTER TABLE orders ADD COLUMN cashier_id INTEGER DEFAULT NULL;"); } catch(e) {}
-try { db.exec("ALTER TABLE staff ADD COLUMN color TEXT DEFAULT '#F97316';"); } catch(e) {}
+try { db.exec("ALTER TABLE staff ADD COLUMN color TEXT DEFAULT '#DC2626';"); } catch(e) {}
 try { db.exec("ALTER TABLE staff ADD COLUMN avatar_initials TEXT DEFAULT '';"); } catch(e) {}
 try { db.exec("UPDATE staff SET active = 1 WHERE role = 'Owner';"); } catch(e) {}
 try { db.exec("UPDATE staff SET color = '#7C3AED' WHERE color IS NULL OR color = '';"); } catch(e) {}
@@ -141,6 +175,25 @@ try { db.exec("ALTER TABLE deals ADD COLUMN deal_group TEXT DEFAULT NULL;"); } c
 try { db.exec("ALTER TABLE orders ADD COLUMN order_type TEXT DEFAULT 'Dine-in';"); } catch(e) {}
 try { db.exec("ALTER TABLE orders ADD COLUMN delivery_charge REAL DEFAULT 0;"); } catch(e) {}
 try { db.exec("ALTER TABLE ingredients ADD COLUMN low_stock_threshold REAL DEFAULT 0;"); } catch(e) {}
+
+// FIX (Bug 5): stamp every order with the shift it belongs to, so shift
+// totals are derived from real sales instead of hardcoded numbers.
+try { db.exec("ALTER TABLE orders ADD COLUMN shift_id INTEGER DEFAULT NULL;"); } catch(e) {}
+// FIX (Bug 6): the Sale screen collected no table/token number even though
+// receipts displayed a placeholder for it.
+try { db.exec("ALTER TABLE orders ADD COLUMN table_number TEXT DEFAULT NULL;"); } catch(e) {}
+// Helpful indexes for the reporting queries.
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at);"); } catch(e) {}
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_orders_shift ON orders(shift_id);"); } catch(e) {}
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_order_items_order ON order_items(order_id);"); } catch(e) {}
+
+// Rebrand: move an existing install off the old default restaurant name.
+// Runs once; never overwrites a name the owner has customised themselves.
+try {
+  db.prepare("UPDATE settings SET value = 'Blaze' WHERE key = 'restaurant_name' AND value = 'Al-Madina Fast Food'").run();
+} catch(e) {}
+// Rebrand: retire the old orange staff colour.
+try { db.exec("UPDATE staff SET color = '#DC2626' WHERE color = '#F97316';"); } catch(e) {}
 
 // Seed menu items
 const count = db.prepare('SELECT COUNT(*) as count FROM menu_items').get();
@@ -244,7 +297,7 @@ if (count.count === 0) {
 const staffCount = db.prepare('SELECT COUNT(*) as count FROM staff').get();
 if (staffCount.count === 0) {
   const hashedPin = bcrypt.hashSync('1234', 10);
-  db.prepare("INSERT INTO staff (name, role, pin, color, active) VALUES ('Admin', 'Owner', ?, '#F97316', 1)").run(hashedPin);
+  db.prepare("INSERT INTO staff (name, role, pin, color, active) VALUES ('Admin', 'Owner', ?, '#DC2626', 1)").run(hashedPin);
 }
 
 // Seed settings
@@ -252,7 +305,7 @@ const settingsCount = db.prepare('SELECT COUNT(*) as count FROM settings').get()
 if (settingsCount.count === 0) {
   const insertSetting = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)');
   [
-    ['restaurant_name', 'Al-Madina Fast Food'],
+    ['restaurant_name', 'Blaze'],
     ['restaurant_address', '123 Main Street, Food Avenue'],
     ['restaurant_phone', '0300-1234567'],
     ['tax_rate', '0'],

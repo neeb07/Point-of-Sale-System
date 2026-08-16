@@ -103,7 +103,7 @@ export default function Reports() {
     }
   }, [from, to]);
 
-  const PIE_COLORS = ['#F97316', '#3B82F6', '#10B981', '#8B5CF6', '#F43F5E', '#06B6D4'];
+  const PIE_COLORS = ['#DC2626', '#3B82F6', '#10B981', '#8B5CF6', '#F43F5E', '#06B6D4'];
 
   const printReport = () => {
     window.print();
@@ -163,8 +163,8 @@ export default function Reports() {
   const getHeatmapColor = (orders) => {
     if (orders === 0) return '#FFFFFF';
     const intensity = orders / maxOrders;
-    if (intensity < 0.2) return '#FED7AA';
-    if (intensity < 0.5) return '#F97316';
+    if (intensity < 0.2) return '#F2D9A0';
+    if (intensity < 0.5) return '#DC2626';
     if (intensity < 0.8) return '#EA580C';
     return '#991B1B';
   };
@@ -180,9 +180,9 @@ export default function Reports() {
               onClick={() => setActiveFilter(chip.value)}
               className="px-3 py-1.5 rounded-full text-xs font-medium transition-all"
               style={{
-                background: activeFilter === chip.value ? '#EA6C0A' : '#FFFFFF',
+                background: activeFilter === chip.value ? '#B91C1C' : '#FFFFFF',
                 color: activeFilter === chip.value ? '#FFFFFF' : '#6B7280',
-                border: activeFilter === chip.value ? '1px solid #EA6C0A' : '1px solid #D1D5DB',
+                border: activeFilter === chip.value ? '1px solid #B91C1C' : '1px solid #D1D5DB',
               }}
             >
               {chip.label}
@@ -218,7 +218,7 @@ export default function Reports() {
         
         {/* Section 1 - KPI Cards */}
         <div className="grid grid-cols-4 gap-4 print:hidden">
-          <KpiCard title="Total Revenue" value={`Rs. ${kpi.revenue.toLocaleString()}`} icon={DollarSign} color="#F97316" />
+          <KpiCard title="Total Revenue" value={`Rs. ${kpi.revenue.toLocaleString()}`} icon={DollarSign} color="#DC2626" />
           <KpiCard title="Orders Processed" value={kpi.orders} icon={ShoppingBag} color="#3B82F6" />
           <KpiCard title="Avg. Order Value" value={`Rs. ${Math.round(kpi.avg_order_value).toLocaleString()}`} icon={TrendingUp} color="#10B981" />
           <KpiCard title="Discounts Given" value={`Rs. ${kpi.total_discounts.toLocaleString()}`} icon={Tag} color="#EF4444" subtitle={`across ${detailedReport.filter(d => d.discount > 0).length} orders`} />
@@ -237,7 +237,7 @@ export default function Reports() {
                   contentStyle={{ borderRadius: 8, border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
                   formatter={(value) => [`Rs. ${value}`, 'Revenue']}
                 />
-                <Line type="monotone" dataKey="revenue" stroke="#F97316" strokeWidth={3} dot={{ fill: '#FFFFFF', stroke: '#F97316', strokeWidth: 2, r: 4 }} activeDot={{ r: 6, fill: '#F97316', stroke: '#FFFFFF' }} />
+                <Line type="monotone" dataKey="revenue" stroke="#DC2626" strokeWidth={3} dot={{ fill: '#FFFFFF', stroke: '#DC2626', strokeWidth: 2, r: 4 }} activeDot={{ r: 6, fill: '#DC2626', stroke: '#FFFFFF' }} />
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -254,7 +254,7 @@ export default function Reports() {
                   <XAxis type="number" hide />
                   <YAxis type="category" dataKey="name" tick={{ fontSize: 11, fill: '#4B5563' }} width={120} axisLine={false} tickLine={false} />
                   <RechartsTooltip cursor={{ fill: '#F9FAFB' }} contentStyle={{ borderRadius: 8, border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} />
-                  <Bar dataKey="quantity" fill="#F97316" radius={[0, 4, 4, 0]}>
+                  <Bar dataKey="quantity" fill="#DC2626" radius={[0, 4, 4, 0]}>
                     <LabelList dataKey="quantity" position="right" style={{ fontSize: 12, fontWeight: 600, fill: '#111827' }} />
                   </Bar>
                 </BarChart>
@@ -362,7 +362,7 @@ export default function Reports() {
                     <XAxis type="number" tick={{ fontSize: 11, fill: '#6B7280' }} tickFormatter={val => `Rs.${val}`} />
                     <YAxis type="category" dataKey="cashier_name" tick={{ fontSize: 11, fill: '#4B5563' }} width={90} axisLine={false} tickLine={false} />
                     <RechartsTooltip cursor={{ fill: '#F9FAFB' }} contentStyle={{ borderRadius: 8, border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} formatter={(value) => [`Rs. ${value}`, 'Revenue']} />
-                    <Bar dataKey="total_revenue" fill="#F97316" radius={[0, 4, 4, 0]} />
+                    <Bar dataKey="total_revenue" fill="#DC2626" radius={[0, 4, 4, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>

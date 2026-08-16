@@ -17,7 +17,7 @@ export default function AccessDenied({ message = "You don't have permission to v
       background: '#FFFFFF',
       gap: 12
     }}>
-      <Lock size={52} color="#F97316" />
+      <Lock size={52} color="#DC2626" />
       <h2 style={{ fontSize: 20, fontWeight: 700, color: '#111827', margin: 0 }}>
         Access Restricted
       </h2>

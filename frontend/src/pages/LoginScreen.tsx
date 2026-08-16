@@ -24,7 +24,7 @@ export default function LoginScreen() {
   const [shaking, setShaking] = useState(false);
   const [pinError, setPinError] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
-  const [restaurantName, setRestaurantName] = useState('Al-Madina Fast Food');
+  const [restaurantName, setRestaurantName] = useState('Blaze');
   const [loading, setLoading] = useState(true);
   const [loggingIn, setLoggingIn] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -148,7 +148,7 @@ export default function LoginScreen() {
         <div style={{
           position: 'absolute', bottom: -80, left: -60,
           width: 320, height: 320, borderRadius: '50%',
-          background: 'radial-gradient(circle, rgba(249,115,22,0.10) 0%, transparent 70%)',
+          background: 'radial-gradient(circle, rgba(220,38,38,0.10) 0%, transparent 70%)',
           filter: 'blur(40px)', pointerEvents: 'none', zIndex: 0,
         }} />
 
@@ -157,9 +157,9 @@ export default function LoginScreen() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
             <div style={{
               width: 46, height: 46, borderRadius: 12,
-              background: '#F97316',
+              background: '#DC2626',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              boxShadow: '0 4px 14px rgba(249,115,22,0.30)',
+              boxShadow: '0 4px 14px rgba(220,38,38,0.30)',
               flexShrink: 0,
             }}>
               <span style={{ color: 'white', fontSize: 19, fontWeight: 800 }}>
@@ -201,7 +201,7 @@ export default function LoginScreen() {
           {/* Divider */}
           <div style={{
             width: 40, height: 3,
-            background: '#F97316',
+            background: '#DC2626',
             borderRadius: 2, marginBottom: 28,
           }} />
 
@@ -255,7 +255,7 @@ export default function LoginScreen() {
         <div style={{
           position: 'absolute', top: -60, right: -60,
           width: 300, height: 300, borderRadius: '50%',
-          background: 'radial-gradient(circle, rgba(249,115,22,0.08) 0%, transparent 70%)',
+          background: 'radial-gradient(circle, rgba(220,38,38,0.08) 0%, transparent 70%)',
           filter: 'blur(40px)', pointerEvents: 'none',
         }} />
 
@@ -292,13 +292,13 @@ export default function LoginScreen() {
                 style={{
                   width: '100%', height: 50,
                   background: '#FFFFFF',
-                  border: selectedStaff ? '1.5px solid #F97316' : '1.5px solid #E5E5E0',
+                  border: selectedStaff ? '1.5px solid #DC2626' : '1.5px solid #E5E5E0',
                   borderRadius: 10,
                   padding: '0 14px',
                   display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                   cursor: 'pointer', outline: 'none',
                   transition: 'border-color 180ms, box-shadow 180ms',
-                  boxShadow: selectedStaff ? '0 0 0 3px rgba(249,115,22,0.10)' : '0 1px 3px rgba(0,0,0,0.05)',
+                  boxShadow: selectedStaff ? '0 0 0 3px rgba(220,38,38,0.10)' : '0 1px 3px rgba(0,0,0,0.05)',
                 }}
                 onMouseEnter={e => {
                   if (!selectedStaff) {
@@ -315,7 +315,7 @@ export default function LoginScreen() {
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                     <div style={{
                       width: 28, height: 28, borderRadius: '50%',
-                      background: selectedStaff.color || '#F97316',
+                      background: selectedStaff.color || '#DC2626',
                       display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
                     }}>
                       <span style={{ color: 'white', fontSize: 11, fontWeight: 700 }}>
@@ -387,7 +387,7 @@ export default function LoginScreen() {
                     >
                       <div style={{
                         width: 34, height: 34, borderRadius: '50%', flexShrink: 0,
-                        background: staff.color || '#F97316',
+                        background: staff.color || '#DC2626',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                       }}>
                         <span style={{ color: 'white', fontSize: 12, fontWeight: 700 }}>
@@ -401,12 +401,12 @@ export default function LoginScreen() {
                       <div style={{
                         padding: '2px 9px', borderRadius: 9999, fontSize: 11, fontWeight: 600,
                         background: staff.role === 'Cashier' ? '#F5F5F0' : '#FFF0E6',
-                        color: staff.role === 'Cashier' ? '#A3A39A' : '#F97316',
-                        border: staff.role === 'Cashier' ? '1px solid #E5E5E0' : '1px solid rgba(249,115,22,0.20)',
+                        color: staff.role === 'Cashier' ? '#A3A39A' : '#DC2626',
+                        border: staff.role === 'Cashier' ? '1px solid #E5E5E0' : '1px solid rgba(220,38,38,0.20)',
                       }}>
                         {staff.role}
                       </div>
-                      {selectedStaff?.id === staff.id && <Check size={14} color="#F97316" />}
+                      {selectedStaff?.id === staff.id && <Check size={14} color="#DC2626" />}
                     </div>
                   ))}
                 </div>
@@ -440,9 +440,9 @@ export default function LoginScreen() {
               {[0, 1, 2, 3].map(i => (
                 <div key={i} style={{
                   width: 13, height: 13, borderRadius: '50%',
-                  background: pinError ? '#EF4444' : pin.length > i ? '#F97316' : 'transparent',
-                  border: `2px solid ${pinError ? '#EF4444' : pin.length > i ? '#F97316' : '#D1D1CC'}`,
-                  boxShadow: pin.length > i && !pinError ? '0 0 6px rgba(249,115,22,0.45)' : 'none',
+                  background: pinError ? '#EF4444' : pin.length > i ? '#DC2626' : 'transparent',
+                  border: `2px solid ${pinError ? '#EF4444' : pin.length > i ? '#DC2626' : '#D1D1CC'}`,
+                  boxShadow: pin.length > i && !pinError ? '0 0 6px rgba(220,38,38,0.45)' : 'none',
                   transition: 'all 140ms',
                 }} />
               ))}
@@ -474,8 +474,8 @@ export default function LoginScreen() {
                     boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
                   }}
                   onMouseEnter={e => {
-                    (e.currentTarget as HTMLButtonElement).style.borderColor = '#F97316';
-                    (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 0 0 3px rgba(249,115,22,0.10)';
+                    (e.currentTarget as HTMLButtonElement).style.borderColor = '#DC2626';
+                    (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 0 0 3px rgba(220,38,38,0.10)';
                   }}
                   onMouseLeave={e => {
                     (e.currentTarget as HTMLButtonElement).style.borderColor = '#E5E5E0';
@@ -534,8 +534,8 @@ export default function LoginScreen() {
                   boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
                 }}
                 onMouseEnter={e => {
-                  (e.currentTarget as HTMLButtonElement).style.borderColor = '#F97316';
-                  (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 0 0 3px rgba(249,115,22,0.10)';
+                  (e.currentTarget as HTMLButtonElement).style.borderColor = '#DC2626';
+                  (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 0 0 3px rgba(220,38,38,0.10)';
                 }}
                 onMouseLeave={e => {
                   (e.currentTarget as HTMLButtonElement).style.borderColor = '#E5E5E0';

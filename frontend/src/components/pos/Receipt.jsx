@@ -3,7 +3,7 @@ import React from 'react';
 const ReceiptHeader = ({ restaurant }) => (
   <div
     style={{
-      background: 'linear-gradient(135deg, #F97316, #EA580C)',
+      background: 'linear-gradient(135deg, #DC2626, #B91C1C)',
       color: '#FFFFFF',
       padding: '24px 20px',
       borderTopLeftRadius: 16,
@@ -20,7 +20,7 @@ const ReceiptHeader = ({ restaurant }) => (
         height: 48,
         borderRadius: 24,
         background: '#FFFFFF',
-        color: '#EA580C',
+        color: '#DC2626',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -120,7 +120,7 @@ const ReceiptTotals = ({ subtotal, discount, deliveryCharge, total, orderType })
     <ReceiptDivider dashed={false} />
     <div
       style={{
-        background: '#FFF7ED',
+        background: '#FEEFD0',
         padding: '16px 20px',
         display: 'flex',
         justifyContent: 'space-between',
@@ -128,7 +128,7 @@ const ReceiptTotals = ({ subtotal, discount, deliveryCharge, total, orderType })
       }}
     >
       <span style={{ fontWeight: 800, fontSize: 15, color: '#111827' }}>TOTAL</span>
-      <span style={{ fontWeight: 800, fontSize: 20, color: '#F97316' }}>Rs.{total}</span>
+      <span style={{ fontWeight: 800, fontSize: 20, color: '#DC2626' }}>Rs.{total}</span>
     </div>
   </div>
 );
@@ -153,15 +153,58 @@ const ReceiptFooter = ({ restaurant }) => (
     {restaurant?.name && (
       <div style={{ fontSize: 12, color: '#9CA3AF' }}>{restaurant.name}</div>
     )}
-    <div style={{ color: '#F97316', fontSize: 16, marginTop: 4, letterSpacing: 4 }}>
+    <div style={{ color: '#DC2626', fontSize: 16, marginTop: 4, letterSpacing: 4 }}>
       ★ ★ ★ ★ ★
     </div>
   </div>
 );
 
-export default function Receipt({ orderInfo, items, subtotal, discount, deliveryCharge, total, restaurant }) {
+/**
+ * Which of the three printed copies this is. All three carry identical
+ * figures — only the banner differs — so the stack can be separated after
+ * printing: one to the kitchen, one to the customer, one for the till.
+ */
+export const COPY_TYPES = ['kitchen', 'customer', 'restaurant'];
+
+const COPY_LABELS = {
+  kitchen: 'KITCHEN COPY',
+  customer: 'CUSTOMER COPY',
+  restaurant: 'RESTAURANT COPY',
+};
+
+const CopyBanner = ({ copyType }) => {
+  if (!copyType || !COPY_LABELS[copyType]) return null;
   return (
     <div
+      style={{
+        background: '#111111',
+        color: '#FFFFFF',
+        textAlign: 'center',
+        padding: '6px 0',
+        fontSize: 13,
+        fontWeight: 800,
+        letterSpacing: 2,
+        fontFamily: 'Inter, sans-serif',
+      }}
+    >
+      {COPY_LABELS[copyType]}
+    </div>
+  );
+};
+
+export default function Receipt({
+  orderInfo,
+  items,
+  subtotal,
+  discount,
+  deliveryCharge,
+  total,
+  restaurant,
+  copyType,
+}) {
+  return (
+    <div
+      className="receipt-copy"
       style={{
         width: 340,
         background: '#FFFFFF',
@@ -172,8 +215,10 @@ export default function Receipt({ orderInfo, items, subtotal, discount, delivery
         flexDirection: 'column',
         fontFamily: 'Inter, sans-serif',
         margin: '0 auto',
+        overflow: 'hidden',
       }}
     >
+      <CopyBanner copyType={copyType} />
       <ReceiptHeader restaurant={restaurant} />
       <ReceiptMeta orderInfo={orderInfo} />
       <ReceiptDivider />
