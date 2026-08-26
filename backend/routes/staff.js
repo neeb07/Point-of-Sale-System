@@ -7,7 +7,10 @@ const saltRounds = 10;
 // GET all staff
 router.get('/', (req, res) => {
   try {
-    const staff = db.prepare('SELECT id, name, role, pin, color, active FROM staff ORDER BY role DESC, name ASC').all();
+    // SECURITY: `pin` used to be in this SELECT, so every caller of
+    // GET /api/staff received the bcrypt hash of every staff PIN. Nothing in
+    // the UI needs it — Settings only renders name/role/colour/active.
+    const staff = db.prepare('SELECT id, name, role, color, active FROM staff ORDER BY role DESC, name ASC').all();
     const normalized = staff.map(s => ({
       ...s,
       active: s.active === 1 || s.active === '1' || s.active === true ? 1 : 0
@@ -72,28 +75,93 @@ router.delete('/:id', (req, res) => {
   }
 });
 
+/**
+ * SECURITY: brute-force protection for PIN login.
+ *
+ * PINs are 4 digits — a 10,000-entry space — and this endpoint previously
+ * accepted unlimited attempts with no delay or lockout, so the whole space
+ * could be walked in minutes. Because a PIN is the *only* credential (there
+ * is no username), the counter is global rather than per-account.
+ *
+ * State is in-memory on purpose: this is a single-till app, the backend is
+ * restarted with the app, and a restart-to-reset still costs an attacker far
+ * more than the unthrottled endpoint did.
+ */
+const MAX_ATTEMPTS = 5;          // failures before the first lockout
+const LOCKOUT_MS = 60 * 1000;    // base lockout, doubles each further trip
+const ATTEMPT_WINDOW_MS = 15 * 60 * 1000; // failures older than this decay away
+
+const loginGuard = {
+  failures: [],      // timestamps of recent failed attempts
+  lockedUntil: 0,
+  lockoutCount: 0,   // consecutive lockouts, drives exponential backoff
+};
+
+function guardStatus(now = Date.now()) {
+  if (now < loginGuard.lockedUntil) {
+    return { locked: true, retryAfterMs: loginGuard.lockedUntil - now };
+  }
+  return { locked: false, retryAfterMs: 0 };
+}
+
+function recordFailure(now = Date.now()) {
+  loginGuard.failures = loginGuard.failures.filter(t => now - t < ATTEMPT_WINDOW_MS);
+  loginGuard.failures.push(now);
+
+  if (loginGuard.failures.length >= MAX_ATTEMPTS) {
+    loginGuard.lockoutCount += 1;
+    // 1m, 2m, 4m, 8m … capped at 15m.
+    const backoff = Math.min(LOCKOUT_MS * 2 ** (loginGuard.lockoutCount - 1), 15 * 60 * 1000);
+    loginGuard.lockedUntil = now + backoff;
+    loginGuard.failures = [];
+  }
+}
+
+function recordSuccess() {
+  loginGuard.failures = [];
+  loginGuard.lockedUntil = 0;
+  loginGuard.lockoutCount = 0;
+}
+
 // POST login via PIN
 router.post('/login', async (req, res) => {
   const { pin } = req.body;
   if (!pin) return res.status(400).json({ error: 'PIN required' });
 
+  const status = guardStatus();
+  if (status.locked) {
+    const seconds = Math.ceil(status.retryAfterMs / 1000);
+    return res.status(429).json({
+      error: `Too many incorrect PINs. Try again in ${seconds} second${seconds === 1 ? '' : 's'}.`,
+      retry_after_seconds: seconds,
+    });
+  }
+
   const staff = db.prepare('SELECT id, name, role, color, pin FROM staff WHERE active = 1').all();
-  
+
   for (const member of staff) {
-    let isValid = false;
-    
-    // Check if PIN is bcrypt hashed or plain text
-    if (member.pin.startsWith('$2b$') || member.pin.startsWith('$2a$')) {
-      isValid = await bcrypt.compare(String(pin), member.pin);
-    } else {
-      // Plain text comparison (legacy seeded PINs)
-      isValid = String(pin) === String(member.pin);
-    }
-    
-    if (isValid) {
+    // SECURITY: a plain-text comparison branch used to sit here as a fallback
+    // for "legacy seeded PINs". It meant an unhashed PIN written directly into
+    // the table would still authenticate. All PINs are hashed on insert, and
+    // db/database.js migrates any stragglers at startup, so the fallback is
+    // gone: a row whose PIN is not a bcrypt hash can no longer log in.
+    if (!/^\$2[aby]\$/.test(member.pin || '')) continue;
+
+    if (await bcrypt.compare(String(pin), member.pin)) {
+      recordSuccess();
       const { pin: _, ...staffData } = member;
       return res.json(staffData);
     }
+  }
+
+  recordFailure();
+  const after = guardStatus();
+  if (after.locked) {
+    const seconds = Math.ceil(after.retryAfterMs / 1000);
+    return res.status(429).json({
+      error: `Too many incorrect PINs. Try again in ${seconds} second${seconds === 1 ? '' : 's'}.`,
+      retry_after_seconds: seconds,
+    });
   }
 
   return res.status(401).json({ error: 'Invalid PIN or inactive account' });

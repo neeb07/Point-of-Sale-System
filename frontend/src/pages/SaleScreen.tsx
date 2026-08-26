@@ -181,7 +181,7 @@ export default function SaleScreen({ onNavigate }: SaleScreenProps = {}) {
       setReceiptData({
         orderInfo: {
           date: moment().format('DD/MM/YYYY'),
-          time: moment().format('HH:mm A'),
+          time: moment().format('hh:mm A'),
           orderNumber: order.id ? `#${order.id}` : `#${Math.floor(1000 + Math.random() * 9000)}`,
           table: tableNumber || '—',
           paymentMethod,

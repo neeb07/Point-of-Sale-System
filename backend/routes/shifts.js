@@ -88,9 +88,10 @@ router.post('/open', (req, res) => {
       return res.status(409).json({ error: 'A shift is already open. Close it first.' });
     }
 
+    // Local wall-clock, not CURRENT_TIMESTAMP's UTC — see db/database.js.
     const result = db.prepare(`
-      INSERT INTO shifts (staff_id, staff_name, opening_cash, status)
-      VALUES (?, ?, ?, 'open')
+      INSERT INTO shifts (staff_id, staff_name, opening_cash, status, opened_at)
+      VALUES (?, ?, ?, 'open', datetime('now', 'localtime'))
     `).run(staff_id || null, staff_name || 'Unknown', Number(opening_cash) || 0);
 
     const shift = db.prepare('SELECT * FROM shifts WHERE id = ?').get(result.lastInsertRowid);
@@ -118,7 +119,7 @@ router.post('/close', (req, res) => {
     db.prepare(`
       UPDATE shifts
       SET closing_cash = ?, expected_cash = ?, variance = ?,
-          closed_at = CURRENT_TIMESTAMP, status = 'closed'
+          closed_at = datetime('now', 'localtime'), status = 'closed'
       WHERE id = ?
     `).run(actual, expected, actual - expected, shift.id);
 

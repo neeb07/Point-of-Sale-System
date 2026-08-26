@@ -218,7 +218,7 @@ export default function Orders() {
     return {
       orderInfo: {
         date: moment(order.created_at).format('DD/MM/YYYY'),
-        time: moment(order.created_at).format('HH:mm A'),
+        time: moment(order.created_at).format('hh:mm A'),
         orderNumber: `#${order.id}`,
         // FIX (Bug 6): reprints now show the table the order was placed on.
         table: order.table_number || '—',

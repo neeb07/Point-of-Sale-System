@@ -89,20 +89,28 @@ export default function LoginScreen() {
   const verifyPin = async (enteredPin: string) => {
   setLoggingIn(true);
   try {
-    console.log('Attempting login with PIN:', enteredPin);
+    // SECURITY: the entered PIN and the full staff record used to be written
+    // to the console here, and the packaged build opens devtools, so every
+    // login printed a working credential to a visible window.
     const result = await staffAPI.login(String(enteredPin));
-    console.log('Login result:', result);
     login(result);
   } catch (err) {
-    console.error('Login error:', err);
     setShaking(true);
     setPinError(true);
-    setErrorMessage('Incorrect PIN. Try again.');
+
+    // The backend now locks out after repeated failures and returns the
+    // remaining wait in its message. Showing our own hardcoded string instead
+    // would leave a locked-out cashier retyping a correct PIN with no idea
+    // why it keeps failing, so prefer the server's wording when it differs.
+    const message = err instanceof Error && err.message ? err.message : '';
+    const isLockout = /try again in/i.test(message);
+    setErrorMessage(isLockout ? message : 'Incorrect PIN. Try again.');
     setPin('');
     setTimeout(() => {
       setShaking(false);
       setPinError(false);
-      setErrorMessage('');
+      // A lockout notice stays put — it is still true after the shake ends.
+      if (!isLockout) setErrorMessage('');
     }, 800);
   } finally {
     setLoggingIn(false);

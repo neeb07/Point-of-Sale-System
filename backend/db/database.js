@@ -55,7 +55,9 @@ db.exec(`
     payment_method TEXT DEFAULT 'Cash',
     status TEXT DEFAULT 'completed',
     cashier_name TEXT DEFAULT 'Admin',
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    -- Local wall-clock, not CURRENT_TIMESTAMP's UTC. Routes also pass this
+    -- explicitly; the default only matters for a freshly created database.
+    created_at DATETIME DEFAULT (datetime('now', 'localtime'))
   );
 
   CREATE TABLE IF NOT EXISTS order_items (
@@ -138,7 +140,7 @@ db.exec(`
     closing_cash REAL DEFAULT NULL,
     expected_cash REAL DEFAULT NULL,
     variance REAL DEFAULT NULL,
-    opened_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    opened_at DATETIME DEFAULT (datetime('now', 'localtime')),
     closed_at DATETIME DEFAULT NULL,
     status TEXT DEFAULT 'open'
   );
@@ -196,6 +198,34 @@ try { db.exec("ALTER TABLE orders ADD COLUMN table_number TEXT DEFAULT NULL;"); 
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at);"); } catch(e) {}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_orders_shift ON orders(shift_id);"); } catch(e) {}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_order_items_order ON order_items(order_id);"); } catch(e) {}
+
+// ─── Timezone correction ────────────────────────────────────────────────────
+// SQLite's CURRENT_TIMESTAMP is UTC, but this till serves one shop in one
+// timezone and every consumer of these timestamps treats them as local:
+//   * reports/shifts filter with DATE(created_at) BETWEEN <local from> AND <to>,
+//     where from/to are computed from the browser's local clock;
+//   * the UI renders them with moment(created_at), which parses as local.
+// At UTC+5 that booked every sale between midnight and 5am to the *previous*
+// trading day and displayed every time five hours early.
+//
+// The fix is to store local time. This one-off migration converts rows written
+// under the old UTC behaviour; all inserts now pass an explicit local
+// timestamp. Guarded by a settings flag so it can never double-shift.
+try {
+  const done = db.prepare("SELECT value FROM settings WHERE key = 'migration_timestamps_localtime'").get();
+  if (!done) {
+    db.transaction(() => {
+      // datetime(x, 'localtime') reads x as UTC and returns local wall-clock.
+      db.exec("UPDATE orders SET created_at = datetime(created_at, 'localtime') WHERE created_at IS NOT NULL;");
+      db.exec("UPDATE shifts SET opened_at = datetime(opened_at, 'localtime') WHERE opened_at IS NOT NULL;");
+      db.exec("UPDATE shifts SET closed_at = datetime(closed_at, 'localtime') WHERE closed_at IS NOT NULL;");
+      db.prepare("INSERT INTO settings (key, value) VALUES ('migration_timestamps_localtime', '1') ON CONFLICT(key) DO UPDATE SET value = '1'").run();
+    })();
+    console.log('Timestamps converted from UTC to local time.');
+  }
+} catch (e) {
+  console.error('Timestamp localtime migration failed:', e.message);
+}
 
 // Rebrand: move an existing install off the old default restaurant name.
 // Runs once; never overwrites a name the owner has customised themselves.
@@ -285,6 +315,26 @@ if (count.count === 0) {
       if (hasV) m.v.forEach(([label, price], i) => insertVariant.run(id, label, price, i));
     });
   })();
+}
+
+// SECURITY: hash any PIN still stored as plain text.
+//
+// routes/staff.js used to fall back to a plain-text comparison when a PIN did
+// not look like a bcrypt hash. That fallback has been removed, so any legacy
+// row must be migrated here or its owner would be locked out. Runs on every
+// boot and is a no-op once every PIN is hashed.
+try {
+  const legacy = db.prepare('SELECT id, pin FROM staff').all()
+    .filter(s => !/^\$2[aby]\$/.test(s.pin || ''));
+  if (legacy.length > 0) {
+    const updatePin = db.prepare('UPDATE staff SET pin = ? WHERE id = ?');
+    db.transaction(() => {
+      legacy.forEach(s => updatePin.run(bcrypt.hashSync(String(s.pin), 10), s.id));
+    })();
+    console.log(`Hashed ${legacy.length} plain-text staff PIN(s).`);
+  }
+} catch (e) {
+  console.error('PIN hashing migration failed:', e.message);
 }
 
 // Seed admin — always with bcrypt hashed PIN

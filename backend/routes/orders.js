@@ -43,10 +43,14 @@ router.post('/', (req, res) => {
     ).get();
 
     const orderResult = db.prepare(
+      // created_at is set explicitly to local wall-clock time. The column
+      // default is CURRENT_TIMESTAMP, which SQLite evaluates in UTC — at
+      // UTC+5 that filed every sale rung up between midnight and 5am under
+      // the previous trading day in reports, shift totals and receipts.
       `INSERT INTO orders
          (total, discount, payment_method, status, cashier_id, cashier_name,
-          order_type, delivery_charge, table_number, shift_id)
-       VALUES (?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?)`
+          order_type, delivery_charge, table_number, shift_id, created_at)
+       VALUES (?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))`
     ).run(
       computedTotal,
       cappedDiscount,
