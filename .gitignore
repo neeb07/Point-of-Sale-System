@@ -81,3 +81,5 @@ coverage/
 
 # Optional eslint cache
 .eslintcache
+
+frontend/release/

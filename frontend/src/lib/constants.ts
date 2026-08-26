@@ -8,13 +8,10 @@
 
 /** Deal sub-groups. Must match `deals.deal_group` values in the database. */
 export const DEAL_GROUPS = [
-  '1 Person Deals',
-  '2 Person Deals',
-  'Student Deal',
-  'Special Pizza Deal',
-  'Family Deal',
-  'Lunch & Midnight Deal',
-  'Broast Deal',
+  'Pizza Deals',
+  'Zinger Deals',
+  'Platter Deals',
+  'Birthday Deal',
 ] as const;
 
 /** Deal group list including the "show everything" pseudo-tab. */
@@ -26,15 +23,23 @@ export const DEAL_GROUP_TABS = ['All Deals', ...DEAL_GROUPS] as const;
  * so adding a new one from the UI never orphans an item.
  */
 export const MENU_CATEGORIES = [
-  'Burger',
-  'Chicken Rolls',
-  'Sides',
-  'Pizza',
+  'Blaze Special',
+  'Stuff Crust',
+  'Regular Pizza',
+  'Burgers',
+  'Wraps',
+  'Chinese',
+  'Pasta',
+  'Fries',
+  'Appetizers',
+  'Sandwich',
+  'Soup',
   'Drinks',
-  'Ice Cream',
+  'Tea',
+  'Extras',
 ] as const;
 
-export const DEFAULT_CATEGORY = 'Burger';
+export const DEFAULT_CATEGORY = 'Burgers';
 
 /** Payment methods offered at checkout. */
 export const PAYMENT_METHODS = ['Cash', 'Card', 'Online'] as const;

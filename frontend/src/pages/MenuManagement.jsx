@@ -17,23 +17,37 @@ import { MENU_CATEGORIES, DEFAULT_CATEGORY } from '@/lib/constants';
 export const categoriesList = MENU_CATEGORIES;
 
 const categoryIcon = {
-  'Burger': Sandwich,
-  'Chicken Rolls': Sandwich,
-  'Sides': Drumstick,
-  'Pizza': Pizza,
+  'Blaze Special': Flame,
+  'Stuff Crust': Pizza,
+  'Regular Pizza': Pizza,
+  'Burgers': Sandwich,
+  'Wraps': Sandwich,
+  'Chinese': Utensils,
+  'Pasta': Utensils,
+  'Fries': Drumstick,
+  'Appetizers': Drumstick,
+  'Sandwich': Sandwich,
+  'Soup': Soup,
   'Drinks': Coffee,
-  'Ice Cream': Droplet,
+  'Tea': Coffee,
+  'Extras': Package,
 };
 
-// Black/red/cream brand washes.
 const categoryGradient = {
-  'Burger':        'linear-gradient(135deg, rgba(220,38,38,0.28), rgba(17,17,17,0.18))',
-  'Chicken Rolls': 'linear-gradient(135deg, rgba(185,28,28,0.28), rgba(17,17,17,0.18))',
-  'Sides':         'linear-gradient(135deg, rgba(232,163,61,0.30), rgba(220,38,38,0.16))',
-  'Pizza':         'linear-gradient(135deg, rgba(220,38,38,0.32), rgba(127,29,29,0.20))',
+  'Blaze Special': 'linear-gradient(135deg, rgba(220,38,38,0.32), rgba(127,29,29,0.20))',
+  'Stuff Crust':   'linear-gradient(135deg, rgba(185,28,28,0.28), rgba(17,17,17,0.18))',
+  'Regular Pizza': 'linear-gradient(135deg, rgba(220,38,38,0.28), rgba(17,17,17,0.14))',
+  'Burgers':       'linear-gradient(135deg, rgba(232,163,61,0.30), rgba(220,38,38,0.16))',
+  'Wraps':         'linear-gradient(135deg, rgba(17,17,17,0.22), rgba(220,38,38,0.14))',
+  'Chinese':       'linear-gradient(135deg, rgba(220,38,38,0.20), rgba(232,163,61,0.18))',
+  'Pasta':         'linear-gradient(135deg, rgba(254,239,208,0.80), rgba(220,38,38,0.14))',
+  'Fries':         'linear-gradient(135deg, rgba(232,163,61,0.30), rgba(17,17,17,0.14))',
+  'Appetizers':    'linear-gradient(135deg, rgba(185,28,28,0.24), rgba(232,163,61,0.18))',
+  'Sandwich':      'linear-gradient(135deg, rgba(17,17,17,0.20), rgba(220,38,38,0.14))',
+  'Soup':          'linear-gradient(135deg, rgba(254,239,208,0.80), rgba(17,17,17,0.12))',
   'Drinks':        'linear-gradient(135deg, rgba(17,17,17,0.26), rgba(75,85,99,0.18))',
-  'Ice Cream':     'linear-gradient(135deg, rgba(254,239,208,0.90), rgba(220,38,38,0.14))',
-  'Extras':        'linear-gradient(135deg, rgba(17,17,17,0.20), rgba(220,38,38,0.14))',
+  'Tea':           'linear-gradient(135deg, rgba(254,239,208,0.80), rgba(185,28,28,0.14))',
+  'Extras':        'linear-gradient(135deg, rgba(17,17,17,0.20), rgba(220,38,38,0.10))',
 };
 
 export default function MenuManagement() {
