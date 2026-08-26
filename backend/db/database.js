@@ -194,6 +194,24 @@ try { db.exec("ALTER TABLE orders ADD COLUMN shift_id INTEGER DEFAULT NULL;"); }
 // FIX (Bug 6): the Sale screen collected no table/token number even though
 // receipts displayed a placeholder for it.
 try { db.exec("ALTER TABLE orders ADD COLUMN table_number TEXT DEFAULT NULL;"); } catch(e) {}
+// Voiding an order now preserves its amounts and records when it happened,
+// instead of zeroing total/discount and destroying the audit trail.
+try { db.exec("ALTER TABLE orders ADD COLUMN voided_at DATETIME DEFAULT NULL;"); } catch(e) {}
+
+// FIX: a deal was written into order_items.menu_item_id using the *deal's* id,
+// which collides with menu_items ids. Sales-by-category then joined that id to
+// whatever unrelated menu item happened to share it, so deal revenue was
+// reported against the wrong category. This flag lets reports tell the two
+// apart. Historical rows cannot be recovered — nothing recorded which they
+// were — so they stay as they are and only new orders are attributed correctly.
+try { db.exec("ALTER TABLE order_items ADD COLUMN is_deal INTEGER DEFAULT 0;"); } catch(e) {}
+
+// The sale deducts stock using the *variant's* recipe (a 12-piece wings order
+// consumes twice a 6-piece one), but the variant was never recorded on the
+// line, so a void had no way to restore the right quantity. Recording it makes
+// the void exactly mirror the sale.
+try { db.exec("ALTER TABLE order_items ADD COLUMN variant_id INTEGER DEFAULT NULL;"); } catch(e) {}
+
 // Helpful indexes for the reporting queries.
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at);"); } catch(e) {}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_orders_shift ON orders(shift_id);"); } catch(e) {}

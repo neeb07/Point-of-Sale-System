@@ -1,11 +1,12 @@
 // @ts-nocheck
 import React, { useState, useEffect, useMemo } from 'react';
 import { DollarSign, ShoppingBag, TrendingUp, Tag, Printer, Download } from 'lucide-react';
-import { reportsAPI } from '@/api/index';
+import { reportsAPI, settingsAPI } from '@/api/index';
+import { buildCsv, money } from '@/lib/csv';
 import moment from 'moment';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer,
-  BarChart, Bar, PieChart, Pie, Cell, LabelList, Legend
+  BarChart, Bar, PieChart, Pie, Cell, LabelList
 } from 'recharts';
 
 const FILTER_CHIPS = [
@@ -30,8 +31,10 @@ export default function Reports() {
   const [heatmapData, setHeatmapData] = useState([]);
   const [cashierPerformance, setCashierPerformance] = useState([]);
   const [detailedReport, setDetailedReport] = useState([]);
-  
+  const [lineItems, setLineItems] = useState([]);
+
   const [reportFormat, setReportFormat] = useState('summary');
+  const [restaurantName, setRestaurantName] = useState('Blaze');
   
   // Calculate dates based on filter
   const { from, to } = useMemo(() => {
@@ -43,8 +46,11 @@ export default function Reports() {
         const y = moment().subtract(1, 'days').format('YYYY-MM-DD');
         return { from: y, to: y };
       }
-      case 'last7': return { from: moment().subtract(7, 'days').format('YYYY-MM-DD'), to: today };
-      case 'last30': return { from: moment().subtract(30, 'days').format('YYYY-MM-DD'), to: today };
+      // The range is inclusive of both ends, so "last 7 days" is today plus the
+      // six before it. Subtracting 7 spanned 8 days and disagreed with the same
+      // filter on the Orders screen, which uses 6.
+      case 'last7': return { from: moment().subtract(6, 'days').format('YYYY-MM-DD'), to: today };
+      case 'last30': return { from: moment().subtract(29, 'days').format('YYYY-MM-DD'), to: today };
       case 'thisMonth': return { from: moment().startOf('month').format('YYYY-MM-DD'), to: today };
       case 'thisYear': return { from: moment().startOf('year').format('YYYY-MM-DD'), to: today };
       default: return { from: null, to: null };
@@ -54,14 +60,15 @@ export default function Reports() {
   const loadData = async () => {
     try {
       const params = { from, to };
-      const [kData, rData, tData, cData, hData, cpData, dData] = await Promise.all([
+      const [kData, rData, tData, cData, hData, cpData, dData, liData] = await Promise.all([
         reportsAPI.kpi(params),
         reportsAPI.revenueOverTime({ ...params, groupBy: activeFilter === 'today' ? 'hour' : 'day' }),
         reportsAPI.topItems(params),
         reportsAPI.byCategory(params),
         reportsAPI.hourlyHeatmap(params),
         reportsAPI.cashierPerformance(params),
-        reportsAPI.detailed(params)
+        reportsAPI.detailed(params),
+        reportsAPI.lineItems(params)
       ]);
       
       // Transform backend data to match frontend expectations
@@ -87,11 +94,13 @@ export default function Reports() {
         avg_order_value: d.avg_order_value || 0,
       })));
       
-      setDetailedReport(dData.map(d => ({ 
-        ...d, 
-        items: d.items_summary,
-        subtotal: d.total || 0, // Use total as subtotal since backend doesn't separate them
-      })));
+      // The backend now returns a real `subtotal` (summed from the order's own
+      // line items) and a real `items` string. `subtotal` used to be aliased to
+      // `total` here, which made the Subtotal column report the post-discount
+      // figure and left Summary showing identical Revenue and Net Revenue
+      // columns either side of a Discounts column that reconciled with neither.
+      setDetailedReport(dData);
+      setLineItems(liData);
     } catch (err) {
       console.error('Failed to load reports:', err);
     }
@@ -103,46 +112,170 @@ export default function Reports() {
     }
   }, [from, to]);
 
+  // Used to name the exported file after the shop rather than a hardcoded string.
+  useEffect(() => {
+    settingsAPI.getAll()
+      .then(s => { if (s.restaurant_name) setRestaurantName(s.restaurant_name); })
+      .catch(() => {});
+  }, []);
+
   const PIE_COLORS = ['#DC2626', '#3B82F6', '#10B981', '#8B5CF6', '#F43F5E', '#06B6D4'];
 
   const printReport = () => {
     window.print();
   };
 
-  const exportCSV = () => {
-    const headers = reportFormat === 'summary' 
-      ? ['Date', 'Total Orders', 'Revenue', 'Discounts', 'Net Revenue']
-      : ['Order #', 'Time', 'Items', 'Payment Method', 'Subtotal', 'Discount', 'Total'];
-    
-    let csv = headers.join(',') + '\n';
-    
-    if (reportFormat === 'summary') {
-      const summaryByDate = {};
-      detailedReport.forEach(row => {
-        const date = moment(row.created_at).format('YYYY-MM-DD');
-        if (!summaryByDate[date]) summaryByDate[date] = { orders: 0, revenue: 0, discounts: 0, net: 0 };
-        summaryByDate[date].orders += 1;
-        summaryByDate[date].revenue += row.subtotal;
-        summaryByDate[date].discounts += row.discount;
-        summaryByDate[date].net += row.total;
-      });
-      Object.keys(summaryByDate).sort().forEach(date => {
-        const d = summaryByDate[date];
-        csv += `${date},${d.orders},${d.revenue},${d.discounts},${d.net}\n`;
-      });
-    } else {
-      detailedReport.forEach(row => {
-        const itemsClean = row.items.replace(/,/g, ';');
-        csv += `${row.id},${moment(row.created_at).format('YYYY-MM-DD HH:mm')},"${itemsClean}",${row.payment_method},${row.subtotal},${row.discount},${row.total}\n`;
-      });
-    }
-
-    const blob = new Blob([csv], { type: 'text/csv' });
+  /**
+   * ── CSV export ────────────────────────────────────────────────────────────
+   *
+   * Rebuilt so the numbers reconcile and the file survives Excel.
+   *
+   * `escapeCell` implements RFC 4180 quoting. The previous version stripped
+   * commas out of the item list (`replace(/,/g, ';')`), silently corrupting
+   * the data to avoid breaking the row, and did nothing at all about a double
+   * quote in an item name — one such name shifted every later column.
+   *
+   * The leading-apostrophe guard defuses CSV injection: a cell beginning with
+   * =, +, - or @ is executed as a formula when the file is opened, and item
+   * names are operator-editable free text.
+   */
+  const downloadCsv = (rows, filenameSuffix) => {
+    const blob = new Blob([buildCsv(rows)], { type: 'text/csv;charset=utf-8;' });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `Sales_Report_${moment().format('YYYYMMDD')}.csv`;
+    const safeName = String(restaurantName || 'Blaze').replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, '');
+    a.download = `${safeName}_${filenameSuffix}_${from}_to_${to}.csv`;
+    document.body.appendChild(a);
     a.click();
+    document.body.removeChild(a);
+    // The previous version never revoked the object URL, leaking the blob for
+    // the lifetime of the window.
+    window.URL.revokeObjectURL(url);
+  };
+
+  const exportCSV = () => {
+    if (reportFormat === 'summary') {
+      const byDate = {};
+      detailedReport.forEach(row => {
+        const date = moment(row.created_at).format('YYYY-MM-DD');
+        if (!byDate[date]) {
+          byDate[date] = {
+            orders: 0, qty: 0, gross: 0, discounts: 0,
+            delivery: 0, net: 0, cash: 0, card: 0, online: 0,
+          };
+        }
+        const d = byDate[date];
+        d.orders += 1;
+        d.qty += Number(row.total_qty) || 0;
+        d.gross += Number(row.subtotal) || 0;
+        d.discounts += Number(row.discount) || 0;
+        d.delivery += Number(row.delivery_charge) || 0;
+        d.net += Number(row.total) || 0;
+        const method = String(row.payment_method || '').toLowerCase();
+        if (method === 'cash') d.cash += Number(row.total) || 0;
+        else if (method === 'card') d.card += Number(row.total) || 0;
+        else d.online += Number(row.total) || 0;
+      });
+
+      const rows = [[
+        'Date', 'Orders', 'Items Sold', 'Gross Sales', 'Discounts',
+        'Delivery Charges', 'Net Sales', 'Cash', 'Card', 'Online',
+      ]];
+      const totals = { orders: 0, qty: 0, gross: 0, discounts: 0, delivery: 0, net: 0, cash: 0, card: 0, online: 0 };
+
+      Object.keys(byDate).sort().forEach(date => {
+        const d = byDate[date];
+        Object.keys(totals).forEach(k => { totals[k] += d[k]; });
+        rows.push([
+          date, d.orders, d.qty, money(d.gross), money(d.discounts),
+          money(d.delivery), money(d.net), money(d.cash), money(d.card), money(d.online),
+        ]);
+      });
+
+      rows.push([
+        'TOTAL', totals.orders, totals.qty, money(totals.gross), money(totals.discounts),
+        money(totals.delivery), money(totals.net), money(totals.cash), money(totals.card), money(totals.online),
+      ]);
+
+      downloadCsv(rows, 'Sales_Summary');
+      return;
+    }
+
+    if (reportFormat === 'items') {
+      const rows = [[
+        'Order #', 'Date', 'Time', 'Cashier', 'Order Type', 'Table/Token',
+        'Payment Method', 'Item', 'Category', 'Qty', 'Unit Price', 'Line Total',
+      ]];
+      let totalQty = 0;
+      let totalValue = 0;
+
+      lineItems.forEach(r => {
+        totalQty += Number(r.quantity) || 0;
+        totalValue += Number(r.line_total) || 0;
+        rows.push([
+          r.order_id,
+          moment(r.created_at).format('YYYY-MM-DD'),
+          moment(r.created_at).format('hh:mm A'),
+          r.cashier_name || 'Unknown',
+          r.order_type || 'Dine-in',
+          r.table_number || '',
+          r.payment_method || '',
+          r.item_name || '',
+          r.category || '',
+          Number(r.quantity) || 0,
+          money(r.unit_price),
+          money(r.line_total),
+        ]);
+      });
+
+      rows.push(['TOTAL', '', '', '', '', '', '', '', '', totalQty, '', money(totalValue)]);
+      downloadCsv(rows, 'Item_Sales');
+      return;
+    }
+
+    // Detailed — one row per order.
+    const rows = [[
+      'Order #', 'Date', 'Time', 'Cashier', 'Order Type', 'Table/Token',
+      'Payment Method', 'Status', 'Items', 'Distinct Items', 'Total Qty',
+      'Subtotal', 'Discount', 'Delivery Charge', 'Total',
+    ]];
+    const totals = { orders: 0, lines: 0, qty: 0, subtotal: 0, discount: 0, delivery: 0, total: 0 };
+
+    detailedReport.forEach(row => {
+      totals.orders += 1;
+      totals.lines += Number(row.line_count) || 0;
+      totals.qty += Number(row.total_qty) || 0;
+      totals.subtotal += Number(row.subtotal) || 0;
+      totals.discount += Number(row.discount) || 0;
+      totals.delivery += Number(row.delivery_charge) || 0;
+      totals.total += Number(row.total) || 0;
+
+      rows.push([
+        row.id,
+        moment(row.created_at).format('YYYY-MM-DD'),
+        moment(row.created_at).format('hh:mm A'),
+        row.cashier_name || 'Unknown',
+        row.order_type || 'Dine-in',
+        row.table_number || '',
+        row.payment_method || '',
+        row.status || '',
+        row.items || '',
+        Number(row.line_count) || 0,
+        Number(row.total_qty) || 0,
+        money(row.subtotal),
+        money(row.discount),
+        money(row.delivery_charge),
+        money(row.total),
+      ]);
+    });
+
+    rows.push([
+      'TOTAL', '', '', '', '', '', '', '', '', totals.lines, totals.qty,
+      money(totals.subtotal), money(totals.discount), money(totals.delivery), money(totals.total),
+    ]);
+
+    downloadCsv(rows, 'Order_Details');
   };
 
   // Process Heatmap Data
@@ -384,11 +517,17 @@ export default function Reports() {
                 >
                   Summary
                 </button>
-                <button 
-                  onClick={() => setReportFormat('detailed')} 
+                <button
+                  onClick={() => setReportFormat('detailed')}
                   className={`px-4 py-1.5 text-xs font-semibold rounded-md ${reportFormat === 'detailed' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500'}`}
                 >
                   Detailed
+                </button>
+                <button
+                  onClick={() => setReportFormat('items')}
+                  className={`px-4 py-1.5 text-xs font-semibold rounded-md ${reportFormat === 'items' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500'}`}
+                >
+                  Item Sales
                 </button>
               </div>
             </div>
@@ -407,9 +546,19 @@ export default function Reports() {
                     <>
                       <th className="py-3 px-4">Date</th>
                       <th className="py-3 px-4 text-center">Total Orders</th>
-                      <th className="py-3 px-4 text-right">Revenue</th>
+                      <th className="py-3 px-4 text-right">Gross Sales</th>
                       <th className="py-3 px-4 text-right">Discounts</th>
                       <th className="py-3 px-4 text-right text-orange-600">Net Revenue</th>
+                    </>
+                  ) : reportFormat === 'items' ? (
+                    <>
+                      <th className="py-3 px-4">Order #</th>
+                      <th className="py-3 px-4">Time</th>
+                      <th className="py-3 px-4">Item</th>
+                      <th className="py-3 px-4">Category</th>
+                      <th className="py-3 px-4 text-center">Qty</th>
+                      <th className="py-3 px-4 text-right">Unit Price</th>
+                      <th className="py-3 px-4 text-right text-orange-600">Line Total</th>
                     </>
                   ) : (
                     <>
@@ -432,9 +581,13 @@ export default function Reports() {
                       const date = moment(row.created_at).format('YYYY-MM-DD');
                       if (!acc[date]) acc[date] = { date, orders: 0, revenue: 0, discounts: 0, net: 0 };
                       acc[date].orders += 1;
-                      acc[date].revenue += row.subtotal;
-                      acc[date].discounts += row.discount;
-                      acc[date].net += row.total;
+                      // Gross (pre-discount) vs net (what was actually taken).
+                      // These were both summing `total`, so the two money
+                      // columns always matched and the discount column between
+                      // them reconciled with neither.
+                      acc[date].revenue += Number(row.subtotal) || 0;
+                      acc[date].discounts += Number(row.discount) || 0;
+                      acc[date].net += Number(row.total) || 0;
                       return acc;
                     }, {})
                   ).sort((a,b) => a[0].localeCompare(b[0])).map(([date, d], i) => (
@@ -446,25 +599,38 @@ export default function Reports() {
                       <td className="py-3 px-4 text-right font-bold text-gray-900">Rs. {d.net.toLocaleString()}</td>
                     </tr>
                   ))
+                ) : reportFormat === 'items' ? (
+                  // Item Sales view — one row per item sold.
+                  lineItems.map((row, i) => (
+                    <tr key={`${row.order_id}-${i}`} className={`border-b border-gray-100 ${i % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}>
+                      <td className="py-3 px-4 font-medium text-gray-900">#{row.order_id}</td>
+                      <td className="py-3 px-4 text-gray-500 text-xs">{moment(row.created_at).format('MMM D, hh:mm A')}</td>
+                      <td className="py-3 px-4 text-gray-700 text-xs">{row.item_name}</td>
+                      <td className="py-3 px-4 text-gray-500 text-xs">{row.category}</td>
+                      <td className="py-3 px-4 text-center text-gray-600">{row.quantity}</td>
+                      <td className="py-3 px-4 text-right text-gray-600">Rs. {Number(row.unit_price).toLocaleString()}</td>
+                      <td className="py-3 px-4 text-right font-bold text-gray-900">Rs. {Number(row.line_total).toLocaleString()}</td>
+                    </tr>
+                  ))
                 ) : (
                   // Detailed view
                   detailedReport.map((row, i) => (
                     <tr key={row.id} className={`border-b border-gray-100 ${i % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}>
                       <td className="py-3 px-4 font-medium text-gray-900">#{row.id}</td>
-                      <td className="py-3 px-4 text-gray-500 text-xs">{moment(row.created_at).format('MMM D, HH:mm')}</td>
+                      <td className="py-3 px-4 text-gray-500 text-xs">{moment(row.created_at).format('MMM D, hh:mm A')}</td>
                       <td className="py-3 px-4 text-gray-600 text-xs truncate max-w-[200px]" title={row.items}>{row.items}</td>
                       <td className="py-3 px-4 text-center">
                         <span className={`px-2 py-1 rounded text-[10px] font-bold ${row.payment_method === 'Cash' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
                           {row.payment_method}
                         </span>
                       </td>
-                      <td className="py-3 px-4 text-right text-gray-600">Rs. {row.subtotal.toLocaleString()}</td>
+                      <td className="py-3 px-4 text-right text-gray-600">Rs. {Number(row.subtotal || 0).toLocaleString()}</td>
                       <td className="py-3 px-4 text-right text-red-500">{row.discount > 0 ? `-Rs. ${row.discount}` : '—'}</td>
-                      <td className="py-3 px-4 text-right font-bold text-gray-900">Rs. {row.total.toLocaleString()}</td>
+                      <td className="py-3 px-4 text-right font-bold text-gray-900">Rs. {Number(row.total || 0).toLocaleString()}</td>
                     </tr>
                   ))
                 )}
-                {detailedReport.length === 0 && (
+                {(reportFormat === 'items' ? lineItems.length : detailedReport.length) === 0 && (
                   <tr>
                     <td colSpan={reportFormat === 'summary' ? 5 : 7} className="py-8 text-center text-gray-400">
                       No orders found for this date range.

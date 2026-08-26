@@ -131,17 +131,26 @@ router.get('/top-items', (req, res) => {
 router.get('/by-category', (req, res) => {
   const { from, to } = getDateRange(req);
   try {
+    // A deal records the *deal's* id in order_items.menu_item_id, which shares
+    // an id space with menu_items. A plain JOIN therefore matched a deal to an
+    // unrelated menu item and filed its revenue under that item's category.
+    // Deals are now grouped under their own bucket, and the join is a LEFT
+    // JOIN so an item deleted from the menu after the sale still appears
+    // rather than dropping out of the report entirely.
     const data = db.prepare(`
       SELECT
-        m.category,
+        CASE
+          WHEN oi.is_deal = 1 THEN 'Deals'
+          ELSE COALESCE(m.category, 'Uncategorized')
+        END AS category,
         SUM(oi.quantity) as total_qty,
         SUM(oi.price * oi.quantity) as total_revenue
       FROM order_items oi
       JOIN orders o ON oi.order_id = o.id
-      JOIN menu_items m ON oi.menu_item_id = m.id
+      LEFT JOIN menu_items m ON oi.menu_item_id = m.id AND oi.is_deal = 0
       WHERE DATE(o.created_at) BETWEEN DATE(?) AND DATE(?)
       AND o.status != 'voided'
-      GROUP BY m.category
+      GROUP BY category
       ORDER BY total_revenue DESC
     `).all(from, to);
 
@@ -211,19 +220,100 @@ router.get('/cashier-performance', (req, res) => {
   }
 });
 
-// Detailed report for report generator
+/**
+ * Detailed report — one row per order. Backs the Reports table and the
+ * "Detailed" CSV export.
+ *
+ * Previously this returned `o.*` plus `items_summary`, but both the table and
+ * the exporter read `row.subtotal` and `row.items`. Neither existed:
+ * `subtotal` is not a column on `orders` (only total/discount/delivery_charge
+ * are), and the concatenated item list was named `items_summary`. The result
+ * was `undefined.toLocaleString()` — a hard render crash on the Detailed tab —
+ * and `undefined.replace()` in the exporter, so the CSV never downloaded.
+ *
+ * `subtotal` is now derived from the order's own line items, which is the
+ * authoritative figure: total = subtotal - discount + delivery_charge.
+ *
+ * Voided orders are excluded by default so these rows reconcile with the KPI
+ * cards and every other report; pass include_voided=1 to audit them.
+ */
 router.get('/detailed', (req, res) => {
   const { from, to } = getDateRange(req);
+  const includeVoided = req.query.include_voided === '1' || req.query.include_voided === 'true';
+
   try {
     const orders = db.prepare(`
-      SELECT o.*, GROUP_CONCAT(oi.name || ' x' || oi.quantity, ', ') as items_summary
+      SELECT
+        o.id,
+        o.created_at,
+        o.cashier_id,
+        o.cashier_name,
+        o.order_type,
+        o.table_number,
+        o.payment_method,
+        o.status,
+        o.discount,
+        o.delivery_charge,
+        o.total,
+        COALESCE(SUM(oi.price * oi.quantity), 0) AS subtotal,
+        COALESCE(SUM(oi.quantity), 0)            AS total_qty,
+        COUNT(oi.id)                             AS line_count,
+        GROUP_CONCAT(oi.name || ' x' || oi.quantity, ', ') AS items
       FROM orders o
       LEFT JOIN order_items oi ON oi.order_id = o.id
       WHERE DATE(o.created_at) BETWEEN DATE(?) AND DATE(?)
+        ${includeVoided ? '' : "AND o.status != 'voided'"}
       GROUP BY o.id
-      ORDER BY o.created_at DESC
+      ORDER BY o.created_at ASC
     `).all(from, to);
-    res.json(orders);
+
+    // GROUP_CONCAT returns NULL for an order with no line items.
+    res.json(orders.map(o => ({ ...o, items: o.items || '' })));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * Line-item report — one row per item sold, rather than per order.
+ *
+ * This is what makes an item-level CSV possible: which dish sold, when, at
+ * what unit price, on whose till. Category is resolved through menu_items and
+ * falls back to 'Deal / Removed Item' when the id does not resolve, which is
+ * the case for deals (they record the deal's id, not a menu item's) and for
+ * items deleted from the menu after the sale.
+ */
+router.get('/line-items', (req, res) => {
+  const { from, to } = getDateRange(req);
+  const includeVoided = req.query.include_voided === '1' || req.query.include_voided === 'true';
+
+  try {
+    const rows = db.prepare(`
+      SELECT
+        o.id            AS order_id,
+        o.created_at,
+        o.cashier_name,
+        o.order_type,
+        o.table_number,
+        o.payment_method,
+        o.status,
+        oi.name         AS item_name,
+        CASE
+          WHEN oi.is_deal = 1 THEN 'Deals'
+          ELSE COALESCE(m.category, 'Removed Item')
+        END AS category,
+        oi.quantity,
+        oi.price        AS unit_price,
+        (oi.price * oi.quantity) AS line_total
+      FROM order_items oi
+      JOIN orders o ON oi.order_id = o.id
+      LEFT JOIN menu_items m ON oi.menu_item_id = m.id AND oi.is_deal = 0
+      WHERE DATE(o.created_at) BETWEEN DATE(?) AND DATE(?)
+        ${includeVoided ? '' : "AND o.status != 'voided'"}
+      ORDER BY o.created_at ASC, oi.id ASC
+    `).all(from, to);
+
+    res.json(rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

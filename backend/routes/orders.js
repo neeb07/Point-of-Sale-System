@@ -65,8 +65,11 @@ router.post('/', (req, res) => {
 
     const orderId = orderResult.lastInsertRowid;
 
+    // is_deal is recorded so reporting can distinguish a deal from a menu item
+    // — they share an id space in this column, which previously made deal
+    // revenue land under an unrelated category.
     const insertItem = db.prepare(
-      'INSERT INTO order_items (order_id, menu_item_id, name, price, quantity) VALUES (?, ?, ?, ?, ?)'
+      'INSERT INTO order_items (order_id, menu_item_id, name, price, quantity, is_deal, variant_id) VALUES (?, ?, ?, ?, ?, ?, ?)'
     );
 
     const getRecipe = db.prepare(
@@ -80,7 +83,7 @@ router.post('/', (req, res) => {
     );
 
     items.forEach(item => {
-      insertItem.run(orderId, item.id, item.name, item.price, item.quantity);
+      insertItem.run(orderId, item.id, item.name, item.price, item.quantity, item.is_deal ? 1 : 0, item.variant_id || null);
 
       // --- INVENTORY DEDUCTION ---
       // NOTE: Deal deduction is intentionally deferred for now. Do not attempt to explode deals
@@ -175,11 +178,64 @@ router.get('/:id', (req, res) => {
   res.json({ ...order, items });
 });
 
+/**
+ * Void an order.
+ *
+ * This used to run `SET status = 'voided', total = 0, discount = 0`, which
+ * destroyed the evidence: once voided, nothing recorded what the order had
+ * been worth, so a void could never be audited and a manager could not see
+ * how much was being written off or by whom. Every report already filters on
+ * `status != 'voided'`, so zeroing the figures bought nothing.
+ *
+ * The amounts are now preserved and only the status changes. Stock consumed
+ * by the sale is returned to inventory, which the previous version never did —
+ * voiding a mis-rung order silently lost its ingredients.
+ */
 const voidOrder = (req, res) => {
   try {
-    db.prepare("UPDATE orders SET status = 'voided', total = 0, discount = 0 WHERE id = ?").run(req.params.id);
-    res.json({ success: true });
+    const order = db.prepare('SELECT id, status FROM orders WHERE id = ?').get(req.params.id);
+    if (!order) return res.status(404).json({ error: 'Order not found' });
+    if (order.status === 'voided') {
+      // Without this guard a second void would restock the ingredients again.
+      return res.status(409).json({ error: 'Order is already voided' });
+    }
+
+    const doVoid = db.transaction(() => {
+      const items = db.prepare(
+        'SELECT menu_item_id, quantity, is_deal, variant_id FROM order_items WHERE order_id = ?'
+      ).all(order.id);
+
+      // Same lookup the sale used, so the restore mirrors the deduction
+      // exactly — including variant-specific recipes.
+      const getRecipe = db.prepare(
+        'SELECT id FROM recipes WHERE menu_item_id = ? AND (variant_id = ? OR variant_id IS NULL)'
+      );
+      const getRecipeIngredients = db.prepare(
+        'SELECT ingredient_id, quantity_required FROM recipe_ingredients WHERE recipe_id = ?'
+      );
+      const restoreStock = db.prepare(
+        'UPDATE ingredients SET stock = stock + ? WHERE id = ?'
+      );
+
+      items.forEach(item => {
+        // Deals never deducted stock on the way in, so they must not add it back.
+        if (item.is_deal) return;
+        const recipeRow = getRecipe.get(item.menu_item_id, item.variant_id || null);
+        if (!recipeRow) return;
+        getRecipeIngredients.all(recipeRow.id).forEach(ing => {
+          restoreStock.run(ing.quantity_required * item.quantity, ing.ingredient_id);
+        });
+      });
+
+      db.prepare(
+        "UPDATE orders SET status = 'voided', voided_at = datetime('now', 'localtime') WHERE id = ?"
+      ).run(order.id);
+    });
+
+    doVoid();
+    res.json({ success: true, id: order.id, status: 'voided' });
   } catch (err) {
+    console.error('Error voiding order:', err);
     res.status(500).json({ error: err.message });
   }
 };

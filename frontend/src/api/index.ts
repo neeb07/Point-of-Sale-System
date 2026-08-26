@@ -84,6 +84,8 @@ export const reportsAPI = {
   hourlyHeatmap: (params: ReportParams) => request<Record<string, unknown>>('GET', `/reports/hourly-heatmap?${new URLSearchParams(params as Record<string, string>).toString()}`),
   cashierPerformance: (params: ReportParams) => request<Record<string, unknown>>('GET', `/reports/cashier-performance?${new URLSearchParams(params as Record<string, string>).toString()}`),
   detailed: (params: ReportParams) => request<Record<string, unknown>>('GET', `/reports/detailed?${new URLSearchParams(params as Record<string, string>).toString()}`),
+  /** One row per item sold, for the item-level CSV export. */
+  lineItems: (params: ReportParams) => request<Record<string, unknown>[]>('GET', `/reports/line-items?${new URLSearchParams(params as Record<string, string>).toString()}`),
 };
 
 export const settingsAPI = {
