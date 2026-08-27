@@ -8,7 +8,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "electron:dev": "concurrently \"cd ../backend && node server.js\" \"vite\" \"wait-on http://localhost:5173 && wait-on http://localhost:3001/api/health && electron .\"",
+    "electron:dev": "concurrently \"cd ../backend && npm start\" \"vite\" \"wait-on http://localhost:5173 && wait-on http://localhost:3001/api/health && electron .\"",
     "electron:build": "npm run prepare-backend && vite build && electron-builder build --win",
     "prepare-backend": "cd ../backend && npm install --ignore-scripts && cd ../frontend && npx electron-rebuild -f -w better-sqlite3 --module-dir ../backend"
   },
