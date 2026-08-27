@@ -122,7 +122,13 @@ if (!gotTheLock) {
       webPreferences: {
         nodeIntegration: false,
         contextIsolation: true,
-        webSecurity: false,
+        // SECURITY: this was `false`, which disables the same-origin policy for
+        // the whole renderer. It was presumably switched off because the
+        // packaged app is served from file:// and calls http://localhost:3001,
+        // but that combination works with web security on: the backend answers
+        // the opaque `null` origin explicitly (see backend/server.js), so
+        // nothing here needs the browser's protections turned off.
+        webSecurity: true,
       },
       title: 'Blaze POS',
       autoHideMenuBar: true,
@@ -134,8 +140,20 @@ if (!gotTheLock) {
       mainWindow.webContents.openDevTools();
     } else {
       mainWindow.loadFile(path.join(app.getAppPath(), 'dist', 'index.html'));
-      mainWindow.webContents.openDevTools(); // keep until fully working
+      // Devtools used to open here too ("keep until fully working"), so the
+      // shipped till launched with an inspector window in front of staff and
+      // customers. It can still be opened deliberately with the shortcut below
+      // when a problem needs diagnosing on site.
     }
+
+    // F12 toggles devtools on demand, in packaged builds as well. The window
+    // has no menu bar, so without this there is no way back in on a till.
+    mainWindow.webContents.on('before-input-event', (event, input) => {
+      if (input.type === 'keyDown' && input.key === 'F12') {
+        mainWindow.webContents.toggleDevTools();
+        event.preventDefault();
+      }
+    });
 
     mainWindow.once('ready-to-show', () => mainWindow.show());
     mainWindow.on('closed', () => { mainWindow = null; });

@@ -2,10 +2,13 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db/database');
 
-// Get all menu items
+// Get all menu items. Retired items are hidden unless explicitly requested.
 router.get('/', (req, res) => {
+  const includeInactive = req.query.include_inactive === '1' || req.query.include_inactive === 'true';
   try {
-    const items = db.prepare('SELECT * FROM menu_items ORDER BY category, name').all();
+    const items = db.prepare(
+      `SELECT * FROM menu_items ${includeInactive ? '' : 'WHERE active = 1'} ORDER BY category, name`
+    ).all();
     const variants = db.prepare('SELECT * FROM item_variants ORDER BY sort_order').all();
     
     // Group variants by menu_item_id
@@ -152,10 +155,55 @@ router.put('/:id', (req, res) => {
   }
 });
 
-// Delete item
+/**
+ * Retire a menu item.
+ *
+ * This was a hard DELETE, which had two failure modes:
+ *
+ *  1. If the item belonged to a deal, the foreign key on deal_items rejected
+ *     it and the operator got a raw 500 "FOREIGN KEY constraint failed" with
+ *     no indication of which deal was in the way.
+ *  2. When it did succeed, every past order containing that item lost its
+ *     category in sales-by-category, because the report joins order_items back
+ *     to menu_items. Deleting one line from today's menu silently rewrote
+ *     last month's reporting.
+ *
+ * The row is now marked inactive: it disappears from the menu and the sale
+ * screen, deals that reference it keep working, and historical reporting is
+ * unchanged.
+ */
 router.delete('/:id', (req, res) => {
   try {
-    db.prepare('DELETE FROM menu_items WHERE id = ?').run(req.params.id);
+    const item = db.prepare('SELECT id, name, active FROM menu_items WHERE id = ?').get(req.params.id);
+    if (!item) return res.status(404).json({ error: 'Menu item not found' });
+
+    db.prepare('UPDATE menu_items SET active = 0 WHERE id = ?').run(item.id);
+
+    // Tell the caller if this item is still part of a deal, so the deal can be
+    // corrected rather than quietly selling a retired item.
+    const deals = db.prepare(`
+      SELECT DISTINCT d.name
+      FROM deal_items di
+      JOIN deals d ON d.id = di.deal_id
+      WHERE di.menu_item_id = ?
+    `).all(item.id).map(d => d.name);
+
+    res.json({
+      success: true,
+      retired: true,
+      name: item.name,
+      used_in_deals: deals,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Restore a retired item.
+router.put('/:id/restore', (req, res) => {
+  try {
+    const info = db.prepare('UPDATE menu_items SET active = 1 WHERE id = ?').run(req.params.id);
+    if (info.changes === 0) return res.status(404).json({ error: 'Menu item not found' });
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });

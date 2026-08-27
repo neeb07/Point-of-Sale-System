@@ -194,6 +194,12 @@ try { db.exec("ALTER TABLE orders ADD COLUMN shift_id INTEGER DEFAULT NULL;"); }
 // FIX (Bug 6): the Sale screen collected no table/token number even though
 // receipts displayed a placeholder for it.
 try { db.exec("ALTER TABLE orders ADD COLUMN table_number TEXT DEFAULT NULL;"); } catch(e) {}
+// Menu items are retired rather than deleted. A hard DELETE failed outright
+// with "FOREIGN KEY constraint failed" whenever the item belonged to a deal,
+// and when it did succeed it broke sales-by-category for every past order
+// containing that item, because the reporting join had nothing left to match.
+try { db.exec("ALTER TABLE menu_items ADD COLUMN active INTEGER DEFAULT 1;"); } catch(e) {}
+
 // Voiding an order now preserves its amounts and records when it happened,
 // instead of zeroing total/discount and destroying the audit trail.
 try { db.exec("ALTER TABLE orders ADD COLUMN voided_at DATETIME DEFAULT NULL;"); } catch(e) {}
