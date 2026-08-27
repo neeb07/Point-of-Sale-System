@@ -118,6 +118,74 @@ body {
 }
 
 @media print {
+  /*
+    Undo the app-shell constraints on the page itself.
+    
+    `body` carries `overflow: hidden`, `min-width: 1280px` and
+    `min-height: 100vh` so the till renders as a fixed desktop layout. On paper
+    those are ruinous and were the real cause of the mangled receipts:
+
+      min-width: 1280px  forced the document far wider than an 80mm page, so
+                         everything past the page edge was clipped — and
+                         reducing the print scale did not help, because the
+                         body stayed 1280px wide and only the slice that fell
+                         inside the page was ever printed.
+
+      overflow: hidden   clipped the print flow to a single viewport, so only
+                         the first of the three copies came out at all.
+
+    Nothing in the print stylesheet reset them, so every fix applied further
+    down the tree was undone here.
+  */
+  html, body {
+    overflow: visible !important;
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #FFFFFF !important;
+  }
+
+  /*
+    Unclamp every ancestor of the printable area.
+
+    The app shell wraps each screen in `height: 100vh; overflow: hidden` so the
+    till fills the window and never scrolls. Those wrappers sit above the
+    receipt modal and are not marked `.print-root`, so nothing reset them: they
+    clamped the print flow to a single screen's worth of height and clipped the
+    rest. Three receipts totalling ~545mm were cut down to one page, which is
+    why only the first copy ever came out.
+
+    `:has()` selects exactly the ancestor chain, so the receipt itself — which
+    does rely on fixed sizes for things like the round logo — is left alone.
+  */
+  *:has(#printable-area) {
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    position: static !important;
+  }
+
+  /*
+    Take everything that is not the receipt out of the page entirely.
+
+    This used `visibility: hidden`, which hides an element but keeps its layout
+    box. Once the shell wrappers above were unclamped, the sidebar and the sale
+    screen still occupied about a metre and a half of page height, so the three
+    receipts were followed by several blank pages — more roll wasted, not less.
+
+    `:has()` keeps the receipt, everything inside it, and its ancestors;
+    everything else is removed from the flow. The visibility rules are kept
+    underneath as a harmless fallback.
+  */
+  body *:not(:has(#printable-area)):not(#printable-area):not(#printable-area *) {
+    display: none !important;
+  }
+
   body * {
     visibility: hidden;
   }
