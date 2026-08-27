@@ -181,8 +181,23 @@ body {
     display: none !important;
   }
 
+  /*
+    Page size.
+
+    This read `size: 80mm auto`, which is not valid CSS — `size` takes `auto`,
+    or one or two lengths, never a mix. Chromium dropped the whole declaration
+    and fell back to the printer's default paper, so each receipt was laid out
+    on a Letter page (measured: 215.9mm x 279.4mm, identical to having no rule
+    at all). On a continuous till roll that means the printer feeds a full
+    Letter page per copy — three copies, three pages of paper — which is why it
+    "kept rolling and didn't stop".
+
+    The real height is set at print time by ReceiptModal, which measures the
+    rendered receipt and injects an exact `size: <width> <height>`. This is the
+    fallback if that ever fails to run: a roll-width page rather than Letter.
+  */
   @page {
-    size: 80mm auto;
+    size: 80mm 200mm;
     margin: 0;
   }
 }

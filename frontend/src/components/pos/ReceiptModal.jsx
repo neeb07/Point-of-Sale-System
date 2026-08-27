@@ -19,7 +19,41 @@ export default function ReceiptModal({ open, onClose, orderData, autoPrintEnable
    * damaged, lost, or the customer asks for another.
    */
   const [selection, setSelection] = useState('all');
-  const { autoPrint } = useSettings();
+  const { autoPrint, paperSize } = useSettings();
+
+  /**
+   * Size the printed page to the receipt before handing off to the printer.
+   *
+   * A thermal printer runs continuous roll paper: it feeds until the page
+   * ends, so the page height in CSS *is* how much paper comes out. The
+   * stylesheet asked for `size: 80mm auto`, which is invalid CSS — Chromium
+   * discarded it and used the default Letter page, feeding ~280mm per copy.
+   *
+   * Measuring the rendered receipt and writing an exact height means the roll
+   * advances by the length of the receipt and no further. The few extra
+   * millimetres give the cutter somewhere to land.
+   */
+  const sizePageToReceipt = () => {
+    try {
+      const copy = document.querySelector('#printable-area .receipt-copy');
+      if (!copy) return;
+
+      const widthMm = paperSize === '58mm' ? 58 : 80;
+      // CSS px are 1/96in by definition, so this conversion is exact.
+      const heightMm = Math.ceil((copy.getBoundingClientRect().height * 25.4) / 96) + 5;
+
+      let tag = document.getElementById('receipt-page-size');
+      if (!tag) {
+        tag = document.createElement('style');
+        tag.id = 'receipt-page-size';
+        document.head.appendChild(tag);
+      }
+      tag.textContent =
+        `@media print { @page { size: ${widthMm}mm ${heightMm}mm; margin: 0; } }`;
+    } catch (e) {
+      // Fall back to the static rule in index.css rather than blocking a sale.
+    }
+  };
 
   /**
    * Settings has an "auto print" switch that nothing ever read, so a shop that
@@ -43,8 +77,8 @@ export default function ReceiptModal({ open, onClose, orderData, autoPrintEnable
     if (printedFor.current === key) return;
     printedFor.current = key;
 
-    // Let the receipts paint before handing off to the print dialog.
-    const t = setTimeout(() => window.print(), 300);
+    // Let the receipts paint before measuring and handing off to the printer.
+    const t = setTimeout(() => { sizePageToReceipt(); window.print(); }, 300);
     return () => clearTimeout(t);
   }, [open, orderData, autoPrint, autoPrintEnabled]);
 
@@ -53,6 +87,7 @@ export default function ReceiptModal({ open, onClose, orderData, autoPrintEnable
   const copiesToPrint = selection === 'all' ? COPY_TYPES : [selection];
 
   const handlePrint = () => {
+    sizePageToReceipt();
     window.print();
   };
 
