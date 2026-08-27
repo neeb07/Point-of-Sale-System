@@ -1,8 +1,9 @@
 // @ts-nocheck
 import React, { useState, useEffect, useMemo } from 'react';
 import { DollarSign, ShoppingBag, TrendingUp, Tag, Printer, Download, FileSpreadsheet } from 'lucide-react';
-import { reportsAPI, settingsAPI } from '@/api/index';
+import { reportsAPI } from '@/api/index';
 import { buildCsv, money } from '@/lib/csv';
+import { useSettings } from '@/lib/SettingsContext';
 import writeXlsxFile from 'write-excel-file/browser';
 import moment from 'moment';
 import {
@@ -35,7 +36,10 @@ export default function Reports() {
   const [lineItems, setLineItems] = useState([]);
 
   const [reportFormat, setReportFormat] = useState('summary');
-  const [restaurantName, setRestaurantName] = useState('Blaze');
+  // Shop name (used to name the exported file) and money formatting both
+  // come from the shared settings provider rather than a second fetch.
+  const { formatMoney, restaurant } = useSettings();
+  const restaurantName = restaurant.name || 'Blaze';
   
   // Calculate dates based on filter
   const { from, to } = useMemo(() => {
@@ -113,12 +117,6 @@ export default function Reports() {
     }
   }, [from, to]);
 
-  // Used to name the exported file after the shop rather than a hardcoded string.
-  useEffect(() => {
-    settingsAPI.getAll()
-      .then(s => { if (s.restaurant_name) setRestaurantName(s.restaurant_name); })
-      .catch(() => {});
-  }, []);
 
   const PIE_COLORS = ['#DC2626', '#3B82F6', '#10B981', '#8B5CF6', '#F43F5E', '#06B6D4'];
 
@@ -423,10 +421,10 @@ export default function Reports() {
         
         {/* Section 1 - KPI Cards */}
         <div className="grid grid-cols-4 gap-4 print:hidden">
-          <KpiCard title="Total Revenue" value={`Rs. ${kpi.revenue.toLocaleString()}`} icon={DollarSign} color="#DC2626" />
+          <KpiCard title="Total Revenue" value={formatMoney(kpi.revenue)} icon={DollarSign} color="#DC2626" />
           <KpiCard title="Orders Processed" value={kpi.orders} icon={ShoppingBag} color="#3B82F6" />
-          <KpiCard title="Avg. Order Value" value={`Rs. ${Math.round(kpi.avg_order_value).toLocaleString()}`} icon={TrendingUp} color="#10B981" />
-          <KpiCard title="Discounts Given" value={`Rs. ${kpi.total_discounts.toLocaleString()}`} icon={Tag} color="#EF4444" subtitle={`across ${detailedReport.filter(d => d.discount > 0).length} orders`} />
+          <KpiCard title="Avg. Order Value" value={formatMoney(kpi.avg_order_value)} icon={TrendingUp} color="#10B981" />
+          <KpiCard title="Discounts Given" value={formatMoney(kpi.total_discounts)} icon={Tag} color="#EF4444" subtitle={`across ${detailedReport.filter(d => d.discount > 0).length} orders`} />
         </div>
 
         {/* Section 2 - Revenue Over Time */}
@@ -437,10 +435,10 @@ export default function Reports() {
               <LineChart data={revenueData}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
                 <XAxis dataKey="date" tick={{ fontSize: 12, fill: '#6B7280' }} tickMargin={10} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize: 12, fill: '#6B7280' }} axisLine={false} tickLine={false} tickFormatter={val => `Rs.${val}`} />
+                <YAxis tick={{ fontSize: 12, fill: '#6B7280' }} axisLine={false} tickLine={false} tickFormatter={val => formatMoney(val)} />
                 <RechartsTooltip 
                   contentStyle={{ borderRadius: 8, border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
-                  formatter={(value) => [`Rs. ${value}`, 'Revenue']}
+                  formatter={(value) => [formatMoney(value), 'Revenue']}
                 />
                 <Line type="monotone" dataKey="revenue" stroke="#DC2626" strokeWidth={3} dot={{ fill: '#FFFFFF', stroke: '#DC2626', strokeWidth: 2, r: 4 }} activeDot={{ r: 6, fill: '#DC2626', stroke: '#FFFFFF' }} />
               </LineChart>
@@ -477,12 +475,12 @@ export default function Reports() {
                       <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
                     ))}
                   </Pie>
-                  <RechartsTooltip formatter={(value) => `Rs. ${value}`} />
+                  <RechartsTooltip formatter={(value) => formatMoney(value)} />
                 </PieChart>
               </ResponsiveContainer>
               <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
                 <span className="text-gray-500 text-xs">Total</span>
-                <span className="text-gray-900 font-bold text-sm">Rs. {(categories.reduce((acc, c) => acc + c.revenue, 0)).toLocaleString()}</span>
+                <span className="text-gray-900 font-bold text-sm">{formatMoney(categories.reduce((acc, c) => acc + c.revenue, 0))}</span>
               </div>
             </div>
             <div className="mt-4 space-y-2">
@@ -492,7 +490,7 @@ export default function Reports() {
                     <div className="w-3 h-3 rounded-full" style={{ background: PIE_COLORS[idx % PIE_COLORS.length] }} />
                     <span className="text-gray-600">{c.category}</span>
                   </div>
-                  <div className="font-medium text-gray-900">{c.percentage}% <span className="text-gray-400 font-normal ml-1">(Rs.{c.revenue})</span></div>
+                  <div className="font-medium text-gray-900">{c.percentage}% <span className="text-gray-400 font-normal ml-1">({formatMoney(c.revenue)})</span></div>
                 </div>
               ))}
             </div>
@@ -523,7 +521,7 @@ export default function Reports() {
                       >
                         {cell.orders > 0 && (
                           <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block z-20 w-max bg-gray-900 text-white text-xs px-2 py-1 rounded shadow-xl">
-                            {cell.day} {cell.hour > 12 ? cell.hour-12+'PM' : cell.hour+'AM'} — {cell.orders} orders — Rs. {cell.revenue}
+                            {cell.day} {cell.hour > 12 ? cell.hour-12+'PM' : cell.hour+'AM'} — {cell.orders} orders — {formatMoney(cell.revenue)}
                           </div>
                         )}
                       </div>
@@ -554,8 +552,8 @@ export default function Reports() {
                     <tr key={idx} className="border-b border-gray-100 last:border-0">
                       <td className="py-3 font-medium text-gray-900">{cp.cashier_name || 'Unknown'}</td>
                       <td className="py-3 text-center text-gray-600">{cp.total_orders}</td>
-                      <td className="py-3 text-right font-semibold text-gray-900">Rs. {cp.total_revenue.toLocaleString()}</td>
-                      <td className="py-3 text-right text-gray-600">Rs. {Math.round(cp.avg_order_value).toLocaleString()}</td>
+                      <td className="py-3 text-right font-semibold text-gray-900">{formatMoney(cp.total_revenue)}</td>
+                      <td className="py-3 text-right text-gray-600">{formatMoney(cp.avg_order_value)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -564,9 +562,9 @@ export default function Reports() {
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={cashierPerformance} layout="horizontal" margin={{ left: 100, right: 20, top: 10, bottom: 10 }}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
-                    <XAxis type="number" tick={{ fontSize: 11, fill: '#6B7280' }} tickFormatter={val => `Rs.${val}`} />
+                    <XAxis type="number" tick={{ fontSize: 11, fill: '#6B7280' }} tickFormatter={val => formatMoney(val)} />
                     <YAxis type="category" dataKey="cashier_name" tick={{ fontSize: 11, fill: '#4B5563' }} width={90} axisLine={false} tickLine={false} />
-                    <RechartsTooltip cursor={{ fill: '#F9FAFB' }} contentStyle={{ borderRadius: 8, border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} formatter={(value) => [`Rs. ${value}`, 'Revenue']} />
+                    <RechartsTooltip cursor={{ fill: '#F9FAFB' }} contentStyle={{ borderRadius: 8, border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} formatter={(value) => [formatMoney(value), 'Revenue']} />
                     <Bar dataKey="total_revenue" fill="#DC2626" radius={[0, 4, 4, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
@@ -666,9 +664,9 @@ export default function Reports() {
                     <tr key={date} className={`border-b border-gray-100 ${i % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}>
                       <td className="py-3 px-4 font-medium text-gray-900">{moment(date).format('MMM D, YYYY')}</td>
                       <td className="py-3 px-4 text-center text-gray-600">{d.orders}</td>
-                      <td className="py-3 px-4 text-right text-gray-600">Rs. {d.revenue.toLocaleString()}</td>
-                      <td className="py-3 px-4 text-right text-red-500">-Rs. {d.discounts.toLocaleString()}</td>
-                      <td className="py-3 px-4 text-right font-bold text-gray-900">Rs. {d.net.toLocaleString()}</td>
+                      <td className="py-3 px-4 text-right text-gray-600">{formatMoney(d.revenue)}</td>
+                      <td className="py-3 px-4 text-right text-red-500">-{formatMoney(d.discounts)}</td>
+                      <td className="py-3 px-4 text-right font-bold text-gray-900">{formatMoney(d.net)}</td>
                     </tr>
                   ))
                 ) : reportFormat === 'items' ? (
@@ -680,8 +678,8 @@ export default function Reports() {
                       <td className="py-3 px-4 text-gray-700 text-xs">{row.item_name}</td>
                       <td className="py-3 px-4 text-gray-500 text-xs">{row.category}</td>
                       <td className="py-3 px-4 text-center text-gray-600">{row.quantity}</td>
-                      <td className="py-3 px-4 text-right text-gray-600">Rs. {Number(row.unit_price).toLocaleString()}</td>
-                      <td className="py-3 px-4 text-right font-bold text-gray-900">Rs. {Number(row.line_total).toLocaleString()}</td>
+                      <td className="py-3 px-4 text-right text-gray-600">{formatMoney(row.unit_price)}</td>
+                      <td className="py-3 px-4 text-right font-bold text-gray-900">{formatMoney(row.line_total)}</td>
                     </tr>
                   ))
                 ) : (
@@ -696,9 +694,9 @@ export default function Reports() {
                           {row.payment_method}
                         </span>
                       </td>
-                      <td className="py-3 px-4 text-right text-gray-600">Rs. {Number(row.subtotal || 0).toLocaleString()}</td>
-                      <td className="py-3 px-4 text-right text-red-500">{row.discount > 0 ? `-Rs. ${row.discount}` : '—'}</td>
-                      <td className="py-3 px-4 text-right font-bold text-gray-900">Rs. {Number(row.total || 0).toLocaleString()}</td>
+                      <td className="py-3 px-4 text-right text-gray-600">{formatMoney(row.subtotal || 0)}</td>
+                      <td className="py-3 px-4 text-right text-red-500">{row.discount > 0 ? `-${formatMoney(row.discount)}` : '—'}</td>
+                      <td className="py-3 px-4 text-right font-bold text-gray-900">{formatMoney(row.total || 0)}</td>
                     </tr>
                   ))
                 )}

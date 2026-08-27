@@ -1,4 +1,5 @@
 import React from 'react';
+import { useSettings } from '@/lib/SettingsContext';
 
 const ReceiptHeader = ({ restaurant }) => (
   <div
@@ -47,21 +48,25 @@ const ReceiptHeader = ({ restaurant }) => (
   </div>
 );
 
-const ReceiptMeta = ({ orderInfo }) => (
+const ReceiptMeta = ({ orderInfo }) => {
+  // Settings offered toggles for these rows but nothing consulted them.
+  const { showCashier, showOrderNumber, showPayment } = useSettings();
+  return (
   <div style={{ padding: '16px 20px', display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#6B7280' }}>
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
       <div>Date: {orderInfo.date}</div>
       <div>Time: {orderInfo.time}</div>
-      <div>Order #: {orderInfo.orderNumber}</div>
+      {showOrderNumber && <div>Order #: {orderInfo.orderNumber}</div>}
     </div>
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4, textAlign: 'right' }}>
-      <div>Cashier: {orderInfo.cashier}</div>
+      {showCashier && <div>Cashier: {orderInfo.cashier}</div>}
       <div>Table: {orderInfo.table || '—'}</div>
-      <div>Payment: {orderInfo.paymentMethod}</div>
+      {showPayment && <div>Payment: {orderInfo.paymentMethod}</div>}
       {orderInfo.orderType && <div>Type: {orderInfo.orderType}</div>}
     </div>
   </div>
-);
+  );
+};
 
 const ReceiptDivider = ({ dashed = true }) => (
   <div
@@ -72,7 +77,9 @@ const ReceiptDivider = ({ dashed = true }) => (
   />
 );
 
-const ReceiptItemsTable = ({ items }) => (
+const ReceiptItemsTable = ({ items }) => {
+  const { formatMoney } = useSettings();
+  return (
   <div style={{ padding: '16px 20px' }}>
     <div style={{ display: 'flex', fontSize: 11, color: '#9CA3AF', textTransform: 'uppercase', fontWeight: 600, marginBottom: 12 }}>
       <div style={{ flex: 1 }}>Item</div>
@@ -89,49 +96,64 @@ const ReceiptItemsTable = ({ items }) => (
             x{item.quantity}
           </div>
           <div style={{ width: 80, textAlign: 'right', fontWeight: 700, fontSize: 13, color: '#111827' }}>
-            Rs.{item.price * item.quantity}
+            {formatMoney(item.price * item.quantity)}
           </div>
         </div>
       ))}
     </div>
   </div>
-);
+  );
+};
 
-const ReceiptTotals = ({ subtotal, discount, deliveryCharge, total, orderType }) => (
-  <div style={{ display: 'flex', flexDirection: 'column' }}>
-    <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 8, fontSize: 13, color: '#374151', fontWeight: 500 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-        <span>Subtotal</span>
-        <span>Rs.{subtotal}</span>
-      </div>
-      {discount > 0 && (
-        <div style={{ display: 'flex', justifyContent: 'space-between', color: '#EF4444' }}>
-          <span>Discount</span>
-          <span>-Rs.{discount}</span>
-        </div>
-      )}
-      {(deliveryCharge > 0 || orderType === 'Delivery') && (
+const ReceiptTotals = ({ subtotal, discount, taxRate, taxAmount, deliveryCharge, total, orderType }) => {
+  const { formatMoney, showTax } = useSettings();
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column' }}>
+      <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 8, fontSize: 13, color: '#374151', fontWeight: 500 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-          <span>Delivery Charge</span>
-          <span>Rs.{deliveryCharge}</span>
+          <span>Subtotal</span>
+          <span>{formatMoney(subtotal)}</span>
         </div>
-      )}
+        {discount > 0 && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', color: '#EF4444' }}>
+            <span>Discount</span>
+            <span>-{formatMoney(discount)}</span>
+          </div>
+        )}
+        {/* The tax rate is set in Settings but never reached the receipt, so a
+            shop charging tax had no way to show it to the customer. */}
+        {showTax && taxAmount > 0 && (
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <span>Tax{taxRate ? ` (${taxRate}%)` : ''}</span>
+            <span>{formatMoney(taxAmount, { decimals: taxAmount % 1 !== 0 })}</span>
+          </div>
+        )}
+        {(deliveryCharge > 0 || orderType === 'Delivery') && (
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <span>Delivery Charge</span>
+            <span>{formatMoney(deliveryCharge)}</span>
+          </div>
+        )}
+      </div>
+      <ReceiptDivider dashed={false} />
+      <div
+        style={{
+          background: '#FEEFD0',
+          padding: '16px 20px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+        }}
+      >
+        <span style={{ fontWeight: 800, fontSize: 15, color: '#111827' }}>TOTAL</span>
+        <span style={{ fontWeight: 800, fontSize: 20, color: '#DC2626' }}>
+          {formatMoney(total, { decimals: total % 1 !== 0 })}
+        </span>
+      </div>
     </div>
-    <ReceiptDivider dashed={false} />
-    <div
-      style={{
-        background: '#FEEFD0',
-        padding: '16px 20px',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-      }}
-    >
-      <span style={{ fontWeight: 800, fontSize: 15, color: '#111827' }}>TOTAL</span>
-      <span style={{ fontWeight: 800, fontSize: 20, color: '#DC2626' }}>Rs.{total}</span>
-    </div>
-  </div>
-);
+  );
+};
 
 const ReceiptFooter = ({ restaurant }) => (
   <div
@@ -197,16 +219,23 @@ export default function Receipt({
   items,
   subtotal,
   discount,
+  taxRate,
+  taxAmount,
   deliveryCharge,
   total,
   restaurant,
   copyType,
 }) {
+  // Settings offers a paper size but nothing applied it, so an 80mm roll and a
+  // 58mm roll both received the same fixed 340px layout.
+  const { paperSize } = useSettings();
+  const width = paperSize === '58mm' ? 260 : 340;
+
   return (
     <div
       className="receipt-copy"
       style={{
-        width: 340,
+        width,
         background: '#FFFFFF',
         borderRadius: 16,
         boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
@@ -224,7 +253,15 @@ export default function Receipt({
       <ReceiptDivider />
       <ReceiptItemsTable items={items} />
       <ReceiptDivider />
-      <ReceiptTotals subtotal={subtotal} discount={discount} deliveryCharge={deliveryCharge || 0} total={total} orderType={orderInfo?.orderType} />
+      <ReceiptTotals
+        subtotal={subtotal}
+        discount={discount}
+        taxRate={taxRate || 0}
+        taxAmount={taxAmount || 0}
+        deliveryCharge={deliveryCharge || 0}
+        total={total}
+        orderType={orderInfo?.orderType}
+      />
       <ReceiptFooter restaurant={restaurant} />
     </div>
   );

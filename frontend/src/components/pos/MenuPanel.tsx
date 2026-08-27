@@ -3,6 +3,7 @@ import { usePOS } from '@/lib/POSContext';
 import { dealsAPI } from '@/api/index';
 import { Tag } from 'lucide-react';
 import { DEAL_GROUP_TABS } from '@/lib/constants';
+import { useSettings } from '@/lib/SettingsContext';
 
 interface MenuItem {
   id: number;
@@ -62,6 +63,7 @@ function getFoodImage(name: string): string {
 // truth is now @/lib/constants so the two can never drift apart again.
 
 export default function MenuPanel({ onAddToCart, search }: MenuPanelProps) {
+  const { formatMoney } = useSettings();
   const { menuItems } = usePOS();
   const [activeCategory, setActiveCategory] = useState('All');
   const [activeDealGroup, setActiveDealGroup] = useState('All Deals');
@@ -320,7 +322,7 @@ export default function MenuPanel({ onAddToCart, search }: MenuPanelProps) {
                 <button
                   key={variant.id}
                   onClick={() => {
-                    const toppingText = selectedTopping > 0 ? ` + Topping Rs.${selectedTopping}` : '';
+                    const toppingText = selectedTopping > 0 ? ` + Topping ${formatMoney(selectedTopping)}` : '';
                     onAddToCart({
                       id: selectedVariantItem.id,
                       name: `${selectedVariantItem.name} (${variant.label})${toppingText}`,
@@ -351,7 +353,7 @@ export default function MenuPanel({ onAddToCart, search }: MenuPanelProps) {
                   }}
                 >
                   <span style={{ fontSize: 15, fontWeight: 500, color: '#111110' }}>{variant.label}</span>
-                  <span style={{ fontSize: 15, fontWeight: 700, color: '#DC2626' }}>Rs. {variant.price.toLocaleString()}</span>
+                  <span style={{ fontSize: 15, fontWeight: 700, color: '#DC2626' }}>{formatMoney(variant.price)}</span>
                 </button>
               ))}
             </div>
@@ -363,6 +365,7 @@ export default function MenuPanel({ onAddToCart, search }: MenuPanelProps) {
 }
 
 function ItemCard({ item, onAdd }: ItemCardProps) {
+  const { formatMoney } = useSettings();
   const [pressed, setPressed] = useState(false);
   const [imgError, setImgError] = useState(false);
   const [imgLoaded, setImgLoaded] = useState(false);
@@ -472,7 +475,7 @@ function ItemCard({ item, onAdd }: ItemCardProps) {
           </div>
         ) : (
           <div style={{ fontSize: 13, fontWeight: 700, color: '#DC2626', textAlign: 'center' }}>
-            Rs. {item.price.toLocaleString()}
+            {formatMoney(item.price)}
           </div>
         )}
       </div>
@@ -481,6 +484,7 @@ function ItemCard({ item, onAdd }: ItemCardProps) {
 }
 
 function DealCard({ deal, onAdd }: DealCardProps) {
+  const { formatMoney } = useSettings();
   const [pressed, setPressed] = useState(false);
   const [imgError, setImgError] = useState(false);
   const [imgLoaded, setImgLoaded] = useState(false);
@@ -610,7 +614,7 @@ function DealCard({ deal, onAdd }: DealCardProps) {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: '#DC2626' }}>
-            Rs. {deal.price.toLocaleString()}
+            {formatMoney(deal.price)}
           </div>
           {savingsPct > 0 && (
             <div style={{ fontSize: 11, fontWeight: 600, color: '#16A34A' }}>

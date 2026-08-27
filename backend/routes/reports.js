@@ -253,6 +253,8 @@ router.get('/detailed', (req, res) => {
         o.payment_method,
         o.status,
         o.discount,
+        o.tax_rate,
+        o.tax_amount,
         o.delivery_charge,
         o.total,
         COALESCE(SUM(oi.price * oi.quantity), 0) AS subtotal,

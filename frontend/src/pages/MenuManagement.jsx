@@ -3,6 +3,7 @@ import React, { useState, useMemo } from 'react';
 import { Plus, Pencil, Trash2, X, Pizza, Sandwich, Coffee, Package, Loader2, Drumstick, Soup, Utensils, Wheat, Droplet, Flame } from 'lucide-react';
 import { usePOS } from '@/lib/POSContext';
 import { MENU_CATEGORIES, DEFAULT_CATEGORY } from '@/lib/constants';
+import { useSettings } from '@/lib/SettingsContext';
 
 /**
  * FIX (Bug 2): this file used to declare 22 invented categories ('Starters',
@@ -51,6 +52,7 @@ const categoryGradient = {
 };
 
 export default function MenuManagement() {
+  const { formatMoney } = useSettings();
   const { menuItems, addMenuItem, updateMenuItem, deleteMenuItem, loading } = usePOS();
   const [modalOpen, setModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
@@ -130,7 +132,7 @@ export default function MenuManagement() {
                 {item.has_variants === 1 ? (
                   <span style={{ fontSize: 12, padding: '4px 8px', background: 'rgba(255,255,255,0.2)', borderRadius: 12 }}>Multiple Sizes</span>
                 ) : (
-                  `Rs. ${item.price.toLocaleString()}`
+                  formatMoney(item.price)
                 )}
               </div>
               <IconBtn
@@ -196,6 +198,7 @@ function IconBtn({ icon: Icon, hoverBg, hoverColor, defaultColor, onClick }) {
 }
 
 function ItemModal({ item, categories = MENU_CATEGORIES, onClose, onSave }) {
+  const { currencySymbol } = useSettings();
   const [name, setName] = useState(item?.name || '');
   const [price, setPrice] = useState(item?.price || '');
   // FIX (Bug 2): the default was 'Starters', a category that does not exist.
@@ -280,7 +283,7 @@ function ItemModal({ item, categories = MENU_CATEGORIES, onClose, onSave }) {
         />
 
         {/* Price */}
-        <label style={{ color: '#FFFFFF', fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 6 }}>Price (Rs.)</label>
+        <label style={{ color: '#FFFFFF', fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 6 }}>Price ({currencySymbol})</label>
         {item?.has_variants === 1 ? (
           <div style={{ ...inputStyle, marginBottom: 16, background: 'rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.8)', border: 'none', display: 'flex', alignItems: 'center' }}>
             Managed via variants

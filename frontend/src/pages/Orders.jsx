@@ -9,6 +9,7 @@ import Toast from '@/components/pos-ui/Toast';
 import Modal from '@/components/pos-ui/Modal';
 import ReceiptModal from '@/components/pos/ReceiptModal';
 import { ordersAPI, settingsAPI } from '@/api/index';
+import { useSettings } from '@/lib/SettingsContext';
 
 const DATE_CHIPS = [
   { id: 'today', label: 'Today' },
@@ -24,8 +25,13 @@ const CARD_STYLE = {
   boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
 };
 
-function formatCurrency(amount) {
-  return `Rs. ${Number(amount || 0).toLocaleString()}`;
+/**
+ * Currency comes from settings rather than a hardcoded "Rs.". This is a plain
+ * module function, so the symbol is passed in by the component that has the
+ * settings hook.
+ */
+function makeFormatCurrency(formatMoney) {
+  return (amount) => formatMoney(amount);
 }
 
 function getDateRange(dateRange, customFrom, customTo) {
@@ -41,6 +47,8 @@ function getDateRange(dateRange, customFrom, customTo) {
 }
 
 export default function Orders() {
+  const { formatMoney } = useSettings();
+  const formatCurrency = makeFormatCurrency(formatMoney);
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedOrder, setSelectedOrder] = useState(null);
@@ -233,6 +241,11 @@ export default function Orders() {
       })),
       subtotal: itemsSubtotal,
       discount: Number(order.discount) || 0,
+      // The rate stored on the order, not the current setting: a reprint must
+      // show the tax the customer was actually charged, even after the shop
+      // changes its rate.
+      taxRate: Number(order.tax_rate) || 0,
+      taxAmount: Number(order.tax_amount) || 0,
       deliveryCharge,
       total: Number(order.total) || 0,
       restaurant: restaurantDetails,
@@ -457,6 +470,10 @@ export default function Orders() {
         open={!!receiptData}
         onClose={() => setReceiptData(null)}
         orderData={receiptData}
+        // A reprint is a deliberate act; firing the printer automatically the
+        // moment the modal opens would be a surprise, so auto-print is a
+        // new-sale behaviour only.
+        autoPrintEnabled={false}
       />
     </div>
   );

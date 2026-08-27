@@ -6,6 +6,7 @@ import DataTable from '@/components/pos-ui/DataTable';
 import Modal from '@/components/pos-ui/Modal';
 import Toast from '@/components/pos-ui/Toast';
 import { staffAPI } from '@/api/index';
+import { useSettings } from '@/lib/SettingsContext';
 
 const AVATAR_COLORS = ['#DC2626', '#8B5CF6', '#3B82F6', '#10B981', '#EF4444', '#F59E0B'];
 
@@ -66,6 +67,7 @@ function PinInput({ value, onChange, length = 4 }) {
 }
 
 function StaffCard({ staff, onEdit, onResetPin, onToggleActive, menuOpen, onMenuToggle }) {
+  const { formatMoney } = useSettings();
   const isActive = staff.status === 'Active' || staff.active === 1;
   const color = staff.color || '#DC2626';
 
@@ -131,7 +133,7 @@ function StaffCard({ staff, onEdit, onResetPin, onToggleActive, menuOpen, onMenu
         </div>
         <div style={{ textAlign: 'right' }}>
           <div style={{ fontSize: 11, color: '#9CA3AF' }}>Revenue</div>
-          <div style={{ fontSize: 14, fontWeight: 700, color: '#111827' }}>Rs. {(staff.todayRevenue || 0).toLocaleString()}</div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: '#111827' }}>{formatMoney(staff.todayRevenue || 0)}</div>
         </div>
       </div>
     </div>
@@ -139,6 +141,7 @@ function StaffCard({ staff, onEdit, onResetPin, onToggleActive, menuOpen, onMenu
 }
 
 export default function Cashier() {
+  const { formatMoney } = useSettings();
   const [activeTab, setActiveTab] = useState('staff');
   const [staff, setStaff] = useState([]);
   const [modalOpen, setModalOpen] = useState(false);
@@ -262,14 +265,14 @@ export default function Cashier() {
       ),
     },
     { key: 'orders', label: 'Orders', align: 'center', render: (row) => row.orders || 0 },
-    { key: 'revenue', label: 'Revenue', render: (row) => <span style={{ fontWeight: 700 }}>Rs. {Number(row.revenue || 0).toLocaleString()}</span> },
-    { key: 'avg_order', label: 'Avg Order', render: (row) => `Rs. ${Math.round(row.avg_order || 0).toLocaleString()}` },
+    { key: 'revenue', label: 'Revenue', render: (row) => <span style={{ fontWeight: 700 }}>{formatMoney(row.revenue || 0)}</span> },
+    { key: 'avg_order', label: 'Avg Order', render: (row) => formatMoney(row.avg_order || 0) },
     {
       key: 'discounts',
       label: 'Discounts Given',
       render: (row) => (
         <span style={{ color: row.discounts > 0 ? '#EF4444' : '#9CA3AF' }}>
-          Rs. {Number(row.discounts || 0).toLocaleString()}
+          {formatMoney(row.discounts || 0)}
         </span>
       ),
     },
@@ -360,7 +363,7 @@ export default function Cashier() {
                       }} />
                     </div>
                     <div style={{ width: 100, fontSize: 13, fontWeight: 700, color: '#111827', textAlign: 'right' }}>
-                      Rs. {Number(p.revenue || 0).toLocaleString()} ({pct}%)
+                      {formatMoney(p.revenue || 0)} ({pct}%)
                     </div>
                   </div>
                 );

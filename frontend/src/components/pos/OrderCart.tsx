@@ -1,6 +1,7 @@
 import React from 'react';
 import { Trash2, Plus, Minus, CreditCard, Banknote, Globe } from 'lucide-react';
 import { PAYMENT_METHODS, type PaymentMethod } from '@/lib/constants';
+import { useSettings } from '@/lib/SettingsContext';
 
 interface CartItem {
   id: number;
@@ -17,6 +18,9 @@ interface OrderCartProps {
   discountValue: string;
   discountType: 'flat' | 'percent';
   discountAmount: number;
+  /** Tax computed from the shop's configured rate; 0 when tax is disabled. */
+  taxRate: number;
+  taxAmount: number;
   paymentMethod: PaymentMethod;
   onDiscountValueChange: (value: string) => void;
   onDiscountTypeChange: (type: 'flat' | 'percent') => void;
@@ -41,6 +45,8 @@ export default function OrderCart({
   discountValue,
   discountType,
   discountAmount,
+  taxRate,
+  taxAmount,
   paymentMethod,
   onDiscountValueChange,
   onDiscountTypeChange,
@@ -51,9 +57,12 @@ export default function OrderCart({
   onClearCart,
   onCharge,
 }: OrderCartProps) {
+  const { formatMoney, currencySymbol } = useSettings();
   const subtotal = cart.reduce((sum: number, item: CartItem) => sum + (item.price * item.qty), 0);
   const appliedDelivery = orderType === 'Delivery' ? deliveryCharge : 0;
-  const total = Math.max(0, subtotal - discountAmount) + appliedDelivery;
+  // Tax sits between the discount and the delivery fee, matching the order the
+  // server applies them in.
+  const total = Math.max(0, subtotal - discountAmount) + taxAmount + appliedDelivery;
 
   return (
     <div
@@ -103,11 +112,11 @@ export default function OrderCart({
                     {item.name}
                   </div>
                   <div style={{ fontSize: 13, fontWeight: 700, color: '#111110', flexShrink: 0 }}>
-                    Rs. {(item.price * item.qty).toLocaleString()}
+                    {formatMoney(item.price * item.qty)}
                   </div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <div style={{ fontSize: 12, color: '#A3A39A' }}>Rs. {item.price.toLocaleString()} each</div>
+                  <div style={{ fontSize: 12, color: '#A3A39A' }}>{formatMoney(item.price)} each</div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <button
                       onClick={() => onUpdateQty(item.id, item.name, -1)}
@@ -188,7 +197,7 @@ export default function OrderCart({
 
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
           <span style={{ fontSize: 13, color: '#A3A39A' }}>Subtotal</span>
-          <span style={{ fontSize: 13, fontWeight: 500, color: '#111110' }}>Rs. {subtotal.toLocaleString()}</span>
+          <span style={{ fontSize: 13, fontWeight: 500, color: '#111110' }}>{formatMoney(subtotal)}</span>
         </div>
         {/* FIX (Bug 6): this row used to be a hardcoded "- Rs. 0" label. */}
         <div style={{
@@ -212,7 +221,7 @@ export default function OrderCart({
                     }}
                     title={type === 'flat' ? 'Flat amount' : 'Percent of subtotal'}
                   >
-                    {type === 'flat' ? 'Rs' : '%'}
+                    {type === 'flat' ? currencySymbol : '%'}
                   </button>
                 );
               })}
@@ -246,7 +255,17 @@ export default function OrderCart({
               Discount applied{discountType === 'percent' ? ` (${Number(discountValue) || 0}%)` : ''}
             </span>
             <span style={{ fontSize: 13, fontWeight: 600, color: '#16A34A' }}>
-              − Rs. {discountAmount.toLocaleString()}
+              − {formatMoney(discountAmount)}
+            </span>
+          </div>
+        )}
+        {taxAmount > 0 && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 14 }}>
+            <span style={{ fontSize: 13, color: '#A3A39A' }}>
+              Tax{taxRate ? ` (${taxRate}%)` : ''}
+            </span>
+            <span style={{ fontSize: 13, fontWeight: 500, color: '#111110' }}>
+              {formatMoney(taxAmount, { decimals: taxAmount % 1 !== 0 })}
             </span>
           </div>
         )}
@@ -257,7 +276,7 @@ export default function OrderCart({
             borderBottom: '1px solid #EBEBEB',
           }}>
             <span style={{ fontSize: 13, color: '#A3A39A' }}>Delivery Charge</span>
-            <span style={{ fontSize: 13, fontWeight: 500, color: '#111110' }}>Rs. {deliveryCharge.toLocaleString()}</span>
+            <span style={{ fontSize: 13, fontWeight: 500, color: '#111110' }}>{formatMoney(deliveryCharge)}</span>
           </div>
         )}
         {orderType !== 'Delivery' && (
@@ -265,7 +284,7 @@ export default function OrderCart({
         )}
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
           <span style={{ fontSize: 16, fontWeight: 700, color: '#111110' }}>Total</span>
-          <span style={{ fontSize: 16, fontWeight: 700, color: '#DC2626' }}>Rs. {total.toLocaleString()}</span>
+          <span style={{ fontSize: 16, fontWeight: 700, color: '#DC2626' }}>{formatMoney(total, { decimals: total % 1 !== 0 })}</span>
         </div>
 
         {/* FIX (Bug 6): payment method was hardcoded to 'Cash' on every order,

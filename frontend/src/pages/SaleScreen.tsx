@@ -1,15 +1,16 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import TopBar from '@/components/pos/TopBar';
 import MenuPanel from '@/components/pos/MenuPanel';
 import OrderCart from '@/components/pos/OrderCart';
 import ReceiptModal from '@/components/pos/ReceiptModal';
 import Modal from '@/components/pos-ui/Modal';
-import { ordersAPI, settingsAPI } from '@/api/index';
+import { ordersAPI } from '@/api/index';
 import { Loader2, CreditCard } from 'lucide-react';
 import { usePOS } from '@/lib/POSContext';
 import { useAuth } from '@/context/AuthContext';
 import moment from 'moment';
 import { PAYMENT_METHODS, type PaymentMethod } from '@/lib/constants';
+import { useSettings } from '@/lib/SettingsContext';
 
 interface CartItem {
   id: number;
@@ -41,6 +42,8 @@ interface ReceiptData {
   items: { name: string; quantity: number; price: number }[];
   subtotal: number;
   discount: number;
+  taxRate: number;
+  taxAmount: number;
   deliveryCharge: number;
   total: number;
   restaurant: RestaurantDetails;
@@ -54,7 +57,7 @@ export default function SaleScreen({ onNavigate }: SaleScreenProps = {}) {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [search, setSearch] = useState('');
   const [orderType, setOrderType] = useState<'Dine-in' | 'Delivery'>('Dine-in');
-  const [deliveryPrice, setDeliveryPrice] = useState(0);
+
   /**
    * FIX (Bug 6): discount, payment method and table number were hardcoded to
    * 0 / 'Cash' / '—' at checkout even though the database, the reports and
@@ -64,35 +67,14 @@ export default function SaleScreen({ onNavigate }: SaleScreenProps = {}) {
   const [discountType, setDiscountType] = useState<'flat' | 'percent'>('flat');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('Cash');
   const [tableNumber, setTableNumber] = useState('');
-  const [restaurantDetails, setRestaurantDetails] = useState<RestaurantDetails>({
-    name: '',
-    tagline: '',
-    address: '',
-    phone: '',
-    footerMessage: 'Thank you for visiting!',
-  });
   const [receiptData, setReceiptData] = useState<ReceiptData | null>(null);
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
   const { loading } = usePOS();
   const { currentUser } = useAuth();
 
-  useEffect(() => {
-    const loadSettings = () => {
-      settingsAPI.getAll().then((data) => {
-        setDeliveryPrice(Number(data.delivery_price) || 0);
-        setRestaurantDetails({
-          name: data.restaurant_name || '',
-          tagline: data.restaurant_tagline || '',
-          address: data.restaurant_address || '',
-          phone: data.restaurant_phone || '',
-          footerMessage: data.receipt_footer || 'Thank you for visiting!',
-        });
-      }).catch(() => {});
-    };
-    loadSettings();
-    window.addEventListener('focus', loadSettings);
-    return () => window.removeEventListener('focus', loadSettings);
-  }, []);
+  // Delivery price, tax rate and the shop's details come from the shared
+  // settings provider, which already refetches when the window regains focus.
+  const { restaurant: restaurantDetails, deliveryPrice, taxRate, formatMoney, refresh: refreshSettings } = useSettings();
 
   const subtotal = cart.reduce((sum, item) => sum + item.price * item.qty, 0);
   const deliveryCharge = orderType === 'Delivery' ? deliveryPrice : 0;
@@ -104,7 +86,14 @@ export default function SaleScreen({ onNavigate }: SaleScreenProps = {}) {
     ? (subtotal * (Number(discountValue) || 0)) / 100
     : (Number(discountValue) || 0);
   const discount = Math.min(Math.max(0, Math.round(rawDiscount)), subtotal);
-  const total = Math.max(0, subtotal - discount) + deliveryCharge;
+
+  // Tax applies to the discounted subtotal, and delivery is added afterwards,
+  // so the rider's fee is neither discounted nor taxed. The server recomputes
+  // all of this from its own tax_rate setting — these figures are for display
+  // only, and the receipt uses whatever the server actually stored.
+  const taxable = Math.max(0, subtotal - discount);
+  const taxAmount = Math.round(taxable * taxRate) / 100;
+  const total = taxable + taxAmount + deliveryCharge;
 
   const handleAddToCart = (item: { id: number; name: string; price: number; isDeal?: boolean; variant_id?: number | null }) => {
     setCart((prev: CartItem[]) => {
@@ -143,13 +132,10 @@ export default function SaleScreen({ onNavigate }: SaleScreenProps = {}) {
 
   const handleOrderTypeChange = (type: 'Dine-in' | 'Delivery') => {
     setOrderType(type);
-    if (type === 'Delivery') {
-      settingsAPI.getAll().then((data) => {
-        setDeliveryPrice(Number(data.delivery_price) || 0);
-      }).catch((err) => {
-        console.error('Failed to load delivery price from settings:', err);
-      });
-    }
+    // Pick up a delivery price changed in Settings since this screen loaded.
+    // The provider owns the value now, so this refreshes it rather than
+    // keeping a second copy in local state.
+    if (type === 'Delivery') refreshSettings();
   };
 
   const handleCharge = () => setConfirmModalOpen(true);
@@ -193,10 +179,15 @@ export default function SaleScreen({ onNavigate }: SaleScreenProps = {}) {
           quantity: c.qty,
           price: c.price,
         })),
-        subtotal,
-        discount,
-        deliveryCharge,
-        total,
+        // Prefer the figures the server computed and stored. The client's
+        // arithmetic is only for live display; if the two ever disagree the
+        // receipt must match what was actually recorded against the sale.
+        subtotal: order.subtotal ?? subtotal,
+        discount: order.discount ?? discount,
+        taxRate: order.tax_rate ?? taxRate,
+        taxAmount: order.tax_amount ?? taxAmount,
+        deliveryCharge: order.delivery_charge ?? deliveryCharge,
+        total: order.total ?? total,
         restaurant: restaurantDetails,
       });
 
@@ -234,6 +225,8 @@ export default function SaleScreen({ onNavigate }: SaleScreenProps = {}) {
           discountValue={discountValue}
           discountType={discountType}
           discountAmount={discount}
+          taxRate={taxRate}
+          taxAmount={taxAmount}
           paymentMethod={paymentMethod}
           onDiscountValueChange={setDiscountValue}
           onDiscountTypeChange={setDiscountType}
@@ -274,14 +267,14 @@ export default function SaleScreen({ onNavigate }: SaleScreenProps = {}) {
             {deliveryCharge > 0 && (
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
                 <span style={{ fontSize: 13, color: '#A3A39A' }}>Delivery Charge</span>
-                <span style={{ fontSize: 13, fontWeight: 600, color: '#111110' }}>Rs. {deliveryCharge.toLocaleString()}</span>
+                <span style={{ fontSize: 13, fontWeight: 600, color: '#111110' }}>{formatMoney(deliveryCharge)}</span>
               </div>
             )}
             {discount > 0 && (
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
                 <span style={{ fontSize: 13, color: '#A3A39A' }}>Discount</span>
                 <span style={{ fontSize: 13, fontWeight: 600, color: '#16A34A' }}>
-                  − Rs. {discount.toLocaleString()}
+                  − {formatMoney(discount)}
                   {discountType === 'percent' ? ` (${Number(discountValue) || 0}%)` : ''}
                 </span>
               </div>
@@ -299,7 +292,7 @@ export default function SaleScreen({ onNavigate }: SaleScreenProps = {}) {
             <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 8, borderTop: '1px solid #EBEBEB' }}>
               <span style={{ fontSize: 14, fontWeight: 700, color: '#111110' }}>Total</span>
               <span style={{ fontSize: 16, fontWeight: 700, color: '#DC2626' }}>
-                Rs. {total.toLocaleString()}
+                {formatMoney(total, { decimals: total % 1 !== 0 })}
               </span>
             </div>
           </div>

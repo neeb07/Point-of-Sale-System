@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Plus, Pencil, Trash2, Tag, X, Upload, Package, ChevronDown } from 'lucide-react';
 import { dealsAPI, menuAPI } from '../api/index';
 import { DEAL_GROUPS } from '@/lib/constants';
+import { useSettings } from '@/lib/SettingsContext';
 
 interface Variant {
   id: number;
@@ -68,6 +69,7 @@ const RED = '#EF4444';
 const GREEN = '#22C55E';
 
 export default function Deals() {
+  const { formatMoney, currencySymbol } = useSettings();
   const [deals, setDeals] = useState<Deal[]>([]);
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -391,11 +393,11 @@ export default function Deals() {
                   {/* Price row */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                     <span style={{ fontSize: 18, fontWeight: 800, color: ORANGE }}>
-                      Rs. {deal.price.toLocaleString()}
+                      {formatMoney(deal.price)}
                     </span>
                     {originalTotal > deal.price && (
                       <span style={{ fontSize: 13, color: TEXT_LIGHT, textDecoration: 'line-through' }}>
-                        Rs. {originalTotal.toLocaleString()}
+                        {formatMoney(originalTotal)}
                       </span>
                     )}
                   </div>
@@ -643,13 +645,13 @@ export default function Deals() {
               {/* Deal Price */}
               <div style={{ marginBottom: 20 }}>
                 <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: TEXT_GRAY, textTransform: 'uppercase', letterSpacing: '0.8px', marginBottom: 8 }}>
-                  Deal Price (Rs.) *
+                  Deal Price ({currencySymbol}) *
                 </label>
                 <div style={{ position: 'relative' }}>
                   <span style={{
                     position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)',
                     color: TEXT_GRAY, fontSize: 14, fontWeight: 600, pointerEvents: 'none',
-                  }}>Rs.</span>
+                  }}>{currencySymbol}</span>
                   <input
                     type="number"
                     value={formPrice}
@@ -670,7 +672,7 @@ export default function Deals() {
                 {originalPrice > 0 && Number(formPrice) > 0 && (
                   <div style={{ marginTop: 6, fontSize: 12, color: savings > 0 ? '#16A34A' : RED }}>
                     {savings > 0
-                      ? `✓ Customer saves Rs. ${savings.toLocaleString()} (${Math.round((savings/originalPrice)*100)}% off)` 
+                      ? `✓ Customer saves ${formatMoney(savings)} (${Math.round((savings/originalPrice)*100)}% off)` 
                       : `⚠ Deal price is higher than individual item prices` 
                     }
                   </div>
@@ -724,7 +726,7 @@ export default function Deals() {
                               <div style={{ fontSize: 11, color: TEXT_GRAY }}>{item.category}</div>
                             </div>
                             <div style={{ fontSize: 13, fontWeight: 700, color: ORANGE }}>
-                              {item.has_variants === 1 ? 'Choose size' : `Rs. ${item.price}`}
+                              {item.has_variants === 1 ? 'Choose size' : formatMoney(item.price)}
                             </div>
                           </div>
                         ))}
@@ -753,7 +755,7 @@ export default function Deals() {
                         <div style={{ flex: 1 }}>
                           <div style={{ fontSize: 13, fontWeight: 600, color: TEXT_DARK }}>{lineName(item)}</div>
                           <div style={{ fontSize: 12, color: TEXT_GRAY }}>
-                            Rs. {lineUnitPrice(item).toLocaleString()} each
+                            {formatMoney(lineUnitPrice(item))} each
                           </div>
                         </div>
 
@@ -783,7 +785,7 @@ export default function Deals() {
                         </div>
 
                         <div style={{ fontSize: 13, fontWeight: 700, color: TEXT_DARK, minWidth: 70, textAlign: 'right' }}>
-                          Rs. {(lineUnitPrice(item) * item.quantity).toLocaleString()}
+                          {formatMoney(lineUnitPrice(item) * item.quantity)}
                         </div>
 
                         <button
@@ -810,7 +812,7 @@ export default function Deals() {
                     }}>
                       <span style={{ fontSize: 13, color: TEXT_GRAY }}>Items total</span>
                       <span style={{ fontSize: 13, fontWeight: 700, color: TEXT_DARK }}>
-                        Rs. {originalPrice.toLocaleString()}
+                        {formatMoney(originalPrice)}
                       </span>
                     </div>
                   </div>
@@ -930,7 +932,7 @@ export default function Deals() {
                 >
                   <span style={{ fontSize: 14, fontWeight: 600, color: TEXT_DARK }}>{v.label}</span>
                   <span style={{ fontSize: 14, fontWeight: 700, color: ORANGE }}>
-                    Rs. {v.price.toLocaleString()}
+                    {formatMoney(v.price)}
                   </span>
                 </button>
               ))}

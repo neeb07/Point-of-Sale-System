@@ -223,6 +223,13 @@ try { db.exec("ALTER TABLE orders ADD COLUMN shift_id INTEGER DEFAULT NULL;"); }
 // FIX (Bug 6): the Sale screen collected no table/token number even though
 // receipts displayed a placeholder for it.
 try { db.exec("ALTER TABLE orders ADD COLUMN table_number TEXT DEFAULT NULL;"); } catch(e) {}
+// Tax is stored per order: both the rate that applied at the time and the
+// amount it produced. Keeping the rate means an old receipt still reprints
+// with the tax it was actually charged after the owner changes the rate, and
+// keeping the amount means reports never have to re-derive it.
+try { db.exec("ALTER TABLE orders ADD COLUMN tax_rate REAL DEFAULT 0;"); } catch(e) {}
+try { db.exec("ALTER TABLE orders ADD COLUMN tax_amount REAL DEFAULT 0;"); } catch(e) {}
+
 // Menu items are retired rather than deleted. A hard DELETE failed outright
 // with "FOREIGN KEY constraint failed" whenever the item belonged to a deal,
 // and when it did succeed it broke sales-by-category for every past order

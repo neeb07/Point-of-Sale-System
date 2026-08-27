@@ -27,7 +27,17 @@ router.post('/', (req, res) => {
     (sum, i) => sum + (Number(i.price) || 0) * (Number(i.quantity) || 0), 0
   );
   const cappedDiscount = Math.min(safeDiscount, itemsSubtotal);
-  const computedTotal = Math.max(0, itemsSubtotal - cappedDiscount + safeDelivery);
+
+  // Tax rate comes from settings, never from the request: the client must not
+  // be able to choose what tax a sale is charged. It is applied to the
+  // discounted subtotal, and the delivery fee is added afterwards so the rider's
+  // charge is neither discounted nor taxed.
+  const taxRateRow = db.prepare("SELECT value FROM settings WHERE key = 'tax_rate'").get();
+  const taxRate = Math.max(0, Number(taxRateRow && taxRateRow.value) || 0);
+  const taxable = Math.max(0, itemsSubtotal - cappedDiscount);
+  const taxAmount = Math.round(taxable * taxRate) / 100;
+
+  const computedTotal = Math.max(0, taxable + taxAmount + safeDelivery);
 
   // Trust the server figure; log when the client disagreed.
   if (Number(total) !== computedTotal) {
@@ -49,8 +59,9 @@ router.post('/', (req, res) => {
       // the previous trading day in reports, shift totals and receipts.
       `INSERT INTO orders
          (total, discount, payment_method, status, cashier_id, cashier_name,
-          order_type, delivery_charge, table_number, shift_id, created_at)
-       VALUES (?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))`
+          order_type, delivery_charge, table_number, shift_id, created_at,
+          tax_rate, tax_amount)
+       VALUES (?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'), ?, ?)`
     ).run(
       computedTotal,
       cappedDiscount,
@@ -60,7 +71,9 @@ router.post('/', (req, res) => {
       order_type || 'Dine-in',
       safeDelivery,
       table_number || null,
-      openShift ? openShift.id : null
+      openShift ? openShift.id : null,
+      taxRate,
+      taxAmount
     );
 
     const orderId = orderResult.lastInsertRowid;
@@ -108,7 +121,18 @@ router.post('/', (req, res) => {
 
   try {
     const orderId = createOrder();
-    res.status(201).json({ success: true, id: orderId, total: computedTotal, discount: cappedDiscount });
+    res.status(201).json({
+      success: true,
+      id: orderId,
+      total: computedTotal,
+      discount: cappedDiscount,
+      // Returned so the receipt prints the figures the server actually stored
+      // rather than the client's own arithmetic.
+      subtotal: itemsSubtotal,
+      tax_rate: taxRate,
+      tax_amount: taxAmount,
+      delivery_charge: safeDelivery,
+    });
   } catch (err) {
     console.error('Error creating order:', err);
     res.status(500).json({ error: err.message });

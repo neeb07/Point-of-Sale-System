@@ -6,10 +6,12 @@ import PageNotFound from './lib/PageNotFound';
 import ScrollToTop from './components/ScrollToTop';
 import Home from '@/pages/Home';
 import { AuthProvider } from './context/AuthContext';
+import { SettingsProvider } from './lib/SettingsContext';
 
 function App() {
   return (
     <AuthProvider>
+      <SettingsProvider>
       <QueryClientProvider client={queryClientInstance}>
         <Router>
           <ScrollToTop />
@@ -20,6 +22,7 @@ function App() {
         </Router>
         <Toaster />
       </QueryClientProvider>
+      </SettingsProvider>
     </AuthProvider>
   )
 }

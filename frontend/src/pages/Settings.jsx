@@ -7,6 +7,7 @@ import Toast from '@/components/pos-ui/Toast';
 import Modal from '@/components/pos-ui/Modal';
 import { settingsAPI, reportsAPI, shiftsAPI } from '@/api/index';
 import { useAuth } from '@/context/AuthContext';
+import { useSettings } from '@/lib/SettingsContext';
 
 const NAV_ITEMS = [
   { id: 'restaurant', label: 'Restaurant', icon: Store },
@@ -74,6 +75,10 @@ function FieldLabel({ label, helper }) {
 }
 
 export default function Settings() {
+  // Saved settings are read back through the shared provider so this screen
+  // renders money the same way the rest of the app does. `refreshSettings` is
+  // called after a save so the change reaches the sale screen immediately.
+  const { formatMoney, currencySymbol, refresh: refreshSettings } = useSettings();
   const { currentUser } = useAuth();
   const [activeSection, setActiveSection] = useState('restaurant');
   const [toast, setToast] = useState(null);
@@ -214,7 +219,34 @@ export default function Settings() {
       receipt_footer: profile.footerMessage,
     });
     setProfileOriginal({ ...profile });
+    refreshSettings();
     setToast({ message: 'Settings saved successfully', type: 'success' });
+  };
+
+  /**
+   * Persist a receipt option immediately.
+   *
+   * These toggles previously only set React state — there was no Save button
+   * in this section and nothing ever wrote them to the backend, so every
+   * change was lost on navigation. They are switches, so saving on change is
+   * the least surprising behaviour.
+   */
+  const updateReceiptSetting = async (patch) => {
+    const next = { ...receiptSettings, ...patch };
+    setReceiptSettings(next);
+    try {
+      await settingsAPI.update({
+        auto_print: String(next.autoPrint),
+        show_tax: String(next.showTax),
+        show_cashier: String(next.showCashier),
+        show_order_number: String(next.showOrderNumber),
+        show_payment: String(next.showPayment),
+        paper_size: next.paperSize,
+      });
+      refreshSettings();
+    } catch (err) {
+      setToast({ message: err.message || 'Could not save receipt settings', type: 'error' });
+    }
   };
 
   const handleSaveTax = async () => {
@@ -225,6 +257,7 @@ export default function Settings() {
       delivery_price: String(tax.deliveryPrice),
     });
     setTaxOriginal({ ...tax });
+    refreshSettings();
     setToast({ message: 'Tax & pricing saved successfully', type: 'success' });
   };
 
@@ -311,7 +344,7 @@ export default function Settings() {
       setToast({
         message: variance === 0
           ? 'Shift closed — drawer balanced'
-          : `Shift closed — drawer ${variance > 0 ? 'over' : 'short'} by Rs. ${Math.abs(variance).toLocaleString()}`,
+          : `Shift closed — drawer ${variance > 0 ? 'over' : 'short'} by ${formatMoney(Math.abs(variance))}`,
         type: variance === 0 ? 'success' : 'error',
       });
     } catch (err) {
@@ -477,17 +510,17 @@ export default function Settings() {
 
   const renderReceipt = () => (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      <Toggle value={receiptSettings.autoPrint} onChange={(v) => setReceiptSettings({ ...receiptSettings, autoPrint: v })} label="Auto-print after charge" hint="Automatically sends to printer when order is completed" />
-      <Toggle value={receiptSettings.showTax} onChange={(v) => setReceiptSettings({ ...receiptSettings, showTax: v })} label="Show tax on receipt" hint="Displays tax breakdown line" />
-      <Toggle value={receiptSettings.showCashier} onChange={(v) => setReceiptSettings({ ...receiptSettings, showCashier: v })} label="Show cashier name" hint="Prints who processed the order" />
-      <Toggle value={receiptSettings.showOrderNumber} onChange={(v) => setReceiptSettings({ ...receiptSettings, showOrderNumber: v })} label="Show order number" hint="Prints the order # at the top" />
-      <Toggle value={receiptSettings.showPayment} onChange={(v) => setReceiptSettings({ ...receiptSettings, showPayment: v })} label="Show payment method" hint="Prints Cash or Card" />
+      <Toggle value={receiptSettings.autoPrint} onChange={(v) => updateReceiptSetting({ autoPrint: v })} label="Auto-print after charge" hint="Automatically sends to printer when order is completed" />
+      <Toggle value={receiptSettings.showTax} onChange={(v) => updateReceiptSetting({ showTax: v })} label="Show tax on receipt" hint="Displays tax breakdown line" />
+      <Toggle value={receiptSettings.showCashier} onChange={(v) => updateReceiptSetting({ showCashier: v })} label="Show cashier name" hint="Prints who processed the order" />
+      <Toggle value={receiptSettings.showOrderNumber} onChange={(v) => updateReceiptSetting({ showOrderNumber: v })} label="Show order number" hint="Prints the order # at the top" />
+      <Toggle value={receiptSettings.showPayment} onChange={(v) => updateReceiptSetting({ showPayment: v })} label="Show payment method" hint="Prints Cash or Card" />
       <div>
         <FieldLabel label="Paper Size" />
         <SegmentedButton
           options={[{ value: '58mm', label: '58mm' }, { value: '80mm', label: '80mm' }]}
           value={receiptSettings.paperSize}
-          onChange={(v) => setReceiptSettings({ ...receiptSettings, paperSize: v })}
+          onChange={(v) => updateReceiptSetting({ paperSize: v })}
         />
       </div>
     </div>
@@ -568,14 +601,14 @@ export default function Settings() {
           </div>
           <div style={{ fontSize: 14, color: '#374151', marginBottom: 8 }}>Duration: {duration}</div>
           <div style={{ fontSize: 14, color: '#374151', marginBottom: 8 }}>Opened by: {currentShift?.staff_name || '—'}</div>
-          <div style={{ fontSize: 14, color: '#374151', marginBottom: 8 }}>Opening float: Rs. {Number(currentShift?.opening_cash || 0).toLocaleString()}</div>
+          <div style={{ fontSize: 14, color: '#374151', marginBottom: 8 }}>Opening float: {formatMoney(currentShift?.opening_cash || 0)}</div>
           <div style={{ fontSize: 14, color: '#374151', marginBottom: 8 }}>Orders so far: {shiftOrders}</div>
-          <div style={{ fontSize: 14, color: '#374151', marginBottom: 8 }}>Revenue so far: Rs. {shiftRevenue.toLocaleString()}</div>
+          <div style={{ fontSize: 14, color: '#374151', marginBottom: 8 }}>Revenue so far: {formatMoney(shiftRevenue)}</div>
           <div style={{ fontSize: 13, color: '#6B7280', marginBottom: 8 }}>
-            Cash: Rs. {shiftCashRevenue.toLocaleString()} · Card/Online: Rs. {Number(currentShift?.non_cash_revenue || 0).toLocaleString()}
+            Cash: {formatMoney(shiftCashRevenue)} · Card/Online: {formatMoney(currentShift?.non_cash_revenue || 0)}
           </div>
           <div style={{ fontSize: 13, color: '#6B7280', marginBottom: 16 }}>
-            Expected in drawer: Rs. {expectedCash.toLocaleString()}
+            Expected in drawer: {formatMoney(expectedCash)}
           </div>
           <button
             onClick={() => setCloseShiftModal(true)}
@@ -611,7 +644,7 @@ export default function Settings() {
               {opened ? opened.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
               {' · '}{fmtTime(opened)}–{fmtTime(closed)}
               {' · '}{sh.total_orders} orders
-              {' · '}Rs. {Number(sh.total_revenue || 0).toLocaleString()}
+              {' · '}{formatMoney(sh.total_revenue || 0)}
               {' · '}{sh.staff_name || '—'}
             </div>
             <div style={{
@@ -620,7 +653,7 @@ export default function Settings() {
             }}>
               {variance === 0
                 ? 'Balanced'
-                : `${variance > 0 ? '+' : '−'}Rs. ${Math.abs(variance).toLocaleString()}`}
+                : `${variance > 0 ? '+' : '−'}${formatMoney(Math.abs(variance))}`}
             </div>
           </div>
         );
@@ -768,7 +801,7 @@ export default function Settings() {
       doc.setFont("helvetica", "normal");
       doc.text(`Total Revenue (Kul Aamdani):`, 20, 85);
       doc.setFont("helvetica", "bold");
-      doc.text(`Rs. ${totalRevenue.toLocaleString()}`, 150, 85);
+      doc.text(formatMoney(totalRevenue), 150, 85);
       
       let y = 105;
       if (topItems.length > 0) {
@@ -798,7 +831,7 @@ export default function Settings() {
       doc.setFontSize(12);
       doc.setFont("helvetica", "normal");
       const insightText = totalOrders > 0 
-        ? `Aaj ki sales report kafi achi hai! Total ${totalOrders} orders receive hue hain aur overall revenue Rs. ${totalRevenue.toLocaleString()} raha. Keep it up and try to push more sales on the top items!`
+        ? `Aaj ki sales report kafi achi hai! Total ${totalOrders} orders receive hue hain aur overall revenue ${formatMoney(totalRevenue)} raha. Keep it up and try to push more sales on the top items!`
         : `Aaj abhi tak koi order receive nahi hua.`;
       
       const splitText = doc.splitTextToSize(insightText, 170);
@@ -808,7 +841,7 @@ export default function Settings() {
       const fileName = `TastyBites_Daily_Report_${today}.pdf`;
       const pdfFile = new File([pdfBlob], fileName, { type: 'application/pdf' });
       
-      const textMsg = `*Aaj Ki Report (${dateStr})*\n\n*Orders:* ${totalOrders}\n*Revenue:* Rs. ${totalRevenue}\n\n_Detailed report PDF file attach kar di gayi hai!_`;
+      const textMsg = `*Aaj Ki Report (${dateStr})*\n\n*Orders:* ${totalOrders}\n*Revenue:* ${formatMoney(totalRevenue)}\n\n_Detailed report PDF file attach kar di gayi hai!_`;
       
       // 2. Share or Download
       let shared = false;
@@ -925,7 +958,7 @@ export default function Settings() {
 
       <Modal isOpen={openShiftModal} onClose={() => setOpenShiftModal(false)} title="Open Shift">
         <div>
-          <FieldLabel label="Opening Cash Amount (Rs.)" />
+          <FieldLabel label={`Opening Cash Amount (${currencySymbol})`} />
           <input style={INPUT_STYLE} type="number" value={openingCash} onChange={(e) => setOpeningCash(e.target.value)} />
           <button
             onClick={handleStartShift}
@@ -947,14 +980,14 @@ export default function Settings() {
           <div style={{ fontSize: 14, color: '#374151' }}>Start: {shiftStart ? new Date(shiftStart).toLocaleTimeString() : '—'}</div>
           <div style={{ fontSize: 14, color: '#374151' }}>End: {new Date().toLocaleTimeString()}</div>
           <div style={{ fontSize: 14, color: '#374151' }}>Total orders: {shiftOrders}</div>
-          <div style={{ fontSize: 14, color: '#374151' }}>Total revenue: Rs. {shiftRevenue.toLocaleString()}</div>
-          <div style={{ fontSize: 14, color: '#374151' }}>Total discounts given: Rs. {shiftDiscounts.toLocaleString()}</div>
+          <div style={{ fontSize: 14, color: '#374151' }}>Total revenue: {formatMoney(shiftRevenue)}</div>
+          <div style={{ fontSize: 14, color: '#374151' }}>Total discounts given: {formatMoney(shiftDiscounts)}</div>
           <div style={{ fontSize: 13, color: '#6B7280', paddingTop: 4, borderTop: '1px solid #F3F4F6' }}>
-            Opening float: Rs. {Number(currentShift?.opening_cash || 0).toLocaleString()}
-            {' + '}Cash sales: Rs. {shiftCashRevenue.toLocaleString()}
+            Opening float: {formatMoney(currentShift?.opening_cash || 0)}
+            {' + '}Cash sales: {formatMoney(shiftCashRevenue)}
           </div>
           <div style={{ fontSize: 14, fontWeight: 600, color: '#111827' }}>
-            Expected cash in drawer: Rs. {expectedCash.toLocaleString()}
+            Expected cash in drawer: {formatMoney(expectedCash)}
           </div>
           <div style={{ fontSize: 12, color: '#9CA3AF' }}>
             Card and online sales are excluded — they never enter the till.
@@ -965,7 +998,7 @@ export default function Settings() {
           </div>
           {actualCash && (
             <div style={{ fontSize: 14, fontWeight: 600, color: cashDiff >= 0 ? '#16A34A' : '#DC2626' }}>
-              Cash Difference: {cashDiff >= 0 ? '+' : ''}Rs. {cashDiff.toLocaleString()}
+              Cash Difference: {cashDiff >= 0 ? '+' : ''}{formatMoney(cashDiff)}
             </div>
           )}
           <button

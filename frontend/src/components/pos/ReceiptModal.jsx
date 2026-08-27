@@ -1,7 +1,8 @@
 // @ts-nocheck
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { X, Printer } from 'lucide-react';
 import Receipt, { COPY_TYPES } from './Receipt';
+import { useSettings } from '@/lib/SettingsContext';
 
 const COPY_TABS = [
   { value: 'all', label: 'All 3' },
@@ -10,7 +11,7 @@ const COPY_TABS = [
   { value: 'restaurant', label: 'Restaurant' },
 ];
 
-export default function ReceiptModal({ open, onClose, orderData }) {
+export default function ReceiptModal({ open, onClose, orderData, autoPrintEnabled = true }) {
   /**
    * Which copies go to the printer. Defaults to all three, which is the
    * normal flow — the cashier hits Print once and separates the stack.
@@ -18,6 +19,34 @@ export default function ReceiptModal({ open, onClose, orderData }) {
    * damaged, lost, or the customer asks for another.
    */
   const [selection, setSelection] = useState('all');
+  const { autoPrint } = useSettings();
+
+  /**
+   * Settings has an "auto print" switch that nothing ever read, so a shop that
+   * turned it on still had to click Print on every single sale.
+   *
+   * The guard matters: this fires once per receipt, not on every render, and
+   * the ref is reset when the modal closes so the next sale prints again. A
+   * reprint opened from the Orders screen passes autoPrintEnabled={false},
+   * because silently firing the printer on a reprint would be a surprise.
+   */
+  const printedFor = useRef(null);
+
+  useEffect(() => {
+    if (!open || !orderData) {
+      printedFor.current = null;
+      return;
+    }
+    if (!autoPrint || !autoPrintEnabled) return;
+
+    const key = orderData?.orderInfo?.orderNumber ?? 'current';
+    if (printedFor.current === key) return;
+    printedFor.current = key;
+
+    // Let the receipts paint before handing off to the print dialog.
+    const t = setTimeout(() => window.print(), 300);
+    return () => clearTimeout(t);
+  }, [open, orderData, autoPrint, autoPrintEnabled]);
 
   if (!open || !orderData) return null;
 
