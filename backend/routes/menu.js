@@ -33,7 +33,7 @@ router.get('/', (req, res) => {
 
 // Add new item
 router.post('/', (req, res) => {
-  const { name, category, price, image_url, variants } = req.body;
+  const { name, category, price, image_url, variants, description } = req.body;
   
   if (!name || !category) {
     return res.status(400).json({ error: 'name and category are required' });
@@ -63,8 +63,8 @@ router.post('/', (req, res) => {
       const dbHasVariants = hasVariants ? 1 : 0;
       
       const result = db.prepare(
-        'INSERT INTO menu_items (name, category, price, image_url, has_variants) VALUES (?, ?, ?, ?, ?)'
-      ).run(name, category, dbPrice, image_url || null, dbHasVariants);
+        'INSERT INTO menu_items (name, category, price, image_url, has_variants, description) VALUES (?, ?, ?, ?, ?, ?)'
+      ).run(name, category, dbPrice, image_url || null, dbHasVariants, description || null);
       
       const itemId = result.lastInsertRowid;
       
@@ -96,7 +96,7 @@ router.post('/', (req, res) => {
 
 // Update item
 router.put('/:id', (req, res) => {
-  const { name, category, price, image_url, variants } = req.body;
+  const { name, category, price, image_url, variants, description } = req.body;
   const { id } = req.params;
   
   if (!name || !category) {
@@ -126,8 +126,8 @@ router.put('/:id', (req, res) => {
       const dbHasVariants = hasVariants ? 1 : 0;
       
       db.prepare(
-        'UPDATE menu_items SET name = ?, category = ?, price = ?, image_url = ?, has_variants = ? WHERE id = ?'
-      ).run(name, category, dbPrice, image_url || null, dbHasVariants, id);
+        'UPDATE menu_items SET name = ?, category = ?, price = ?, image_url = ?, has_variants = ?, description = ? WHERE id = ?'
+      ).run(name, category, dbPrice, image_url || null, dbHasVariants, description || null, id);
       
       // Delete existing variants
       db.prepare('DELETE FROM item_variants WHERE menu_item_id = ?').run(id);

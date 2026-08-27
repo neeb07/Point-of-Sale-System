@@ -149,6 +149,18 @@ export default function MenuManagement() {
               <div style={{ marginLeft: 14, flex: 1, minWidth: 0 }}>
                 <div style={{ color: '#FFFFFF', fontWeight: 700, fontSize: 15 }}>{item.name}</div>
                 <div style={{ color: 'rgba(255,255,255,0.8)', fontSize: 12 }}>{item.category}</div>
+                {/* The ingredient line printed under the item on the menu card. */}
+                {item.description && (
+                  <div
+                    style={{
+                      color: 'rgba(255,255,255,0.65)', fontSize: 11, marginTop: 2,
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }}
+                    title={item.description}
+                  >
+                    {item.description}
+                  </div>
+                )}
               </div>
               <div style={{ color: '#FFFFFF', fontWeight: 700, fontSize: 16, marginRight: 16 }}>
                 {item.has_variants === 1 ? (
@@ -226,6 +238,7 @@ function ItemModal({ item, categories = MENU_CATEGORIES, onClose, onSave }) {
   // FIX (Bug 2): the default was 'Starters', a category that does not exist.
   const [category, setCategory] = useState(item?.category || DEFAULT_CATEGORY);
   const [imageUrl, setImageUrl] = useState(item?.image_url || '');
+  const [description, setDescription] = useState(item?.description || '');
   // Lets staff introduce a genuinely new category without a code change.
   const [addingCategory, setAddingCategory] = useState(false);
   const [newCategory, setNewCategory] = useState('');
@@ -252,6 +265,7 @@ function ItemModal({ item, categories = MENU_CATEGORIES, onClose, onSave }) {
       price: Number(price) || 0,
       category: finalCategory,
       image_url: imageUrl,
+      description: description.trim() || null,
     });
   };
 
@@ -380,6 +394,17 @@ function ItemModal({ item, categories = MENU_CATEGORIES, onClose, onSave }) {
             <img src={imageUrl} alt="Preview" style={{ width: 80, height: 80, objectFit: 'cover', borderRadius: 8, border: '1px solid #E5E7EB' }} />
           </div>
         )}
+
+        {/* The ingredient line from the printed menu. Optional — most items
+            outside the pizzas do not carry one on the card. */}
+        <label style={{ color: '#FFFFFF', fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 6 }}>Description</label>
+        <textarea
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          rows={2}
+          placeholder="e.g. Mix Cheese, Chicken Tikka, Pizza Sauce, Capsicum"
+          style={{ ...inputStyle, height: 'auto', padding: '10px 12px', marginBottom: 24, resize: 'vertical' }}
+        />
 
         {/* Actions */}
         <div className="flex gap-3">

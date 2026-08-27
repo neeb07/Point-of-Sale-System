@@ -240,6 +240,11 @@ try { db.exec("ALTER TABLE orders ADD COLUMN employee_discount REAL DEFAULT 0;")
 // the owner changes the percentage — same reasoning as tax_rate.
 try { db.exec("ALTER TABLE orders ADD COLUMN employee_discount_rate REAL DEFAULT 0;"); } catch(e) {}
 
+// The printed menu lists an ingredient line under each pizza. Storing it
+// keeps the card and the till in step, and gives staff something to read
+// out when a customer asks what is on a pizza.
+try { db.exec("ALTER TABLE menu_items ADD COLUMN description TEXT DEFAULT NULL;"); } catch(e) {}
+
 // Menu items are retired rather than deleted. A hard DELETE failed outright
 // with "FOREIGN KEY constraint failed" whenever the item belonged to a deal,
 // and when it did succeed it broke sales-by-category for every past order
@@ -305,107 +310,29 @@ try {
 // Rebrand: retire the old orange staff colour.
 try { db.exec("UPDATE staff SET color = '#DC2626' WHERE color = '#F97316';"); } catch(e) {}
 
-// Seed menu items — Blaze Pizza House full menu
+// Seed menu items — the printed Blaze Pizza House menu.
+// Defined once in db/menu-data.js and shared with scripts/seed_blaze_menu.js,
+// so a fresh install and a re-seed can never produce different menus.
+const { MENU: SEED_MENU } = require('./menu-data.js');
+
 const count = db.prepare('SELECT COUNT(*) as count FROM menu_items').get();
 if (count.count === 0) {
-  const insertItem = db.prepare('INSERT INTO menu_items (name, category, price, has_variants) VALUES (?, ?, ?, ?)');
-  const insertVariant = db.prepare('INSERT INTO item_variants (menu_item_id, label, price, sort_order) VALUES (?, ?, ?, ?)');
+  const insertItem = db.prepare(
+    'INSERT INTO menu_items (name, category, price, has_variants, description) VALUES (?, ?, ?, ?, ?)'
+  );
+  const insertVariant = db.prepare(
+    'INSERT INTO item_variants (menu_item_id, label, price, sort_order) VALUES (?, ?, ?, ?)'
+  );
 
   db.transaction(() => {
-    const menu = [
-      // Blaze Special — Med/Lg/XL: 1450/2050/2950
-      ...['Donner Special','Bihari Kabab','Butter Chicken Pizza','Crunchy Pizza','Four Seasons Pizza']
-        .map(n => ({ n, c: 'Blaze Special', v: [['Medium',1450],['Large',2050],['X-Large',2950]] })),
-      // Stuff Crust — Med/Lg/XL: 1550/2150/3200
-      ...['Kabab Crust','Royal Crust Pizza','Crown Crust Pizza']
-        .map(n => ({ n, c: 'Stuff Crust', v: [['Medium',1550],['Large',2150],['X-Large',3200]] })),
-      // Regular Pizza — S/M/L/XL: 650/1250/1850/2750
-      ...['Fajita','Vegetable Pizza','Tikka','Chicken Smoked','Malai Boti','Chicken Tandoori','Chicken Supreme']
-        .map(n => ({ n, c: 'Regular Pizza', v: [['Small',650],['Medium',1250],['Large',1850],['X-Large',2750]] })),
-      // Burgers
-      { n:'Tikka Patty Burger',c:'Burgers',p:450 },
-      { n:'Crunchy Burger',c:'Burgers',p:450 },
-      { n:'Jalapeno Spicy Burger',c:'Burgers',p:500 },
-      { n:'Zinger Burger',c:'Burgers',p:500 },
-      { n:'Chicken Patty Burger',c:'Burgers',p:450 },
-      { n:'Chicken Grilled Burger',c:'Burgers',p:550 },
-      { n:'Mighty Burger',c:'Burgers',p:700 },
-      { n:'Tower Burger',c:'Burgers',p:750 },
-      { n:'Beef Patty Burger',c:'Burgers',v:[['Single Patty',700],['Double Patty',1100]] },
-      // Wraps
-      { n:'Shawarma Roll',c:'Wraps',p:300 },{ n:'Afghani Roll',c:'Wraps',p:400 },
-      { n:'Zinger Cheese Roll',c:'Wraps',p:500 },{ n:'Tikka Paratha Roll',c:'Wraps',p:450 },
-      { n:'Chicken Cheese Paratha',c:'Wraps',p:500 },{ n:'Achari Paratha',c:'Wraps',p:450 },
-      { n:'Zinger Paratha Roll',c:'Wraps',p:500 },{ n:'Zinger Shawarma Roll',c:'Wraps',p:500 },
-      // Chinese
-      { n:'Vegetable Fried Rice',c:'Chinese',p:450 },{ n:'Egg Fried Rice',c:'Chinese',p:500 },
-      { n:'Chicken Fried Rice',c:'Chinese',p:550 },{ n:'Chicken Chowmain',c:'Chinese',p:750 },
-      { n:'Chicken Menchorian With Rice',c:'Chinese',p:850 },
-      { n:'Chicken Black Paper Fried Rice',c:'Chinese',p:600 },
-      { n:'Chicken Shashlik With Rice',c:'Chinese',p:850 },
-      // Pasta
-      { n:'Creamy Baked Pasta',c:'Pasta',v:[['F1',500],['F2',900]] },
-      { n:'Alfredo Pasta',c:'Pasta',v:[['F1',500],['F2',900]] },
-      { n:'Crunchy Pasta',c:'Pasta',v:[['F1',550],['F2',950]] },
-      // Fries
-      { n:'Plain Fries',c:'Fries',p:240 },{ n:'Masala Fries',c:'Fries',p:250 },
-      { n:'Garlic Mayo Fries',c:'Fries',p:270 },
-      { n:'Malai Boti Fries',c:'Fries',v:[['F1',450],['F2',850]] },
-      { n:'Loaded Fries',c:'Fries',v:[['F1',450],['F2',850]] },
-      { n:'Fries Bucket',c:'Fries',p:400 },
-      // Appetizers
-      { n:'Nuggets',c:'Appetizers',v:[['6 Pieces',350],['12 Pieces',650]] },
-      { n:'Grilled Wings',c:'Appetizers',v:[['6 Pieces',450],['12 Pieces',900]] },
-      { n:'Crispy Wings',c:'Appetizers',v:[['6 Pieces',450],['12 Pieces',900]] },
-      { n:'Hot Wings',c:'Appetizers',v:[['6 Pieces',450],['12 Pieces',900]] },
-      // Sandwich
-      { n:'Grilled Sandwich',c:'Sandwich',p:600 },{ n:'Club Sandwich',c:'Sandwich',p:450 },
-      { n:'Cold Sandwich',c:'Sandwich',p:350 },
-      // Soup
-      { n:'Chicken Corn Soup',c:'Soup',v:[['Single',500],['Family',1000]] },
-      { n:'Hot & Sour Soup',c:'Soup',v:[['Single',500],['Family',1000]] },
-      // Drinks
-      { n:'Fresh Lime',c:'Drinks',p:200 },{ n:'Mint Margarita',c:'Drinks',p:250 },
-      { n:'Regular Drink',c:'Drinks',v:[['Option A',80],['Option B',100]] },
-      { n:'500ml Drink',c:'Drinks',v:[['Option A',100],['Option B',120]] },
-      { n:'1 Liter Drink',c:'Drinks',v:[['Option A',150],['Option B',180]] },
-      { n:'1.5 Liter Drink',c:'Drinks',v:[['Option A',180],['Option B',220]] },
-      { n:'2.25 Liter Drink',c:'Drinks',v:[['Option A',250],['Option B',280]] },
-      { n:'Mineral Water',c:'Drinks',v:[['500ml',70],['1.5 Litre',140]] },
-      // Tea
-      { n:'Kashmiri Tea',c:'Tea',p:250 },{ n:'Mix Tea',c:'Tea',p:140 },
-      { n:'Cappuccino Coffee',c:'Tea',p:300 },
-      // Extras
-      { n:'Extra Topping',c:'Extras',v:[['Medium',100],['Large',150],['X-Large',200]] },
-    ];
-
-    menu.forEach(m => {
+    SEED_MENU.forEach(m => {
       const hasV = Array.isArray(m.v) && m.v.length > 0;
-      const id = insertItem.run(m.n, m.c, hasV ? 0 : (m.p||0), hasV ? 1 : 0).lastInsertRowid;
+      const id = insertItem.run(m.n, m.c, hasV ? 0 : (m.p || 0), hasV ? 1 : 0, m.d || null).lastInsertRowid;
       if (hasV) m.v.forEach(([label, price], i) => insertVariant.run(id, label, price, i));
     });
   })();
 }
 
-// SECURITY: hash any PIN still stored as plain text.
-//
-// routes/staff.js used to fall back to a plain-text comparison when a PIN did
-// not look like a bcrypt hash. That fallback has been removed, so any legacy
-// row must be migrated here or its owner would be locked out. Runs on every
-// boot and is a no-op once every PIN is hashed.
-try {
-  const legacy = db.prepare('SELECT id, pin FROM staff').all()
-    .filter(s => !/^\$2[aby]\$/.test(s.pin || ''));
-  if (legacy.length > 0) {
-    const updatePin = db.prepare('UPDATE staff SET pin = ? WHERE id = ?');
-    db.transaction(() => {
-      legacy.forEach(s => updatePin.run(bcrypt.hashSync(String(s.pin), 10), s.id));
-    })();
-    console.log(`Hashed ${legacy.length} plain-text staff PIN(s).`);
-  }
-} catch (e) {
-  console.error('PIN hashing migration failed:', e.message);
-}
 
 // Seed admin — always with bcrypt hashed PIN
 const staffCount = db.prepare('SELECT COUNT(*) as count FROM staff').get();
@@ -440,65 +367,40 @@ if (!deliveryPriceRow) {
   db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run('delivery_price', '0');
 }
 
-// Seed deals — Blaze Pizza House deals from printed menu
+// Seed deals — shared with scripts/seed_blaze_menu.js via db/menu-data.js.
+const { DEALS: SEED_DEALS } = require('./menu-data.js');
+
 const dealsCount = db.prepare('SELECT COUNT(*) as count FROM deals').get();
 if (dealsCount.count === 0) {
-  const insertDeal = db.prepare('INSERT INTO deals (name, price, description, deal_group) VALUES (?, ?, ?, ?)');
-  const insertDealItem = db.prepare('INSERT INTO deal_items (deal_id, menu_item_id, quantity, variant_id) VALUES (?, ?, ?, ?)');
-  const getItemId = db.prepare('SELECT id FROM menu_items WHERE name = ?');
+  const insertDeal = db.prepare(
+    'INSERT INTO deals (name, price, description, deal_group, active) VALUES (?, ?, ?, ?, 1)'
+  );
+  const insertDealItem = db.prepare(
+    'INSERT INTO deal_items (deal_id, menu_item_id, quantity, variant_id) VALUES (?, ?, ?, ?)'
+  );
+  const getItemId = db.prepare('SELECT id FROM menu_items WHERE name = ? AND active = 1');
   const getVariantId = db.prepare('SELECT id FROM item_variants WHERE menu_item_id = ? AND label = ?');
 
-  const seedDeals = [
-    { name:'Pizza Deal 1',group:'Pizza Deals',price:850,desc:'Shawarma Roll + Small Pizza + Regular Drink',
-      items:[{n:'Shawarma Roll',q:1},{n:'Tikka',v:'Small',q:1},{n:'Regular Drink',v:'Option A',q:1}]},
-    { name:'Pizza Deal 2',group:'Pizza Deals',price:1599,desc:'Large Pizza + 1 Liter Drink',
-      items:[{n:'Tikka',v:'Large',q:1},{n:'1 Liter Drink',v:'Option A',q:1}]},
-    { name:'Pizza Deal 3',group:'Pizza Deals',price:999,desc:'2 Small Pizza + 2 Regular Drink',
-      items:[{n:'Tikka',v:'Small',q:2},{n:'Regular Drink',v:'Option A',q:2}]},
-    { name:'Pizza Deal 4',group:'Pizza Deals',price:1999,desc:'2 Medium Pizza + 500 ml Drink',
-      items:[{n:'Tikka',v:'Medium',q:2},{n:'500ml Drink',v:'Option A',q:1}]},
-    { name:'Family Deal 5',group:'Pizza Deals',price:2999,desc:'2 Large Pizza + 1.5 Liter Drink',
-      items:[{n:'Tikka',v:'Large',q:2},{n:'1.5 Liter Drink',v:'Option A',q:1}]},
-    { name:'Zinger Deal 1',group:'Zinger Deals',price:600,desc:'Zinger Burger + Regular Drink + Regular Fries',
-      items:[{n:'Zinger Burger',q:1},{n:'Regular Drink',v:'Option A',q:1},{n:'Plain Fries',q:1}]},
-    { name:'Zinger Deal 2',group:'Zinger Deals',price:1200,desc:'2 Zinger Burgers + 2 Regular Drinks + Masala Fries',
-      items:[{n:'Zinger Burger',q:2},{n:'Regular Drink',v:'Option A',q:2},{n:'Masala Fries',q:1}]},
-    { name:'Zinger Deal 3',group:'Zinger Deals',price:1900,desc:'3 Zinger Burgers + 3 Crispy Wings + Masala Fries + 1 Liter Drink',
-      items:[{n:'Zinger Burger',q:3},{n:'Crispy Wings',v:'6 Pieces',q:1},{n:'Masala Fries',q:1},{n:'1 Liter Drink',v:'Option A',q:1}]},
-    { name:'Zinger Deal 4',group:'Zinger Deals',price:880,desc:'Tower Burger + 500ml Drink + Regular Fries',
-      items:[{n:'Tower Burger',q:1},{n:'500ml Drink',v:'Option A',q:1},{n:'Plain Fries',q:1}]},
-    { name:'Zinger Family Deal 5',group:'Zinger Deals',price:3000,desc:'5 Zinger Burgers + Masala Fries + 1.5 Liter Drink + 5 Crispy Wings',
-      items:[{n:'Zinger Burger',q:5},{n:'Masala Fries',q:1},{n:'1.5 Liter Drink',v:'Option A',q:1},{n:'Crispy Wings',v:'6 Pieces',q:1}]},
-    { name:'Platter Deal 1',group:'Platter Deals',price:3500,desc:'2 Zinger Cheese Roll + 1 Chicken Tikka Medium + Loaded Fries + 6 Hot Wings + 1.5 Drink',
-      items:[{n:'Zinger Cheese Roll',q:2},{n:'Tikka',v:'Medium',q:1},{n:'Loaded Fries',v:'F1',q:1},{n:'Hot Wings',v:'6 Pieces',q:1},{n:'1.5 Liter Drink',v:'Option A',q:1}]},
-    { name:'Platter Deal 2',group:'Platter Deals',price:3500,desc:'Large Pizza + Zinger Burger + Tower Burger + Garlic Mayo Fries + 6 Crispy Wings + 1.5 Drink',
-      items:[{n:'Tikka',v:'Large',q:1},{n:'Zinger Burger',q:1},{n:'Tower Burger',q:1},{n:'Garlic Mayo Fries',q:1},{n:'Crispy Wings',v:'6 Pieces',q:1},{n:'1.5 Liter Drink',v:'Option A',q:1}]},
-    { name:'Platter Deal 3',group:'Platter Deals',price:3500,desc:'1 Medium Pizza + 1 Creamy Baked Pasta + 1 Chowmein + 6 Crispy Wings + 6 Nuggets + 1.5 Drink',
-      items:[{n:'Tikka',v:'Medium',q:1},{n:'Creamy Baked Pasta',v:'F1',q:1},{n:'Chicken Chowmain',q:1},{n:'Crispy Wings',v:'6 Pieces',q:1},{n:'Nuggets',v:'6 Pieces',q:1},{n:'1.5 Liter Drink',v:'Option A',q:1}]},
-    { name:'Birthday Deal',group:'Birthday Deal',price:4350,desc:'1 Chicken Tikka Pizza (XL) + 3 Zinger Burger + 1 Regular Fries + 1.5 Litre Cold Drink',
-      items:[{n:'Tikka',v:'X-Large',q:1},{n:'Zinger Burger',q:3},{n:'Plain Fries',q:1},{n:'1.5 Liter Drink',v:'Option A',q:1}]},
-  ];
-
   db.transaction(() => {
-    seedDeals.forEach(d => {
-      const res = insertDeal.run(d.name, d.price, d.desc, d.group);
-      const dealId = res.lastInsertRowid;
-      d.items.forEach(i => {
-        const itemRow = getItemId.get(i.n);
-        if (itemRow) {
-          let vId = null;
-          if (i.v) {
-            const vRow = getVariantId.get(itemRow.id, i.v);
-            if (vRow) vId = vRow.id;
-          }
-          insertDealItem.run(dealId, itemRow.id, i.q, vId);
-        } else {
-          console.warn('Menu item not found for deal ' + d.name + ': ' + i.n);
+    SEED_DEALS.forEach(d => {
+      const dealId = insertDeal.run(d.n, d.p, d.d, d.g).lastInsertRowid;
+      d.items.forEach(([name, qty, variantLabel]) => {
+        const itemRow = getItemId.get(name);
+        if (!itemRow) {
+          console.warn(`Menu item not found for deal ${d.n}: ${name}`);
+          return;
         }
+        let vId = null;
+        if (variantLabel) {
+          const vRow = getVariantId.get(itemRow.id, variantLabel);
+          if (vRow) vId = vRow.id;
+        }
+        insertDealItem.run(dealId, itemRow.id, qty, vId);
       });
     });
   })();
 }
+
 
 // --- Seed Ingredients and Recipes ---
 const ingCount = db.prepare('SELECT COUNT(*) as count FROM ingredients').get();
@@ -646,6 +548,11 @@ function doAutoBackup() {
 }
 
 doAutoBackup(); // on startup
-setInterval(doAutoBackup, 24 * 60 * 60 * 1000); // every 24h
+// unref'd so the timer never holds the process open by itself. The server is
+// kept alive by its listening socket; a one-off maintenance script that
+// requires this module can now exit when it finishes instead of hanging on a
+// 24-hour timer that will never fire.
+const backupTimer = setInterval(doAutoBackup, 24 * 60 * 60 * 1000); // every 24h
+if (typeof backupTimer.unref === 'function') backupTimer.unref();
 
 module.exports = db;
