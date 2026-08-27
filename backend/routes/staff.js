@@ -58,7 +58,25 @@ router.get('/', requireAdmin, (req, res) => {
     // SECURITY: `pin` used to be in this SELECT, so every caller of
     // GET /api/staff received the bcrypt hash of every staff PIN. Nothing in
     // the UI needs it — Settings only renders name/role/colour/active.
-    const staff = db.prepare('SELECT id, name, role, color, active FROM staff ORDER BY role DESC, name ASC').all();
+    // The staff cards show each person's takings for today. They read
+    // `todayOrders` and `todayRevenue`, which this endpoint never returned —
+    // so both tiles have always displayed 0. Computed here rather than with a
+    // second round trip, and scoped to the local trading day.
+    const staff = db.prepare(`
+      SELECT
+        s.id, s.name, s.role, s.color, s.active,
+        (SELECT COUNT(*) FROM orders o
+          WHERE o.cashier_id = s.id
+            AND o.status != 'voided'
+            AND DATE(o.created_at) = DATE('now', 'localtime')) AS todayOrders,
+        (SELECT COALESCE(SUM(o.total), 0) FROM orders o
+          WHERE o.cashier_id = s.id
+            AND o.status != 'voided'
+            AND DATE(o.created_at) = DATE('now', 'localtime')) AS todayRevenue
+      FROM staff s
+      ORDER BY s.role DESC, s.name ASC
+    `).all();
+
     const normalized = staff.map(s => ({
       ...s,
       active: s.active === 1 || s.active === '1' || s.active === true ? 1 : 0
@@ -275,6 +293,59 @@ router.post('/login', async (req, res) => {
   return res.status(401).json({ error: 'Incorrect PIN for this account.' });
 });
 
+
+/**
+ * Performance per cashier for a date range. Backs the Performance tab.
+ *
+ * Admin only — it is every staff member's takings side by side. A manager sees
+ * their own figures on the reports screen, which is scoped to them.
+ */
+router.get('/performance', requireAdmin, (req, res) => {
+  const today = new Date().toISOString().split('T')[0];
+  const from = req.query.from || today;
+  const to = req.query.to || today;
+
+  try {
+    const allStaff = db.prepare('SELECT id, name, role, color, active FROM staff').all();
+
+    const performance = allStaff.map(s => {
+      const stats = db.prepare(`
+        SELECT
+          COUNT(*) as total_orders,
+          COALESCE(SUM(total), 0) as total_revenue,
+          COALESCE(AVG(total), 0) as avg_order_value,
+          COALESCE(SUM(discount), 0) as total_discounts
+        FROM orders
+        WHERE cashier_id = ?
+        AND DATE(created_at) BETWEEN DATE(?) AND DATE(?)
+        AND status != 'voided'
+      `).get(s.id, from, to);
+
+      const busiestHour = db.prepare(`
+        SELECT
+          CAST(strftime('%H', created_at) AS INTEGER) as hour,
+          COUNT(*) as count
+        FROM orders
+        WHERE cashier_id = ?
+        AND DATE(created_at) BETWEEN DATE(?) AND DATE(?)
+        AND status != 'voided'
+        GROUP BY hour
+        ORDER BY count DESC
+        LIMIT 1
+      `).get(s.id, from, to);
+
+      const hourLabel = busiestHour
+        ? `${busiestHour.hour % 12 || 12}${busiestHour.hour < 12 ? 'AM' : 'PM'}`
+        : 'N/A';
+
+      return { ...s, ...stats, busiest_hour: hourLabel };
+    });
+
+    res.json(performance);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 /** Sign out — drops the session so the token stops working immediately. */
 router.post('/logout', (req, res) => {

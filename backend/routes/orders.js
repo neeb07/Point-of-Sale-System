@@ -86,8 +86,13 @@ router.post('/', (req, res) => {
       computedTotal,
       cappedDiscount,
       paymentMethod,
-      cashier_id || null,
-      cashier_name || 'Unknown',
+      // Attribution comes from the signed-in session, not the request body.
+      // Taking it from the body let a caller credit a sale to somebody else,
+      // and it is what the manager report scoping keys on — so it has to be
+      // something the client cannot choose. The body values are used only as a
+      // fallback for a request with no session, which the route guard prevents.
+      (req.user && req.user.staffId) || cashier_id || null,
+      (req.user && req.user.name) || cashier_name || 'Unknown',
       order_type || 'Dine-in',
       safeDelivery,
       table_number || null,

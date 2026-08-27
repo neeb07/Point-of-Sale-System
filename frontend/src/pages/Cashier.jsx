@@ -180,7 +180,22 @@ export default function Cashier() {
         params.from = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
         params.to = new Date().toISOString().split('T')[0];
       }
-      const data = await staffAPI.performance(params);
+      const raw = await staffAPI.performance(params);
+
+      /**
+       * The endpoint returns total_orders / total_revenue / avg_order_value /
+       * total_discounts, but the table below reads orders / revenue /
+       * avg_order / discounts. None of those existed on the response, so every
+       * figure in the Performance tab rendered as 0 regardless of the data.
+       * Normalised here, the same way the reports screen does it.
+       */
+      const data = (raw || []).map(p => ({
+        ...p,
+        orders: Number(p.total_orders) || 0,
+        revenue: Number(p.total_revenue) || 0,
+        avg_order: Number(p.avg_order_value) || 0,
+        discounts: Number(p.total_discounts) || 0,
+      }));
       // Map backend field names to frontend expectations
       const mappedData = data.map(d => ({
         ...d,

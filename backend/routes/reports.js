@@ -2,6 +2,26 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db/database');
 
+const { isAdminRole } = require('../middleware/auth');
+
+/**
+ * Restrict a manager to their own takings.
+ *
+ * An administrator sees the whole shop. A manager sees only the sales they
+ * rang up themselves, so with a manager per branch neither can read the
+ * other's figures — or the shop's combined total — from the reports screen.
+ *
+ * The filter is applied here, from the session, rather than taken from a query
+ * parameter: the client cannot ask to see somebody else's numbers.
+ *
+ * `alias` is the table reference used by the calling query — most say
+ * `FROM orders`, the joined ones alias it to `o`.
+ */
+function userScope(req, alias = 'orders') {
+  if (!req.user || isAdminRole(req.user.role)) return { sql: '', params: [] };
+  return { sql: ` AND ${alias}.cashier_id = ?`, params: [req.user.staffId] };
+}
+
 function getDateRange(req) {
   const today = new Date().toISOString().split('T')[0];
   const from = req.query.from || today;
@@ -12,6 +32,7 @@ function getDateRange(req) {
 // KPI summary
 router.get('/kpi', (req, res) => {
   const { from, to } = getDateRange(req);
+  const scope = userScope(req);
   try {
     const summary = db.prepare(`
       SELECT
@@ -21,8 +42,8 @@ router.get('/kpi', (req, res) => {
         COALESCE(SUM(discount), 0) as total_discounts
       FROM orders
       WHERE DATE(created_at) BETWEEN DATE(?) AND DATE(?)
-      AND status != 'voided'
-    `).get(from, to);
+      AND status != 'voided'${scope.sql}
+    `).get(from, to, ...scope.params);
 
     const prevFrom = new Date(from);
     prevFrom.setDate(prevFrom.getDate() - (new Date(to) - new Date(from)) / 86400000 - 1);
@@ -33,8 +54,8 @@ router.get('/kpi', (req, res) => {
       SELECT COALESCE(SUM(total), 0) as total_revenue, COUNT(*) as total_orders
       FROM orders
       WHERE DATE(created_at) BETWEEN DATE(?) AND DATE(?)
-      AND status != 'voided'
-    `).get(prevFrom.toISOString().split('T')[0], prevTo.toISOString().split('T')[0]);
+      AND status != 'voided'${scope.sql}
+    `).get(prevFrom.toISOString().split('T')[0], prevTo.toISOString().split('T')[0], ...scope.params);
 
     const revenueTrend = prev.total_revenue > 0
       ? (((summary.total_revenue - prev.total_revenue) / prev.total_revenue) * 100).toFixed(1)
@@ -53,6 +74,7 @@ router.get('/kpi', (req, res) => {
 router.get('/revenue-over-time', (req, res) => {
   const { from, to } = getDateRange(req);
   const groupBy = req.query.groupBy || 'day';
+  const scope = userScope(req);
   try {
     let query;
     if (groupBy === 'hour') {
@@ -62,7 +84,7 @@ router.get('/revenue-over-time', (req, res) => {
                COUNT(*) as orders
         FROM orders
         WHERE DATE(created_at) BETWEEN DATE(?) AND DATE(?)
-        AND status != 'voided'
+        AND status != 'voided'${scope.sql}
         GROUP BY strftime('%H', created_at)
         ORDER BY strftime('%H', created_at)
       `;
@@ -73,7 +95,7 @@ router.get('/revenue-over-time', (req, res) => {
                COUNT(*) as orders
         FROM orders
         WHERE DATE(created_at) BETWEEN DATE(?) AND DATE(?)
-        AND status != 'voided'
+        AND status != 'voided'${scope.sql}
         GROUP BY strftime('%Y-%m', created_at)
         ORDER BY period
       `;
@@ -84,12 +106,12 @@ router.get('/revenue-over-time', (req, res) => {
                COUNT(*) as orders
         FROM orders
         WHERE DATE(created_at) BETWEEN DATE(?) AND DATE(?)
-        AND status != 'voided'
+        AND status != 'voided'${scope.sql}
         GROUP BY DATE(created_at)
         ORDER BY DATE(created_at)
       `;
     }
-    const data = db.prepare(query).all(from, to);
+    const data = db.prepare(query).all(from, to, ...scope.params);
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -99,6 +121,7 @@ router.get('/revenue-over-time', (req, res) => {
 // Top selling items
 router.get('/top-items', (req, res) => {
   const { from, to } = getDateRange(req);
+  const scope = userScope(req, 'o');
   try {
     const items = db.prepare(`
       SELECT
@@ -109,11 +132,11 @@ router.get('/top-items', (req, res) => {
       FROM order_items oi
       JOIN orders o ON oi.order_id = o.id
       WHERE DATE(o.created_at) BETWEEN DATE(?) AND DATE(?)
-      AND o.status != 'voided'
+      AND o.status != 'voided'${scope.sql}
       GROUP BY oi.name
       ORDER BY total_qty DESC
       LIMIT 10
-    `).all(from, to);
+    `).all(from, to, ...scope.params);
 
     const totalRevenue = items.reduce((s, i) => s + i.total_revenue, 0);
     const result = items.map(i => ({
@@ -130,6 +153,7 @@ router.get('/top-items', (req, res) => {
 // Sales by category
 router.get('/by-category', (req, res) => {
   const { from, to } = getDateRange(req);
+  const scope = userScope(req, 'o');
   try {
     // A deal records the *deal's* id in order_items.menu_item_id, which shares
     // an id space with menu_items. A plain JOIN therefore matched a deal to an
@@ -149,10 +173,10 @@ router.get('/by-category', (req, res) => {
       JOIN orders o ON oi.order_id = o.id
       LEFT JOIN menu_items m ON oi.menu_item_id = m.id AND oi.is_deal = 0
       WHERE DATE(o.created_at) BETWEEN DATE(?) AND DATE(?)
-      AND o.status != 'voided'
+      AND o.status != 'voided'${scope.sql}
       GROUP BY category
       ORDER BY total_revenue DESC
-    `).all(from, to);
+    `).all(from, to, ...scope.params);
 
     const totalRevenue = data.reduce((s, i) => s + i.total_revenue, 0);
     const result = data.map(i => ({
@@ -168,6 +192,7 @@ router.get('/by-category', (req, res) => {
 
 // Hourly heatmap — last 7 days by default
 router.get('/hourly-heatmap', (req, res) => {
+  const scope = userScope(req);
   try {
     const data = db.prepare(`
       SELECT
@@ -186,10 +211,10 @@ router.get('/hourly-heatmap', (req, res) => {
         COALESCE(SUM(total), 0) as revenue
       FROM orders
       WHERE DATE(created_at) >= DATE('now', '-30 days')
-      AND status != 'voided'
+      AND status != 'voided'${scope.sql}
       GROUP BY day_num, hour
       ORDER BY day_num, hour
-    `).all();
+    `).all(...scope.params);
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -199,6 +224,7 @@ router.get('/hourly-heatmap', (req, res) => {
 // Cashier performance
 router.get('/cashier-performance', (req, res) => {
   const { from, to } = getDateRange(req);
+  const scope = userScope(req, 'o');
   try {
     const data = db.prepare(`
       SELECT
@@ -210,10 +236,10 @@ router.get('/cashier-performance', (req, res) => {
         COALESCE(SUM(o.discount), 0) as total_discounts
       FROM orders o
       WHERE DATE(o.created_at) BETWEEN DATE(?) AND DATE(?)
-      AND o.status != 'voided'
+      AND o.status != 'voided'${scope.sql}
       GROUP BY o.cashier_id, o.cashier_name
       ORDER BY total_revenue DESC
-    `).all(from, to);
+    `).all(from, to, ...scope.params);
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -240,6 +266,7 @@ router.get('/cashier-performance', (req, res) => {
 router.get('/detailed', (req, res) => {
   const { from, to } = getDateRange(req);
   const includeVoided = req.query.include_voided === '1' || req.query.include_voided === 'true';
+  const scope = userScope(req, 'o');
 
   try {
     const orders = db.prepare(`
@@ -268,10 +295,10 @@ router.get('/detailed', (req, res) => {
       FROM orders o
       LEFT JOIN order_items oi ON oi.order_id = o.id
       WHERE DATE(o.created_at) BETWEEN DATE(?) AND DATE(?)
-        ${includeVoided ? '' : "AND o.status != 'voided'"}
+        ${includeVoided ? '' : "AND o.status != 'voided'"}${scope.sql}
       GROUP BY o.id
       ORDER BY o.created_at ASC
-    `).all(from, to);
+    `).all(from, to, ...scope.params);
 
     // GROUP_CONCAT returns NULL for an order with no line items.
     res.json(orders.map(o => ({ ...o, items: o.items || '' })));
@@ -292,6 +319,7 @@ router.get('/detailed', (req, res) => {
 router.get('/line-items', (req, res) => {
   const { from, to } = getDateRange(req);
   const includeVoided = req.query.include_voided === '1' || req.query.include_voided === 'true';
+  const scope = userScope(req, 'o');
 
   try {
     const rows = db.prepare(`
@@ -315,9 +343,9 @@ router.get('/line-items', (req, res) => {
       JOIN orders o ON oi.order_id = o.id
       LEFT JOIN menu_items m ON oi.menu_item_id = m.id AND oi.is_deal = 0
       WHERE DATE(o.created_at) BETWEEN DATE(?) AND DATE(?)
-        ${includeVoided ? '' : "AND o.status != 'voided'"}
+        ${includeVoided ? '' : "AND o.status != 'voided'"}${scope.sql}
       ORDER BY o.created_at ASC, oi.id ASC
-    `).all(from, to);
+    `).all(from, to, ...scope.params);
 
     res.json(rows);
   } catch (err) {
@@ -328,6 +356,7 @@ router.get('/line-items', (req, res) => {
 // Daily summary
 router.get('/daily', (req, res) => {
   const { from, to } = getDateRange(req);
+  const scope = userScope(req);
   try {
     const data = db.prepare(`
       SELECT
@@ -338,10 +367,10 @@ router.get('/daily', (req, res) => {
         COALESCE(AVG(total), 0) as avg_order_value
       FROM orders
       WHERE DATE(created_at) BETWEEN DATE(?) AND DATE(?)
-      AND status != 'voided'
+      AND status != 'voided'${scope.sql}
       GROUP BY DATE(created_at)
       ORDER BY date DESC
-    `).all(from, to);
+    `).all(from, to, ...scope.params);
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: err.message });
