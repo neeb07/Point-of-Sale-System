@@ -73,8 +73,8 @@ app.use('/api/settings', (req, res, next) => {
   return requireAdmin(req, res, next);
 }, require('./routes/settings'));
 
-// Inventory is not part of the manager's job at all, read included.
-app.use('/api/inventory', requireAdmin, require('./routes/inventory'));
+// Stock counts are day-to-day till work, so both roles keep and adjust them.
+app.use('/api/inventory', requireAuth, require('./routes/inventory'));
 
 // Staff administration. The login route inside is exempt — see routes/staff.js.
 app.use('/api/staff', require('./routes/staff'));

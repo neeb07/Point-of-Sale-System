@@ -39,10 +39,20 @@ const ADMIN_NAV: NavItem[] = [
   { id: 'settings', icon: Settings,      label: 'Settings',  adminOnly: true },
 ];
 
-/** The manager works the till, so the sale screen leads. */
+/**
+ * The manager works the till, so the sale screen leads.
+ *
+ * Menu and Deals are here to be *read* — a manager needs to look up what is on
+ * the menu and what a deal contains to answer a customer. The screens open in
+ * a view-only state; the backend refuses the writes regardless. Inventory is
+ * fully theirs: counting and adjusting stock is day-to-day till work.
+ */
 const MANAGER_NAV: NavItem[] = [
   { id: 'sale',     icon: HomeIcon,      label: 'Sale' },
   { id: 'orders',   icon: ClipboardList, label: 'Orders' },
+  { id: 'menu',     icon: Utensils,      label: 'Menu' },
+  { id: 'deals',    icon: Tag,           label: 'Deals' },
+  { id: 'inventory',icon: Package,       label: 'Inventory' },
   { id: 'shifts',   icon: Clock,         label: 'Shifts' },
   { id: 'reports',  icon: BarChart2,     label: 'Reports' },
 ];

@@ -4,6 +4,7 @@ import { dealsAPI, menuAPI } from '../api/index';
 import { DEAL_GROUPS } from '@/lib/constants';
 import { useSettings } from '@/lib/SettingsContext';
 import SearchBar from '@/components/pos-ui/SearchBar';
+import { useAuth } from '@/context/AuthContext';
 
 interface Variant {
   id: number;
@@ -71,6 +72,9 @@ const GREEN = '#22C55E';
 
 export default function Deals() {
   const { formatMoney, currencySymbol } = useSettings();
+  // Managers look deals up to answer a customer; only an administrator
+  // creates, edits or removes them. The backend refuses the writes anyway.
+  const { isAdmin } = useAuth();
   const [deals, setDeals] = useState<Deal[]>([]);
   const [search, setSearch] = useState('');
 
@@ -271,6 +275,7 @@ export default function Deals() {
             Create and manage combo deals and special offers
           </p>
         </div>
+        {isAdmin && (
         <button
           onClick={openAddModal}
           style={{
@@ -286,6 +291,7 @@ export default function Deals() {
           <Plus size={18} />
           Add Deal
         </button>
+        )}
       </div>
 
       {/* Loading */}
@@ -309,6 +315,7 @@ export default function Deals() {
           </div>
           <h3 style={{ fontSize: 18, fontWeight: 700, color: TEXT_DARK, margin: 0 }}>No deals yet</h3>
           <p style={{ fontSize: 14, color: TEXT_GRAY, margin: 0 }}>Create your first combo deal to get started</p>
+          {isAdmin && (
           <button
             onClick={openAddModal}
             style={{
@@ -320,6 +327,16 @@ export default function Deals() {
           >
             <Plus size={16} /> Create Deal
           </button>
+          )}
+        </div>
+      )}
+
+      {!isAdmin && (
+        <div style={{
+          marginBottom: 16, padding: '10px 14px', borderRadius: 8,
+          background: '#FEF3C7', color: '#92400E', fontSize: 13,
+        }}>
+          View only — creating and changing deals is restricted to an administrator.
         </div>
       )}
 
@@ -429,8 +446,10 @@ export default function Deals() {
                   </div>
                 </div>
 
-                {/* Actions */}
+                {/* Actions — administrator only. */}
                 <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+                  {isAdmin && (
+                  <>
                   <button
                     onClick={() => openEditModal(deal)}
                     style={{
@@ -483,6 +502,8 @@ export default function Deals() {
                     >
                       <Trash2 size={16} color={TEXT_LIGHT} />
                     </button>
+                  )}
+                  </>
                   )}
                 </div>
               </div>

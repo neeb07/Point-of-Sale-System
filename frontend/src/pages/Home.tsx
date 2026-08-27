@@ -29,12 +29,11 @@ const screens: Record<string, React.ComponentType<{ onNavigate?: (page: string) 
 /**
  * Screens only an administrator may open.
  *
- * This list used to be just `cashier` and `inventory`, while the sidebar
- * advertised Menu, Deals and Settings to everyone — so a till user could
- * reprice the menu or change the tax rate. The backend enforces the same
- * boundary; this is what keeps the UI honest about it.
+ * Menu, Deals and Inventory are not here: a manager opens them, but Menu and
+ * Deals render read-only and every write is refused by the backend anyway.
+ * Staff administration and Settings stay closed outright.
  */
-const ADMIN_ONLY_SCREENS = new Set(['menu', 'deals', 'inventory', 'cashier', 'settings']);
+const ADMIN_ONLY_SCREENS = new Set(['cashier', 'settings']);
 
 /**
  * Where each role lands.

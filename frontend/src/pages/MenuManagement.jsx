@@ -4,6 +4,7 @@ import { Plus, Pencil, Trash2, X, Pizza, Sandwich, Coffee, Package, Loader2, Dru
 import { usePOS } from '@/lib/POSContext';
 import { MENU_CATEGORIES, DEFAULT_CATEGORY } from '@/lib/constants';
 import { useSettings } from '@/lib/SettingsContext';
+import { useAuth } from '@/context/AuthContext';
 import SearchBar from '@/components/pos-ui/SearchBar';
 
 /**
@@ -54,6 +55,10 @@ const categoryGradient = {
 
 export default function MenuManagement() {
   const { formatMoney } = useSettings();
+  // A manager may look the menu up to answer a customer, but not change it.
+  // The backend refuses the writes either way; hiding the controls means they
+  // are not offered an action that would only fail.
+  const { isAdmin } = useAuth();
   const { menuItems, addMenuItem, updateMenuItem, deleteMenuItem, loading } = usePOS();
   const [search, setSearch] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
@@ -98,6 +103,7 @@ export default function MenuManagement() {
         {/* Header */}
         <div className="flex items-center justify-between" style={{ marginBottom: 24 }}>
           <h1 style={{ color: '#B91C1C', fontWeight: 700, fontSize: 24 }}>Menu Management</h1>
+          {isAdmin && (
           <button
             onClick={openAdd}
             className="flex items-center gap-2 transition-all duration-150"
@@ -113,7 +119,17 @@ export default function MenuManagement() {
             <Plus size={18} />
             Add New Item
           </button>
+          )}
         </div>
+
+        {!isAdmin && (
+          <div style={{
+            marginBottom: 16, padding: '10px 14px', borderRadius: 8,
+            background: '#FEF3C7', color: '#92400E', fontSize: 13,
+          }}>
+            View only — changing the menu is restricted to an administrator.
+          </div>
+        )}
 
         <div style={{ marginBottom: 20 }}>
           <SearchBar
@@ -169,6 +185,8 @@ export default function MenuManagement() {
                   formatMoney(item.price)
                 )}
               </div>
+              {isAdmin && (
+              <>
               <IconBtn
                 icon={Pencil}
                 hoverBg="rgba(255,255,255,0.2)"
@@ -183,6 +201,8 @@ export default function MenuManagement() {
                 defaultColor="rgba(255,255,255,0.8)"
                 onClick={() => handleDelete(item.id)}
               />
+              </>
+              )}
             </div>
           );
         })}
