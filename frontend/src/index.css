@@ -147,15 +147,33 @@ body {
     inset: auto !important;
   }
 
+  /*
+    Width is the printable width of the roll, not the roll's physical width.
+    An 80mm roll only prints across about 72mm — the rest is hardware margin —
+    so laying the receipt out at a full 80mm pushed the right-hand side past
+    what the head can reach and it came out cut off.
+  */
   #printable-area {
     position: static !important;
     display: block !important;
-    width: 80mm;
+    width: var(--receipt-width, 72mm);
     gap: 0 !important;
-    margin: 0 !important;
+    margin: 0 auto !important;
     overflow: visible !important;
     box-shadow: none !important;
     border: none !important;
+  }
+
+  /*
+    Never clip. The receipt card uses overflow:hidden on screen to keep its
+    rounded corners, which on paper silently truncated any line too wide for
+    the box instead of wrapping it — the reason names came out mid-word.
+  */
+  #printable-area, #printable-area * {
+    overflow: visible !important;
+    overflow-wrap: break-word !important;
+    word-break: break-word !important;
+    box-shadow: none !important;
   }
 
   /* One copy per page so the thermal printer cuts between tickets. The
@@ -168,8 +186,11 @@ body {
     box-shadow: none !important;
     border: none !important;
     border-radius: 0 !important;
-    margin: 0 !important;
-    width: 80mm !important;
+    margin: 0 auto !important;
+    /* Set by ReceiptModal from the paper_size setting; 72mm is the printable
+       width of an 80mm roll, 48mm that of a 58mm roll. */
+    width: var(--receipt-width, 72mm) !important;
+    max-width: var(--receipt-width, 72mm) !important;
   }
   .receipt-copy:last-child {
     page-break-after: auto;
@@ -200,6 +221,37 @@ body {
     size: 80mm 200mm;
     margin: 0;
   }
+}
+
+
+/*
+  Measuring the printed height.
+
+  ReceiptModal has to know how tall a receipt will be *on paper* so it can size
+  the page to it. It cannot simply measure the on-screen receipt: the rules
+  that change the layout — the narrower printable width and the word breaking —
+  live inside `@media print`, which does not apply on screen, so the on-screen
+  box is wider and shorter than the printed one. Measuring it produced a page
+  shorter than the content, and the overflow spilled onto a second page, which
+  on a roll means more paper rather than less.
+
+  These are the same layout rules, outside the media query, applied to the
+  receipt for the instant it is measured and then removed.
+*/
+.measuring-print {
+  width: var(--receipt-width, 72mm) !important;
+  margin: 0 auto !important;
+}
+.measuring-print,
+.measuring-print * {
+  overflow: visible !important;
+  overflow-wrap: break-word !important;
+  word-break: break-word !important;
+}
+.measuring-print .receipt-copy {
+  width: var(--receipt-width, 72mm) !important;
+  max-width: var(--receipt-width, 72mm) !important;
+  margin: 0 auto !important;
 }
 
 @keyframes shake {

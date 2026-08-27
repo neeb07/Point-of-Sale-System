@@ -35,12 +35,45 @@ export default function ReceiptModal({ open, onClose, orderData, autoPrintEnable
    */
   const sizePageToReceipt = () => {
     try {
+      const area = document.getElementById('printable-area');
       const copy = document.querySelector('#printable-area .receipt-copy');
-      if (!copy) return;
+      if (!area || !copy) return;
 
-      const widthMm = paperSize === '58mm' ? 58 : 80;
-      // CSS px are 1/96in by definition, so this conversion is exact.
-      const heightMm = Math.ceil((copy.getBoundingClientRect().height * 25.4) / 96) + 5;
+      // Page is the roll's physical width; content is the narrower strip the
+      // print head can actually reach. Laying the receipt out at the full roll
+      // width pushed its right-hand edge past the printable area, so lines came
+      // out cut off rather than wrapped.
+      const roll = paperSize === '58mm'
+        ? { pageMm: 58, contentMm: 48 }
+        : { pageMm: 80, contentMm: 72 };
+
+      // Publish the content width so the print stylesheet lays the receipt out
+      // at exactly the width we are about to measure.
+      document.documentElement.style.setProperty('--receipt-width', `${roll.contentMm}mm`);
+
+      /*
+       * Measure the receipt as it will be on paper, not as it is on screen.
+       *
+       * On screen it is ~340px (90mm) wide; on paper 72mm, where the same text
+       * wraps onto more lines and the receipt is taller. The rules that cause
+       * that — the printable width and the word breaking — live inside
+       * `@media print`, so they are not in effect while measuring. The
+       * `.measuring-print` class carries the same rules outside the media
+       * query; it is applied for the instant of the measurement and removed.
+       *
+       * Without it the page came out shorter than the receipt and the overflow
+       * printed onto a second page, which on a roll is more paper, not less.
+       */
+      area.classList.add('measuring-print');
+
+      // Reading offsetHeight forces the reflow before we measure.
+      const heightPx = copy.offsetHeight;
+
+      area.classList.remove('measuring-print');
+
+      // CSS px are 1/96in by definition, so this conversion is exact. The few
+      // extra millimetres give the cutter somewhere to land.
+      const heightMm = Math.ceil((heightPx * 25.4) / 96) + 5;
 
       let tag = document.getElementById('receipt-page-size');
       if (!tag) {
@@ -49,7 +82,7 @@ export default function ReceiptModal({ open, onClose, orderData, autoPrintEnable
         document.head.appendChild(tag);
       }
       tag.textContent =
-        `@media print { @page { size: ${widthMm}mm ${heightMm}mm; margin: 0; } }`;
+        `@media print { @page { size: ${roll.pageMm}mm ${heightMm}mm; margin: 0; } }`;
     } catch {
       // Fall back to the static rule in index.css rather than blocking a sale.
     }
