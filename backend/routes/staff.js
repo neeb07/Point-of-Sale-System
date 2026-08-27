@@ -3,9 +3,57 @@ const router = express.Router();
 const db = require('../db/database');
 const bcrypt = require('bcryptjs');
 const saltRounds = 10;
+const {
+  createSession, destroySession, requireAdmin, requireAuth, isAdminRole, getSession,
+} = require('../middleware/auth');
 
-// GET all staff
-router.get('/', (req, res) => {
+/**
+ * Roles this build recognises.
+ *
+ * Two, matching how the shop actually runs: an administrator with full access
+ * and a manager who works the till. 'Owner' is the historical admin role name
+ * and is still accepted so the shop's existing account keeps working.
+ */
+const ASSIGNABLE_ROLES = ['Admin', 'Manager'];
+
+/**
+ * Refuse to remove the last administrator.
+ *
+ * Nothing prevented deleting or demoting the only Owner, which would have left
+ * the shop permanently unable to reach Settings, staff or backups — with no
+ * way back in short of editing the database by hand.
+ */
+function countOtherActiveAdmins(excludeId) {
+  return db.prepare(
+    `SELECT COUNT(*) AS c FROM staff
+     WHERE active = 1 AND id != ? AND role IN ('Admin', 'Owner')`
+  ).get(excludeId).c;
+}
+
+/**
+ * Public account directory for the PIN screen.
+ *
+ * The sign-in screen has to list the accounts before anyone is signed in, so
+ * this cannot require a token. It returns only what that screen draws — the
+ * name and colour of each active account — and never the PIN hash, the role or
+ * anything else. GET /api/staff remains administration and stays admin-only.
+ */
+router.get('/directory', (req, res) => {
+  try {
+    // `role` is included because the sign-in screen labels each account with
+    // it, and `active` because the screen filters on it. Both are already
+    // visible on that screen by design; the PIN hash never leaves the table.
+    const staff = db.prepare(
+      "SELECT id, name, color, role, 1 AS active FROM staff WHERE active = 1 ORDER BY name ASC"
+    ).all();
+    res.json(staff);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET all staff — administration, so admin only.
+router.get('/', requireAdmin, (req, res) => {
   try {
     // SECURITY: `pin` used to be in this SELECT, so every caller of
     // GET /api/staff received the bcrypt hash of every staff PIN. Nothing in
@@ -22,14 +70,17 @@ router.get('/', (req, res) => {
 });
 
 // POST new staff
-router.post('/', async (req, res) => {
+router.post('/', requireAdmin, async (req, res) => {
   const { name, role, pin, color } = req.body;
   if (!name || !pin) return res.status(400).json({ error: 'Name and PIN required' });
+  if (role !== undefined && !ASSIGNABLE_ROLES.includes(role)) {
+    return res.status(400).json({ error: `Role must be one of: ${ASSIGNABLE_ROLES.join(', ')}` });
+  }
 
   try {
     const hashedPin = await bcrypt.hash(String(pin), saltRounds);
     const insert = db.prepare('INSERT INTO staff (name, role, pin, color, active) VALUES (?, ?, ?, ?, 1)');
-    const info = insert.run(name, role || 'Cashier', hashedPin, color || '#DC2626');
+    const info = insert.run(name, role || 'Manager', hashedPin, color || '#DC2626');
     res.json({ id: info.lastInsertRowid, name, role, color: color || '#DC2626', active: 1 });
   } catch (err) {
     if (err.message.includes('UNIQUE constraint')) {
@@ -40,9 +91,28 @@ router.post('/', async (req, res) => {
 });
 
 // PUT update staff (toggle active, update role, etc)
-router.put('/:id', async (req, res) => {
+router.put('/:id', requireAdmin, async (req, res) => {
   const { active, role, pin, name, color } = req.body;
   try {
+    const target = db.prepare('SELECT id, role, active FROM staff WHERE id = ?').get(req.params.id);
+    if (!target) return res.status(404).json({ error: 'Staff member not found' });
+
+    // Deactivating or demoting the last administrator would lock the shop out
+    // of Settings, staff and backups with no way back in.
+    const losingAdmin =
+      (active !== undefined && !active && isAdminRole(target.role)) ||
+      (role !== undefined && isAdminRole(target.role) && !isAdminRole(role));
+
+    if (losingAdmin && target.active === 1 && countOtherActiveAdmins(target.id) === 0) {
+      return res.status(409).json({
+        error: 'This is the only administrator account. Promote another user to administrator first.',
+      });
+    }
+
+    if (role !== undefined && !ASSIGNABLE_ROLES.includes(role) && !isAdminRole(role)) {
+      return res.status(400).json({ error: `Role must be one of: ${ASSIGNABLE_ROLES.join(', ')}` });
+    }
+
     if (name !== undefined) {
       db.prepare('UPDATE staff SET name = ? WHERE id = ?').run(name, req.params.id);
     }
@@ -66,8 +136,17 @@ router.put('/:id', async (req, res) => {
 });
 
 // DELETE staff
-router.delete('/:id', (req, res) => {
+router.delete('/:id', requireAdmin, (req, res) => {
   try {
+    const target = db.prepare('SELECT id, role, active FROM staff WHERE id = ?').get(req.params.id);
+    if (!target) return res.status(404).json({ error: 'Staff member not found' });
+
+    if (isAdminRole(target.role) && target.active === 1 && countOtherActiveAdmins(target.id) === 0) {
+      return res.status(409).json({
+        error: 'This is the only administrator account. Create another administrator before removing this one.',
+      });
+    }
+
     db.prepare('DELETE FROM staff WHERE id = ?').run(req.params.id);
     res.json({ success: true });
   } catch (err) {
@@ -150,7 +229,10 @@ router.post('/login', async (req, res) => {
     if (await bcrypt.compare(String(pin), member.pin)) {
       recordSuccess();
       const { pin: _, ...staffData } = member;
-      return res.json(staffData);
+      // The token authorises every later request. The role travels inside it,
+      // read from the database — the client never gets to assert its own role.
+      const token = createSession(member);
+      return res.json({ ...staffData, token, is_admin: isAdminRole(member.role) });
     }
   }
 
@@ -168,7 +250,7 @@ router.post('/login', async (req, res) => {
 });
 
 // Performance per cashier for a date range
-router.get('/performance', (req, res) => {
+router.get('/performance', requireAdmin, (req, res) => {
   const today = new Date().toISOString().split('T')[0];
   const from = req.query.from || today;
   const to = req.query.to || today;
@@ -213,6 +295,26 @@ router.get('/performance', (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+/** Sign out — drops the session so the token stops working immediately. */
+router.post('/logout', (req, res) => {
+  const session = getSession(req);
+  if (session) destroySession(session.token);
+  res.json({ success: true });
+});
+
+/**
+ * Who am I? Lets the app verify a restored session against the server rather
+ * than trusting what it saved in localStorage.
+ */
+router.get('/me', requireAuth, (req, res) => {
+  res.json({
+    id: req.user.staffId,
+    name: req.user.name,
+    role: req.user.role,
+    is_admin: isAdminRole(req.user.role),
+  });
 });
 
 module.exports = router;

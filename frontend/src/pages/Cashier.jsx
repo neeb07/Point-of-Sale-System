@@ -150,7 +150,7 @@ export default function Cashier() {
   const [toast, setToast] = useState(null);
   const [perfDate, setPerfDate] = useState('today');
   const [performance, setPerformance] = useState([]);
-  const [form, setForm] = useState({ name: '', role: 'Cashier', color: '#DC2626', pin: '', confirmPin: '' });
+  const [form, setForm] = useState({ name: '', role: 'Manager', color: '#DC2626', pin: '', confirmPin: '' });
   const [errors, setErrors] = useState({});
 
   const loadStaff = async () => {
@@ -384,7 +384,7 @@ export default function Cashier() {
           <div>
             <label style={{ fontSize: 14, fontWeight: 600, color: '#111827' }}>Role</label>
             <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-              {['Cashier', 'Manager'].map((r) => (
+              {['Manager', 'Admin'].map((r) => (
                 <button
                   key={r}
                   onClick={() => setForm({ ...form, role: r })}

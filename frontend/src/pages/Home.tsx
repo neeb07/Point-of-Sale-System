@@ -8,12 +8,13 @@ import Reports from '@/pages/Reports';
 import Settings from '@/pages/Settings';
 import Deals from '@/pages/Deals';
 import InventoryScreen from '@/pages/InventoryScreen';
+import ShiftsScreen from '@/pages/ShiftsScreen';
 import LoginScreen from '@/pages/LoginScreen';
 import AccessDenied from '@/components/AccessDenied';
 import { POSProvider } from '@/lib/POSContext';
 import { useAuth } from '@/context/AuthContext';
 
-const screens: Record<string, React.ComponentType> = {
+const screens: Record<string, React.ComponentType<{ onNavigate?: (page: string) => void }>> = {
   sale: SaleScreen,
   menu: MenuManagement,
   deals: Deals,
@@ -22,45 +23,48 @@ const screens: Record<string, React.ComponentType> = {
   reports: Reports,
   settings: Settings,
   inventory: InventoryScreen,
+  shifts: ShiftsScreen,
 };
 
+/**
+ * Screens only an administrator may open.
+ *
+ * This list used to be just `cashier` and `inventory`, while the sidebar
+ * advertised Menu, Deals and Settings to everyone — so a till user could
+ * reprice the menu or change the tax rate. The backend enforces the same
+ * boundary; this is what keeps the UI honest about it.
+ */
+const ADMIN_ONLY_SCREENS = new Set(['menu', 'deals', 'inventory', 'cashier', 'settings']);
+
+/**
+ * Where each role lands.
+ *
+ * An owner opens this app to read the day's numbers, so they start on Reports.
+ * A manager opens it to serve the next customer, so they start on the till.
+ */
+const LANDING_SCREEN = { admin: 'reports', manager: 'sale' } as const;
+
 export default function Home() {
-  const [activePage, setActivePage] = useState('sale');
-  const { isLocked, isAdmin } = useAuth();
+  const { isLocked, isAdmin, currentUser } = useAuth();
+
+  // Keyed by user so switching accounts re-lands on the right screen rather
+  // than leaving the previous user's page showing.
+  const [activePage, setActivePage] = useState<string | null>(null);
 
   if (isLocked) {
     return <LoginScreen />;
   }
 
-  const ActiveScreen = screens[activePage];
+  const landing = isAdmin ? LANDING_SCREEN.admin : LANDING_SCREEN.manager;
+  const page = activePage ?? landing;
 
-  if ((activePage === 'cashier' || activePage === 'inventory') && !isAdmin) {
-    return (
-      <POSProvider>
-        <div
-          style={{
-            width: '100vw',
-            height: '100vh',
-            overflow: 'hidden',
-            display: 'flex',
-            flexDirection: 'row',
-            background: '#F5F2EA',
-            fontFamily: "'Inter', sans-serif",
-          }}
-        >
-          <Sidebar
-            activePage={activePage}
-            onNavigate={setActivePage}
-          />
-          <AccessDenied message="Only managers can access this page." />
-        </div>
-      </POSProvider>
-    );
-  }
+  const denied = ADMIN_ONLY_SCREENS.has(page) && !isAdmin;
+  const ActiveScreen = screens[page] ?? screens[landing];
 
   return (
     <POSProvider>
       <div
+        key={currentUser?.id ?? 'anon'}
         style={{
           width: '100vw',
           height: '100vh',
@@ -71,11 +75,12 @@ export default function Home() {
           fontFamily: "'Inter', sans-serif",
         }}
       >
-        <Sidebar
-          activePage={activePage}
-          onNavigate={setActivePage}
-        />
-        <ActiveScreen onNavigate={setActivePage} />
+        <Sidebar activePage={page} onNavigate={setActivePage} />
+        {denied ? (
+          <AccessDenied message="This screen is restricted to an administrator." />
+        ) : (
+          <ActiveScreen onNavigate={setActivePage} />
+        )}
       </div>
     </POSProvider>
   );

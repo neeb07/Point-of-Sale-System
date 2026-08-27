@@ -39,20 +39,59 @@ app.use(cors({
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-app.use('/api/menu', require('./routes/menu'));
-app.use('/api/orders', require('./routes/orders'));
-app.use('/api/reports', require('./routes/reports'));
-app.use('/api/settings', require('./routes/settings'));
+const {
+  attachUser, requireAuth, requireAdmin, adminOnlyWrites,
+} = require('./middleware/auth');
+
+// Resolve the caller's session for every request; individual routes decide
+// what they require.
+app.use(attachUser);
+
+/**
+ * Permission matrix.
+ *
+ * Reads that the till needs in order to sell — the menu, the deals, the shop's
+ * tax and currency settings — are open to any signed-in user. Everything that
+ * changes them, plus inventory, staff and backups, is admin-only.
+ *
+ * These are the real boundary. The React app hides the same things, but that
+ * is a convenience: this is what actually stops a manager repricing the menu.
+ */
+app.use('/api/menu', adminOnlyWrites, require('./routes/menu'));
+app.use('/api/deals', adminOnlyWrites, require('./routes/deals'));
+/**
+ * Settings: readable without a token, writable only by an administrator.
+ *
+ * The sign-in screen draws the shop's name and branding before anyone has
+ * signed in, so requiring a token to *read* settings left the PIN screen
+ * unable to load — and, because a 401 signs the user out, bouncing in a loop.
+ * Nothing in here is secret: it is the tax rate, currency and receipt wording
+ * that get printed on every customer's receipt anyway.
+ */
+app.use('/api/settings', (req, res, next) => {
+  if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return next();
+  return requireAdmin(req, res, next);
+}, require('./routes/settings'));
+
+// Inventory is not part of the manager's job at all, read included.
+app.use('/api/inventory', requireAdmin, require('./routes/inventory'));
+
+// Staff administration. The login route inside is exempt — see routes/staff.js.
 app.use('/api/staff', require('./routes/staff'));
-app.use('/api/deals', require('./routes/deals'));
-app.use('/api/whatsapp', require('./routes/whatsapp'));
-app.use('/api/inventory', require('./routes/inventory'));
-app.use('/api/shifts', require('./routes/shifts'));
+
+// The daily WhatsApp report sends the shop's figures out of the building.
+app.use('/api/whatsapp', requireAdmin, require('./routes/whatsapp'));
+
+// Taking money and running the till: both roles.
+app.use('/api/orders', requireAuth, require('./routes/orders'));
+app.use('/api/shifts', requireAuth, require('./routes/shifts'));
+app.use('/api/reports', requireAuth, require('./routes/reports'));
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 
-// Backup — reads from correct DB location
-app.get('/api/backup', (req, res) => {
+// Backup — reads from correct DB location. Admin only: it hands over the
+// entire trading history as a file.
+app.get('/api/backup', requireAdmin, (req, res) => {
   const userDataDir = process.env.POS_USER_DATA_PATH || path.join(__dirname);
   const dbPath = path.join(userDataDir, 'pos_database.db');
 

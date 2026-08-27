@@ -38,10 +38,12 @@ export default function LoginScreen() {
     const loadData = async () => {
       try {
         const [staff, settings] = await Promise.all([
-          staffAPI.getAll(),
+          staffAPI.directory(),
           settingsAPI.getAll()
         ]) as [Staff[], Settings];
-        setStaffList(staff.filter((s: Staff) => Number(s.active) === 1));
+        // The directory endpoint only ever returns active accounts, so this
+        // no longer filters on a field the payload may not carry.
+        setStaffList(staff);
         if (settings.restaurant_name) setRestaurantName(settings.restaurant_name);
       } catch (err) {
         console.error('Failed to load login data:', err);
@@ -408,9 +410,9 @@ export default function LoginScreen() {
                       </div>
                       <div style={{
                         padding: '2px 9px', borderRadius: 9999, fontSize: 11, fontWeight: 600,
-                        background: staff.role === 'Cashier' ? '#F5F5F0' : '#FFF0E6',
-                        color: staff.role === 'Cashier' ? '#A3A39A' : '#DC2626',
-                        border: staff.role === 'Cashier' ? '1px solid #E5E5E0' : '1px solid rgba(220,38,38,0.20)',
+                        background: staff.role === 'Manager' ? '#F5F5F0' : '#FFF0E6',
+                        color: staff.role === 'Manager' ? '#A3A39A' : '#DC2626',
+                        border: staff.role === 'Manager' ? '1px solid #E5E5E0' : '1px solid rgba(220,38,38,0.20)',
                       }}>
                         {staff.role}
                       </div>

@@ -245,6 +245,19 @@ try { db.exec("ALTER TABLE orders ADD COLUMN employee_discount_rate REAL DEFAULT
 // out when a customer asks what is on a pizza.
 try { db.exec("ALTER TABLE menu_items ADD COLUMN description TEXT DEFAULT NULL;"); } catch(e) {}
 
+// ─── Roles ──────────────────────────────────────────────────────────────────
+// The shop runs on two roles: an administrator with full access and a manager
+// who works the till. 'Cashier' was the old name for the till role and carried
+// no meaningful restrictions, so those accounts become Managers. 'Owner' is
+// left alone — it is the existing admin account and is honoured as an admin
+// everywhere, renaming it would risk locking the shop out on upgrade.
+try { db.exec("UPDATE staff SET role = 'Manager' WHERE role = 'Cashier';"); } catch(e) {}
+
+// Who voided an order. Managers are allowed to void, so a void needs a name
+// against it — otherwise "ring up, take cash, void" leaves no trace.
+try { db.exec("ALTER TABLE orders ADD COLUMN voided_by TEXT DEFAULT NULL;"); } catch(e) {}
+try { db.exec("ALTER TABLE orders ADD COLUMN voided_by_id INTEGER DEFAULT NULL;"); } catch(e) {}
+
 // Menu items are retired rather than deleted. A hard DELETE failed outright
 // with "FOREIGN KEY constraint failed" whenever the item belonged to a deal,
 // and when it did succeed it broke sales-by-category for every past order

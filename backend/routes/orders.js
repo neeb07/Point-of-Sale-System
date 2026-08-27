@@ -278,9 +278,20 @@ const voidOrder = (req, res) => {
         });
       });
 
+      // Record who voided it. The name comes from the session, not the
+      // request body, so it cannot be spoofed by the caller.
       db.prepare(
-        "UPDATE orders SET status = 'voided', voided_at = datetime('now', 'localtime') WHERE id = ?"
-      ).run(order.id);
+        `UPDATE orders
+            SET status = 'voided',
+                voided_at = datetime('now', 'localtime'),
+                voided_by = ?,
+                voided_by_id = ?
+          WHERE id = ?`
+      ).run(
+        (req.user && req.user.name) || 'Unknown',
+        (req.user && req.user.staffId) || null,
+        order.id
+      );
     });
 
     doVoid();

@@ -4,6 +4,7 @@ import { DollarSign, ShoppingBag, TrendingUp, Tag, Printer, Download, FileSpread
 import { reportsAPI } from '@/api/index';
 import { buildCsv, money } from '@/lib/csv';
 import { useSettings } from '@/lib/SettingsContext';
+import { useAuth } from '@/context/AuthContext';
 import writeXlsxFile from 'write-excel-file/browser';
 import moment from 'moment';
 import {
@@ -39,6 +40,10 @@ export default function Reports() {
   // Shop name (used to name the exported file) and money formatting both
   // come from the shared settings provider rather than a second fetch.
   const { formatMoney, restaurant } = useSettings();
+  // A manager may read the day's figures but not take a copy out of the
+  // building. Viewing needs the data, so this is a UI control rather than a
+  // hard boundary — the settings and menu routes are the enforced ones.
+  const { isAdmin } = useAuth();
   const restaurantName = restaurant.name || 'Blaze';
   
   // Calculate dates based on filter
@@ -741,26 +746,38 @@ export default function Reports() {
             </table>
           </div>
 
-          <div className="flex gap-4 mt-6 print:hidden">
-            <button
-              onClick={printReport}
-              className="flex items-center gap-2 px-6 py-2.5 bg-gray-900 text-white rounded-lg text-sm font-bold hover:bg-gray-800 transition-colors"
-            >
-              <Printer size={16} /> Print Report
-            </button>
-            <button
-              onClick={exportExcel}
-              className="flex items-center gap-2 px-6 py-2.5 bg-gray-900 text-white rounded-lg text-sm font-bold hover:bg-gray-800 transition-colors"
-            >
-              <FileSpreadsheet size={16} /> Export Excel
-            </button>
-            <button
-              onClick={exportCSV}
-              className="flex items-center gap-2 px-6 py-2.5 bg-white border border-gray-300 text-gray-700 rounded-lg text-sm font-bold hover:bg-gray-50 transition-colors"
-            >
-              <Download size={16} /> Export CSV
-            </button>
-          </div>
+          {/*
+            Taking the figures out of the building — printed or downloaded — is
+            an administrator action. A manager reads the day's numbers on
+            screen. Print sits behind the same gate as the exports because a
+            printout leaves the shop just as easily as a spreadsheet.
+          */}
+          {isAdmin ? (
+            <div className="flex gap-4 mt-6 print:hidden">
+              <button
+                onClick={printReport}
+                className="flex items-center gap-2 px-6 py-2.5 bg-gray-900 text-white rounded-lg text-sm font-bold hover:bg-gray-800 transition-colors"
+              >
+                <Printer size={16} /> Print Report
+              </button>
+              <button
+                onClick={exportExcel}
+                className="flex items-center gap-2 px-6 py-2.5 bg-gray-900 text-white rounded-lg text-sm font-bold hover:bg-gray-800 transition-colors"
+              >
+                <FileSpreadsheet size={16} /> Export Excel
+              </button>
+              <button
+                onClick={exportCSV}
+                className="flex items-center gap-2 px-6 py-2.5 bg-white border border-gray-300 text-gray-700 rounded-lg text-sm font-bold hover:bg-gray-50 transition-colors"
+              >
+                <Download size={16} /> Export CSV
+              </button>
+            </div>
+          ) : (
+            <div className="mt-6 text-xs text-gray-400 print:hidden">
+              Exporting and printing reports is restricted to an administrator.
+            </div>
+          )}
         </div>
 
       </div>

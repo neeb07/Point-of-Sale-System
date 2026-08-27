@@ -258,6 +258,7 @@ router.get('/detailed', (req, res) => {
         o.is_employee,
         o.employee_discount,
         o.employee_discount_rate,
+        o.voided_by,
         o.delivery_charge,
         o.total,
         COALESCE(SUM(oi.price * oi.quantity), 0) AS subtotal,

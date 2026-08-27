@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
+import { setAuthToken, setUnauthorizedHandler, staffAPI } from '@/api/index';
 
 interface Staff {
   id: number;
@@ -15,8 +16,28 @@ interface AuthContextType {
   isLocked: boolean;
   login: (staffObj: Staff) => void;
   logout: () => void;
+  /** Full access: menu, deals, inventory, settings, staff, backups, exports. */
   isAdmin: boolean;
+  /** Works the till: sales, shifts, orders and read-only reports. */
+  isManager: boolean;
+  /** @deprecated kept so older call sites keep compiling; same as isManager. */
   isCashier: boolean;
+}
+
+/**
+ * Roles that carry full access.
+ *
+ * 'Owner' is the historical name and is still what the shop's own account
+ * uses, so it is honoured alongside 'Admin' rather than renamed — renaming
+ * would have locked the owner out of their own till on upgrade.
+ *
+ * Note this list previously included 'Manager', which meant a manager had the
+ * *same* rights as the owner: inventory, staff administration and settings all
+ * open. That was the opposite of what the shop wanted.
+ */
+const ADMIN_ROLES = ['Admin', 'Owner'];
+export function roleIsAdmin(role?: string | null): boolean {
+  return ADMIN_ROLES.includes(String(role || ''));
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -99,6 +120,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
   };
 
   const logout = () => {
+    // Drop the server session too, so the token stops working the moment the
+    // user signs out rather than lingering for the rest of its two hours.
+    staffAPI.logout().catch(() => {});
+    setAuthToken(null);
     setCurrentUser(null);
     setIsLocked(true);
     localStorage.removeItem(STORAGE_KEY);
@@ -118,6 +143,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
   };
 
   const login = (staffObj: Staff) => {
+    // The backend enforces permissions from this token, not from anything the
+    // client claims about itself.
+    if (typeof staffObj.token === 'string') setAuthToken(staffObj.token);
     setCurrentUser(staffObj);
     setIsLocked(false);
     userRef.current = staffObj;
@@ -155,12 +183,41 @@ export function AuthProvider({ children }: AuthProviderProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLocked]);
 
+  // If the backend rejects our token, fall back to the PIN screen rather than
+  // leaving the user on a page where every request quietly fails.
+  useEffect(() => {
+    setUnauthorizedHandler(() => {
+      setCurrentUser(null);
+      setIsLocked(true);
+      localStorage.removeItem(STORAGE_KEY);
+    });
+    return () => setUnauthorizedHandler(null);
+  }, []);
+
+  // A session restored from localStorage is checked against the server, so a
+  // token that expired while the app was closed does not present a working-
+  // looking till. The role comes back from the database, not from storage.
+  useEffect(() => {
+    if (!currentUser) return;
+    staffAPI.me()
+      .then(me => {
+        setCurrentUser(prev => (prev ? { ...prev, role: me.role, name: me.name, id: me.id } : prev));
+      })
+      .catch(() => {
+        setCurrentUser(null);
+        setIsLocked(true);
+        localStorage.removeItem(STORAGE_KEY);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Role checks
-  const isAdmin = currentUser?.role === 'Owner' || currentUser?.role === 'Manager';
-  const isCashier = currentUser?.role === 'Cashier';
+  const isAdmin = roleIsAdmin(currentUser?.role);
+  const isManager = !!currentUser && !isAdmin;
+  const isCashier = isManager;
 
   return (
-    <AuthContext.Provider value={{ currentUser, isLocked, login, logout, isAdmin, isCashier }}>
+    <AuthContext.Provider value={{ currentUser, isLocked, login, logout, isAdmin, isManager, isCashier }}>
       {children}
     </AuthContext.Provider>
   );

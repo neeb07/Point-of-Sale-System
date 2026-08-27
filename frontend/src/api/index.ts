@@ -1,24 +1,78 @@
 const BASE_URL = 'http://localhost:3001/api';
 
-interface RequestOptions {
-  method: string;
-  headers: {
-    'Content-Type': string;
-  };
-  body?: string;
+/**
+ * Session token.
+ *
+ * The backend now enforces roles rather than trusting the UI, so every request
+ * carries the token issued at login. It is held here (and mirrored into
+ * localStorage by AuthContext) so a page reload keeps the session.
+ */
+const TOKEN_KEY = 'pos_session_token';
+
+let authToken: string | null = null;
+try {
+  authToken = localStorage.getItem(TOKEN_KEY);
+} catch (e) {
+  authToken = null;
+}
+
+export function setAuthToken(token: string | null): void {
+  authToken = token;
+  try {
+    if (token) localStorage.setItem(TOKEN_KEY, token);
+    else localStorage.removeItem(TOKEN_KEY);
+  } catch (e) {
+    // A blocked localStorage must not stop the till working this session.
+  }
+}
+
+export function getAuthToken(): string | null {
+  return authToken;
+}
+
+/**
+ * Called when the backend rejects our token, so the app can drop the user back
+ * to the PIN screen instead of silently failing every request. AuthContext
+ * registers the handler.
+ */
+type UnauthorizedHandler = () => void;
+let onUnauthorized: UnauthorizedHandler | null = null;
+export function setUnauthorizedHandler(fn: UnauthorizedHandler | null): void {
+  onUnauthorized = fn;
+}
+
+/** Raised so callers can tell "not allowed" apart from a generic failure. */
+export class ApiError extends Error {
+  status: number;
+  code?: string;
+  constructor(message: string, status: number, code?: string) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.code = code;
+  }
 }
 
 async function request<T = unknown>(method: string, path: string, body: unknown = null): Promise<T> {
-  const options: RequestOptions = {
-    method,
-    headers: { 'Content-Type': 'application/json' },
-  };
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (authToken) headers.Authorization = `Bearer ${authToken}`;
+
+  const options: RequestInit = { method, headers };
   if (body) options.body = JSON.stringify(body);
-  
+
   const response = await fetch(`${BASE_URL}${path}`, options);
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: 'Request failed' }));
-    throw new Error(error.error || 'Request failed');
+
+    // 401 means the token is gone or expired: sign out rather than leaving the
+    // user on a screen where nothing works. 403 is a live session without the
+    // rights for this action, which is a message, not a sign-out.
+    if (response.status === 401) {
+      setAuthToken(null);
+      if (onUnauthorized) onUnauthorized();
+    }
+
+    throw new ApiError(error.error || 'Request failed', response.status, error.code);
   }
   return response.json();
 }
@@ -106,7 +160,9 @@ export const settingsAPI = {
     });
   },
   backup: async () => {
-    const response = await fetch(`${BASE_URL}/backup`);
+    const response = await fetch(`${BASE_URL}/backup`, {
+      headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
+    });
     if (!response.ok) throw new Error('Backup failed');
     const blob = await response.blob();
     const url = URL.createObjectURL(blob);
@@ -120,10 +176,15 @@ export const settingsAPI = {
 
 export const staffAPI = {
   getAll: () => request<Staff[]>('GET', '/staff'),
+  /** Names and colours for the sign-in screen; needs no session. */
+  directory: () => request<Staff[]>('GET', '/staff/directory'),
   create: (data: Staff) => request<Staff>('POST', '/staff', data),
   update: (id: number, data: Staff) => request<Staff>('PUT', `/staff/${id}`, data),
   delete: (id: number) => request<void>('DELETE', `/staff/${id}`),
-  login: (pin: string) => request<Staff>('POST', '/staff/login', { pin }),
+  login: (pin: string) => request<Staff & { token: string }>('POST', '/staff/login', { pin }),
+  logout: () => request<{ success: boolean }>('POST', '/staff/logout'),
+  /** Verifies a restored session against the server instead of trusting localStorage. */
+  me: () => request<{ id: number; name: string; role: string; is_admin: boolean }>('GET', '/staff/me'),
   performance: (params: Record<string, string> = {}) => {
     const qs = new URLSearchParams(params).toString();
     return request<Record<string, unknown>>('GET', `/staff/performance${qs ? `?${qs}` : ''}`);

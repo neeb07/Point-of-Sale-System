@@ -1,12 +1,12 @@
 import React from 'react';
-import { Home as HomeIcon, User, ClipboardList, BarChart2, Settings, LogOut, Utensils, Tag, Package } from 'lucide-react';
+import { Home as HomeIcon, User, ClipboardList, BarChart2, Settings, LogOut, Utensils, Tag, Package, Clock } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 
 interface NavItem {
   id: string;
   icon: React.ElementType;
   label: string;
-  alwaysShow?: boolean;
+  /** Restricted to administrators. */
   adminOnly?: boolean;
 }
 
@@ -15,20 +15,41 @@ interface SidebarProps {
   onNavigate: (page: string) => void;
 }
 
-const allNavItems: NavItem[] = [
-  { id: 'sale',     icon: HomeIcon,      label: 'Home',    alwaysShow: true },
-  { id: 'menu',     icon: Utensils,      label: 'Menu',    alwaysShow: true },
-  { id: 'deals',    icon: Tag,           label: 'Deals',   alwaysShow: true },
+/**
+ * Navigation, in the order each role wants it.
+ *
+ * Menu, Deals and Settings used to be marked "always show", so a till user
+ * could open them and change prices, deals and the tax rate. They are
+ * administrator screens and are listed as such now.
+ *
+ * The admin's list leads with Reports because an owner opens this app to look
+ * at the day's numbers, not to ring up a sale. The sale screen stays reachable
+ * — the owner still has to serve customers when the shop is short-staffed —
+ * just not first.
+ */
+const ADMIN_NAV: NavItem[] = [
+  { id: 'reports',  icon: BarChart2,     label: 'Reports' },
+  { id: 'orders',   icon: ClipboardList, label: 'Orders' },
+  { id: 'menu',     icon: Utensils,      label: 'Menu',      adminOnly: true },
+  { id: 'deals',    icon: Tag,           label: 'Deals',     adminOnly: true },
   { id: 'inventory',icon: Package,       label: 'Inventory', adminOnly: true },
-  { id: 'cashier',  icon: User,          label: 'Cashier', adminOnly: true },
-  { id: 'orders',   icon: ClipboardList, label: 'Orders',  alwaysShow: true },
-  { id: 'reports',  icon: BarChart2,     label: 'Reports', alwaysShow: true },
-  { id: 'settings', icon: Settings,      label: 'Settings',alwaysShow: true },
+  { id: 'cashier',  icon: User,          label: 'Staff',     adminOnly: true },
+  { id: 'shifts',   icon: Clock,         label: 'Shifts' },
+  { id: 'sale',     icon: HomeIcon,      label: 'Sale' },
+  { id: 'settings', icon: Settings,      label: 'Settings',  adminOnly: true },
+];
+
+/** The manager works the till, so the sale screen leads. */
+const MANAGER_NAV: NavItem[] = [
+  { id: 'sale',     icon: HomeIcon,      label: 'Sale' },
+  { id: 'orders',   icon: ClipboardList, label: 'Orders' },
+  { id: 'shifts',   icon: Clock,         label: 'Shifts' },
+  { id: 'reports',  icon: BarChart2,     label: 'Reports' },
 ];
 
 export default function Sidebar({ activePage, onNavigate }: SidebarProps) {
   const { isAdmin, logout } = useAuth();
-  const navItems = allNavItems.filter(item => item.alwaysShow || isAdmin);
+  const navItems = isAdmin ? ADMIN_NAV : MANAGER_NAV;
 
   return (
     <div
