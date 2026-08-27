@@ -94,7 +94,13 @@ export default function LoginScreen() {
     // SECURITY: the entered PIN and the full staff record used to be written
     // to the console here, and the packaged build opens devtools, so every
     // login printed a working credential to a visible window.
-    const result = await staffAPI.login(String(enteredPin));
+    if (!selectedStaff) {
+      setErrorMessage('Select an account first.');
+      return;
+    }
+    // The account is part of the credential: the backend checks this PIN
+    // against this account and no other.
+    const result = await staffAPI.login(String(enteredPin), selectedStaff.id);
     login(result);
   } catch (err) {
     setShaking(true);

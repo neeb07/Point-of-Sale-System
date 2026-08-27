@@ -157,10 +157,13 @@ router.delete('/:id', requireAdmin, (req, res) => {
 /**
  * SECURITY: brute-force protection for PIN login.
  *
- * PINs are 4 digits — a 10,000-entry space — and this endpoint previously
+ * PINs are 4 digits — a 10,000-entry space — and this endpoint originally
  * accepted unlimited attempts with no delay or lockout, so the whole space
- * could be walked in minutes. Because a PIN is the *only* credential (there
- * is no username), the counter is global rather than per-account.
+ * could be walked in minutes.
+ *
+ * The counter is per account. Sign-in now names the account being signed into,
+ * so one person fat-fingering their PIN throttles only their own account
+ * rather than locking the whole shop out of the till.
  *
  * State is in-memory on purpose: this is a single-till app, the backend is
  * restarted with the app, and a restart-to-reset still costs an attacker far
@@ -170,132 +173,108 @@ const MAX_ATTEMPTS = 5;          // failures before the first lockout
 const LOCKOUT_MS = 60 * 1000;    // base lockout, doubles each further trip
 const ATTEMPT_WINDOW_MS = 15 * 60 * 1000; // failures older than this decay away
 
-const loginGuard = {
-  failures: [],      // timestamps of recent failed attempts
-  lockedUntil: 0,
-  lockoutCount: 0,   // consecutive lockouts, drives exponential backoff
-};
+/** accountKey -> { failures: number[], lockedUntil, lockoutCount } */
+const loginGuards = new Map();
 
-function guardStatus(now = Date.now()) {
-  if (now < loginGuard.lockedUntil) {
-    return { locked: true, retryAfterMs: loginGuard.lockedUntil - now };
+function guardFor(accountKey) {
+  const key = String(accountKey);
+  if (!loginGuards.has(key)) {
+    loginGuards.set(key, { failures: [], lockedUntil: 0, lockoutCount: 0 });
+  }
+  return loginGuards.get(key);
+}
+
+function guardStatus(guard, now = Date.now()) {
+  if (now < guard.lockedUntil) {
+    return { locked: true, retryAfterMs: guard.lockedUntil - now };
   }
   return { locked: false, retryAfterMs: 0 };
 }
 
-function recordFailure(now = Date.now()) {
-  loginGuard.failures = loginGuard.failures.filter(t => now - t < ATTEMPT_WINDOW_MS);
-  loginGuard.failures.push(now);
+function recordFailure(guard, now = Date.now()) {
+  guard.failures = guard.failures.filter(t => now - t < ATTEMPT_WINDOW_MS);
+  guard.failures.push(now);
 
-  if (loginGuard.failures.length >= MAX_ATTEMPTS) {
-    loginGuard.lockoutCount += 1;
+  if (guard.failures.length >= MAX_ATTEMPTS) {
+    guard.lockoutCount += 1;
     // 1m, 2m, 4m, 8m … capped at 15m.
-    const backoff = Math.min(LOCKOUT_MS * 2 ** (loginGuard.lockoutCount - 1), 15 * 60 * 1000);
-    loginGuard.lockedUntil = now + backoff;
-    loginGuard.failures = [];
+    const backoff = Math.min(LOCKOUT_MS * 2 ** (guard.lockoutCount - 1), 15 * 60 * 1000);
+    guard.lockedUntil = now + backoff;
+    guard.failures = [];
   }
 }
 
-function recordSuccess() {
-  loginGuard.failures = [];
-  loginGuard.lockedUntil = 0;
-  loginGuard.lockoutCount = 0;
+function recordSuccess(guard) {
+  guard.failures = [];
+  guard.lockedUntil = 0;
+  guard.lockoutCount = 0;
 }
 
-// POST login via PIN
+function lockedResponse(res, status) {
+  const seconds = Math.ceil(status.retryAfterMs / 1000);
+  return res.status(429).json({
+    error: `Too many incorrect PINs. Try again in ${seconds} second${seconds === 1 ? '' : 's'}.`,
+    retry_after_seconds: seconds,
+  });
+}
+
+
+/**
+ * Sign in.
+ *
+ * The PIN is checked against the *selected account only*.
+ *
+ * It used to be checked against every active account in turn and returned
+ * whichever one matched, so the account picker on the sign-in screen was
+ * decorative: choosing "Junaid (Manager)" and typing the administrator's PIN
+ * signed you in as the administrator, with full access. Whoever's PIN you
+ * typed is who you became.
+ *
+ * Requiring the account id makes the picked account authoritative — a PIN only
+ * works for the person it belongs to. It also means two people may safely hold
+ * the same PIN, which the schema never actually prevented: the UNIQUE
+ * constraint is on `pin`, but `pin` stores a *bcrypt hash*, and bcrypt salts
+ * every hash, so the same PIN hashed twice produces two different strings that
+ * the constraint happily accepts.
+ */
 router.post('/login', async (req, res) => {
-  const { pin } = req.body;
+  const { pin, staff_id } = req.body;
+
   if (!pin) return res.status(400).json({ error: 'PIN required' });
-
-  const status = guardStatus();
-  if (status.locked) {
-    const seconds = Math.ceil(status.retryAfterMs / 1000);
-    return res.status(429).json({
-      error: `Too many incorrect PINs. Try again in ${seconds} second${seconds === 1 ? '' : 's'}.`,
-      retry_after_seconds: seconds,
-    });
+  if (staff_id === undefined || staff_id === null || staff_id === '') {
+    return res.status(400).json({ error: 'Select an account to sign in.' });
   }
 
-  const staff = db.prepare('SELECT id, name, role, color, pin FROM staff WHERE active = 1').all();
+  // Throttle per account, so one person's mistyping cannot lock out the other.
+  const guard = guardFor(staff_id);
+  const status = guardStatus(guard);
+  if (status.locked) return lockedResponse(res, status);
 
-  for (const member of staff) {
-    // SECURITY: a plain-text comparison branch used to sit here as a fallback
-    // for "legacy seeded PINs". It meant an unhashed PIN written directly into
-    // the table would still authenticate. All PINs are hashed on insert, and
-    // db/database.js migrates any stragglers at startup, so the fallback is
-    // gone: a row whose PIN is not a bcrypt hash can no longer log in.
-    if (!/^\$2[aby]\$/.test(member.pin || '')) continue;
+  const member = db.prepare(
+    'SELECT id, name, role, color, pin FROM staff WHERE id = ? AND active = 1'
+  ).get(staff_id);
 
-    if (await bcrypt.compare(String(pin), member.pin)) {
-      recordSuccess();
-      const { pin: _, ...staffData } = member;
-      // The token authorises every later request. The role travels inside it,
-      // read from the database — the client never gets to assert its own role.
-      const token = createSession(member);
-      return res.json({ ...staffData, token, is_admin: isAdminRole(member.role) });
-    }
+  // A missing or inactive account and a wrong PIN return the same failure, so
+  // the response cannot be used to enumerate which accounts exist.
+  const pinIsHashed = member && /^\$2[aby]\$/.test(member.pin || '');
+  const ok = pinIsHashed && await bcrypt.compare(String(pin), member.pin);
+
+  if (ok) {
+    recordSuccess(guard);
+    const { pin: _, ...staffData } = member;
+    // The token authorises every later request. The role travels inside it,
+    // read from the database — the client never gets to assert its own role.
+    const token = createSession(member);
+    return res.json({ ...staffData, token, is_admin: isAdminRole(member.role) });
   }
 
-  recordFailure();
-  const after = guardStatus();
-  if (after.locked) {
-    const seconds = Math.ceil(after.retryAfterMs / 1000);
-    return res.status(429).json({
-      error: `Too many incorrect PINs. Try again in ${seconds} second${seconds === 1 ? '' : 's'}.`,
-      retry_after_seconds: seconds,
-    });
-  }
+  recordFailure(guard);
+  const after = guardStatus(guard);
+  if (after.locked) return lockedResponse(res, after);
 
-  return res.status(401).json({ error: 'Invalid PIN or inactive account' });
+  return res.status(401).json({ error: 'Incorrect PIN for this account.' });
 });
 
-// Performance per cashier for a date range
-router.get('/performance', requireAdmin, (req, res) => {
-  const today = new Date().toISOString().split('T')[0];
-  const from = req.query.from || today;
-  const to = req.query.to || today;
-
-  try {
-    const allStaff = db.prepare('SELECT id, name, role, color, active FROM staff').all();
-
-    const performance = allStaff.map(s => {
-      const stats = db.prepare(`
-        SELECT
-          COUNT(*) as total_orders,
-          COALESCE(SUM(total), 0) as total_revenue,
-          COALESCE(AVG(total), 0) as avg_order_value,
-          COALESCE(SUM(discount), 0) as total_discounts
-        FROM orders
-        WHERE cashier_id = ?
-        AND DATE(created_at) BETWEEN DATE(?) AND DATE(?)
-        AND status != 'voided'
-      `).get(s.id, from, to);
-
-      const busiestHour = db.prepare(`
-        SELECT
-          CAST(strftime('%H', created_at) AS INTEGER) as hour,
-          COUNT(*) as count
-        FROM orders
-        WHERE cashier_id = ?
-        AND DATE(created_at) BETWEEN DATE(?) AND DATE(?)
-        AND status != 'voided'
-        GROUP BY hour
-        ORDER BY count DESC
-        LIMIT 1
-      `).get(s.id, from, to);
-
-      const hourLabel = busiestHour
-        ? `${busiestHour.hour % 12 || 12}${busiestHour.hour < 12 ? 'AM' : 'PM'}` 
-        : 'N/A';
-
-      return { ...s, ...stats, busiest_hour: hourLabel };
-    });
-
-    res.json(performance);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
 
 /** Sign out — drops the session so the token stops working immediately. */
 router.post('/logout', (req, res) => {

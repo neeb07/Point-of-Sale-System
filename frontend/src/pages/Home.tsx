@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Sidebar from '@/components/pos/Sidebar';
 import SaleScreen from '@/pages/SaleScreen';
 import MenuManagement from '@/pages/MenuManagement';
@@ -46,9 +46,26 @@ const LANDING_SCREEN = { admin: 'reports', manager: 'sale' } as const;
 export default function Home() {
   const { isLocked, isAdmin, currentUser } = useAuth();
 
-  // Keyed by user so switching accounts re-lands on the right screen rather
-  // than leaving the previous user's page showing.
   const [activePage, setActivePage] = useState<string | null>(null);
+
+  /**
+   * Land on the role's own screen at every sign-in.
+   *
+   * `activePage` outlives a sign-out, so without this the next person to sign
+   * in inherited whatever screen the last one left open — a manager signing in
+   * after the owner had been reading Reports would land on Reports, not the
+   * till. Clearing it whenever the signed-in account changes (including to
+   * nobody, on sign-out) makes `page` fall back to the landing screen below.
+   */
+  const signedInId = currentUser?.id ?? null;
+  const lastSignedInId = useRef<number | null>(signedInId);
+
+  useEffect(() => {
+    if (lastSignedInId.current !== signedInId) {
+      lastSignedInId.current = signedInId;
+      setActivePage(null);
+    }
+  }, [signedInId]);
 
   if (isLocked) {
     return <LoginScreen />;

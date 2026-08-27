@@ -50,7 +50,7 @@ export default function ReceiptModal({ open, onClose, orderData, autoPrintEnable
       }
       tag.textContent =
         `@media print { @page { size: ${widthMm}mm ${heightMm}mm; margin: 0; } }`;
-    } catch (e) {
+    } catch {
       // Fall back to the static rule in index.css rather than blocking a sale.
     }
   };

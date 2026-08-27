@@ -181,7 +181,12 @@ export const staffAPI = {
   create: (data: Staff) => request<Staff>('POST', '/staff', data),
   update: (id: number, data: Staff) => request<Staff>('PUT', `/staff/${id}`, data),
   delete: (id: number) => request<void>('DELETE', `/staff/${id}`),
-  login: (pin: string) => request<Staff & { token: string }>('POST', '/staff/login', { pin }),
+  /**
+   * Sign in as a specific account. The id is required: the PIN is checked
+   * against that account only, so a PIN cannot sign you in as someone else.
+   */
+  login: (pin: string, staffId: number) =>
+    request<Staff & { token: string }>('POST', '/staff/login', { pin, staff_id: staffId }),
   logout: () => request<{ success: boolean }>('POST', '/staff/logout'),
   /** Verifies a restored session against the server instead of trusting localStorage. */
   me: () => request<{ id: number; name: string; role: string; is_admin: boolean }>('GET', '/staff/me'),
