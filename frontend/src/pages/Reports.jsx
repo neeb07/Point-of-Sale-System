@@ -1,8 +1,9 @@
 // @ts-nocheck
 import React, { useState, useEffect, useMemo } from 'react';
-import { DollarSign, ShoppingBag, TrendingUp, Tag, Printer, Download } from 'lucide-react';
+import { DollarSign, ShoppingBag, TrendingUp, Tag, Printer, Download, FileSpreadsheet } from 'lucide-react';
 import { reportsAPI, settingsAPI } from '@/api/index';
 import { buildCsv, money } from '@/lib/csv';
+import writeXlsxFile from 'write-excel-file/browser';
 import moment from 'moment';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer,
@@ -126,35 +127,39 @@ export default function Reports() {
   };
 
   /**
-   * ── CSV export ────────────────────────────────────────────────────────────
+   * Build a Date that Excel will render as the intended calendar day.
    *
-   * Rebuilt so the numbers reconcile and the file survives Excel.
-   *
-   * `escapeCell` implements RFC 4180 quoting. The previous version stripped
-   * commas out of the item list (`replace(/,/g, ';')`), silently corrupting
-   * the data to avoid breaking the row, and did nothing at all about a double
-   * quote in an item name — one such name shifted every later column.
-   *
-   * The leading-apostrophe guard defuses CSV injection: a cell beginning with
-   * =, +, - or @ is executed as a formula when the file is opened, and item
-   * names are operator-editable free text.
+   * write-excel-file serialises a Date from its **UTC** components. A local
+   * midnight here is 19:00 the previous day in UTC, so passing
+   * `moment(x).startOf('day').toDate()` wrote every date one day early —
+   * an order rung up on the 17th exported as the 16th. Pinning the value to
+   * UTC midnight of the same calendar date makes the serial a whole number and
+   * the rendered date correct regardless of the machine's timezone.
    */
-  const downloadCsv = (rows, filenameSuffix) => {
-    const blob = new Blob([buildCsv(rows)], { type: 'text/csv;charset=utf-8;' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    const safeName = String(restaurantName || 'Blaze').replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, '');
-    a.download = `${safeName}_${filenameSuffix}_${from}_to_${to}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    // The previous version never revoked the object URL, leaking the blob for
-    // the lifetime of the window.
-    window.URL.revokeObjectURL(url);
+  const excelDate = (value) => {
+    const m = moment(value);
+    return new Date(Date.UTC(m.year(), m.month(), m.date()));
   };
 
-  const exportCSV = () => {
+  const exportFileName = (suffix, ext) => {
+    const safeName = String(restaurantName || 'Blaze').replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, '');
+    return `${safeName}_${suffix}_${from}_to_${to}.${ext}`;
+  };
+
+  /**
+   * ── Report definition ─────────────────────────────────────────────────────
+   *
+   * A report is described once — its columns and its records — and both the
+   * CSV and the Excel export render from that single definition, so the two
+   * can never drift apart in columns, ordering or arithmetic.
+   *
+   * `width` is in characters and only means anything to the Excel export.
+   * A CSV carries no formatting at all, which is why a date column there shows
+   * as ###### until the reader widens it: Excel parses the value as a date,
+   * and a date is too wide for the default column. The xlsx export sets real
+   * widths, so it opens readable.
+   */
+  const getReportTable = () => {
     if (reportFormat === 'summary') {
       const byDate = {};
       detailedReport.forEach(row => {
@@ -178,104 +183,171 @@ export default function Reports() {
         else d.online += Number(row.total) || 0;
       });
 
-      const rows = [[
-        'Date', 'Orders', 'Items Sold', 'Gross Sales', 'Discounts',
-        'Delivery Charges', 'Net Sales', 'Cash', 'Card', 'Online',
-      ]];
-      const totals = { orders: 0, qty: 0, gross: 0, discounts: 0, delivery: 0, net: 0, cash: 0, card: 0, online: 0 };
+      const records = Object.keys(byDate).sort().map(date => ({ date, ...byDate[date] }));
+      const t = { orders: 0, qty: 0, gross: 0, discounts: 0, delivery: 0, net: 0, cash: 0, card: 0, online: 0 };
+      records.forEach(r => Object.keys(t).forEach(k => { t[k] += r[k]; }));
 
-      Object.keys(byDate).sort().forEach(date => {
-        const d = byDate[date];
-        Object.keys(totals).forEach(k => { totals[k] += d[k]; });
-        rows.push([
-          date, d.orders, d.qty, money(d.gross), money(d.discounts),
-          money(d.delivery), money(d.net), money(d.cash), money(d.card), money(d.online),
-        ]);
-      });
-
-      rows.push([
-        'TOTAL', totals.orders, totals.qty, money(totals.gross), money(totals.discounts),
-        money(totals.delivery), money(totals.net), money(totals.cash), money(totals.card), money(totals.online),
-      ]);
-
-      downloadCsv(rows, 'Sales_Summary');
-      return;
+      return {
+        name: 'Sales_Summary',
+        records,
+        columns: [
+          { header: 'Date',             width: 13, type: 'date',  value: r => excelDate(moment(r.date, 'YYYY-MM-DD')), total: () => 'TOTAL' },
+          { header: 'Orders',           width: 9,  type: 'int',   value: r => r.orders,          total: () => t.orders },
+          { header: 'Items Sold',       width: 11, type: 'int',   value: r => r.qty,             total: () => t.qty },
+          { header: 'Gross Sales',      width: 13, type: 'money', value: r => money(r.gross),    total: () => money(t.gross) },
+          { header: 'Discounts',        width: 12, type: 'money', value: r => money(r.discounts),total: () => money(t.discounts) },
+          { header: 'Delivery Charges', width: 16, type: 'money', value: r => money(r.delivery), total: () => money(t.delivery) },
+          { header: 'Net Sales',        width: 13, type: 'money', value: r => money(r.net),      total: () => money(t.net) },
+          { header: 'Cash',             width: 12, type: 'money', value: r => money(r.cash),     total: () => money(t.cash) },
+          { header: 'Card',             width: 12, type: 'money', value: r => money(r.card),     total: () => money(t.card) },
+          { header: 'Online',           width: 12, type: 'money', value: r => money(r.online),   total: () => money(t.online) },
+        ],
+      };
     }
 
     if (reportFormat === 'items') {
-      const rows = [[
-        'Order #', 'Date', 'Time', 'Cashier', 'Order Type', 'Table/Token',
-        'Payment Method', 'Item', 'Category', 'Qty', 'Unit Price', 'Line Total',
-      ]];
-      let totalQty = 0;
-      let totalValue = 0;
-
+      const t = { qty: 0, value: 0 };
       lineItems.forEach(r => {
-        totalQty += Number(r.quantity) || 0;
-        totalValue += Number(r.line_total) || 0;
-        rows.push([
-          r.order_id,
-          moment(r.created_at).format('YYYY-MM-DD'),
-          moment(r.created_at).format('hh:mm A'),
-          r.cashier_name || 'Unknown',
-          r.order_type || 'Dine-in',
-          r.table_number || '',
-          r.payment_method || '',
-          r.item_name || '',
-          r.category || '',
-          Number(r.quantity) || 0,
-          money(r.unit_price),
-          money(r.line_total),
-        ]);
+        t.qty += Number(r.quantity) || 0;
+        t.value += Number(r.line_total) || 0;
       });
 
-      rows.push(['TOTAL', '', '', '', '', '', '', '', '', totalQty, '', money(totalValue)]);
-      downloadCsv(rows, 'Item_Sales');
-      return;
+      return {
+        name: 'Item_Sales',
+        records: lineItems,
+        columns: [
+          { header: 'Order #',        width: 9,  type: 'int',   value: r => r.order_id, total: () => 'TOTAL' },
+          { header: 'Date',           width: 13, type: 'date',  value: r => excelDate(r.created_at) },
+          { header: 'Time',           width: 11, type: 'text',  value: r => moment(r.created_at).format('hh:mm A') },
+          { header: 'Cashier',        width: 16, type: 'text',  value: r => r.cashier_name || 'Unknown' },
+          { header: 'Order Type',     width: 13, type: 'text',  value: r => r.order_type || 'Dine-in' },
+          { header: 'Table/Token',    width: 13, type: 'text',  value: r => r.table_number || '' },
+          { header: 'Payment Method', width: 16, type: 'text',  value: r => r.payment_method || '' },
+          { header: 'Item',           width: 34, type: 'text',  value: r => r.item_name || '' },
+          { header: 'Category',       width: 18, type: 'text',  value: r => r.category || '' },
+          { header: 'Qty',            width: 8,  type: 'int',   value: r => Number(r.quantity) || 0, total: () => t.qty },
+          { header: 'Unit Price',     width: 12, type: 'money', value: r => money(r.unit_price) },
+          { header: 'Line Total',     width: 13, type: 'money', value: r => money(r.line_total), total: () => money(t.value) },
+        ],
+      };
     }
 
     // Detailed — one row per order.
-    const rows = [[
-      'Order #', 'Date', 'Time', 'Cashier', 'Order Type', 'Table/Token',
-      'Payment Method', 'Status', 'Items', 'Distinct Items', 'Total Qty',
-      'Subtotal', 'Discount', 'Delivery Charge', 'Total',
-    ]];
-    const totals = { orders: 0, lines: 0, qty: 0, subtotal: 0, discount: 0, delivery: 0, total: 0 };
-
-    detailedReport.forEach(row => {
-      totals.orders += 1;
-      totals.lines += Number(row.line_count) || 0;
-      totals.qty += Number(row.total_qty) || 0;
-      totals.subtotal += Number(row.subtotal) || 0;
-      totals.discount += Number(row.discount) || 0;
-      totals.delivery += Number(row.delivery_charge) || 0;
-      totals.total += Number(row.total) || 0;
-
-      rows.push([
-        row.id,
-        moment(row.created_at).format('YYYY-MM-DD'),
-        moment(row.created_at).format('hh:mm A'),
-        row.cashier_name || 'Unknown',
-        row.order_type || 'Dine-in',
-        row.table_number || '',
-        row.payment_method || '',
-        row.status || '',
-        row.items || '',
-        Number(row.line_count) || 0,
-        Number(row.total_qty) || 0,
-        money(row.subtotal),
-        money(row.discount),
-        money(row.delivery_charge),
-        money(row.total),
-      ]);
+    const t = { lines: 0, qty: 0, subtotal: 0, discount: 0, delivery: 0, total: 0 };
+    detailedReport.forEach(r => {
+      t.lines += Number(r.line_count) || 0;
+      t.qty += Number(r.total_qty) || 0;
+      t.subtotal += Number(r.subtotal) || 0;
+      t.discount += Number(r.discount) || 0;
+      t.delivery += Number(r.delivery_charge) || 0;
+      t.total += Number(r.total) || 0;
     });
 
-    rows.push([
-      'TOTAL', '', '', '', '', '', '', '', '', totals.lines, totals.qty,
-      money(totals.subtotal), money(totals.discount), money(totals.delivery), money(totals.total),
-    ]);
+    return {
+      name: 'Order_Details',
+      records: detailedReport,
+      columns: [
+        { header: 'Order #',         width: 9,  type: 'int',   value: r => r.id, total: () => 'TOTAL' },
+        { header: 'Date',            width: 13, type: 'date',  value: r => excelDate(r.created_at) },
+        { header: 'Time',            width: 11, type: 'text',  value: r => moment(r.created_at).format('hh:mm A') },
+        { header: 'Cashier',         width: 16, type: 'text',  value: r => r.cashier_name || 'Unknown' },
+        { header: 'Order Type',      width: 13, type: 'text',  value: r => r.order_type || 'Dine-in' },
+        { header: 'Table/Token',     width: 13, type: 'text',  value: r => r.table_number || '' },
+        { header: 'Payment Method',  width: 16, type: 'text',  value: r => r.payment_method || '' },
+        { header: 'Status',          width: 12, type: 'text',  value: r => r.status || '' },
+        { header: 'Items',           width: 52, type: 'text',  value: r => r.items || '' },
+        { header: 'Distinct Items',  width: 14, type: 'int',   value: r => Number(r.line_count) || 0, total: () => t.lines },
+        { header: 'Total Qty',       width: 11, type: 'int',   value: r => Number(r.total_qty) || 0,  total: () => t.qty },
+        { header: 'Subtotal',        width: 12, type: 'money', value: r => money(r.subtotal),         total: () => money(t.subtotal) },
+        { header: 'Discount',        width: 12, type: 'money', value: r => money(r.discount),         total: () => money(t.discount) },
+        { header: 'Delivery Charge', width: 16, type: 'money', value: r => money(r.delivery_charge),  total: () => money(t.delivery) },
+        { header: 'Total',           width: 13, type: 'money', value: r => money(r.total),            total: () => money(t.total) },
+      ],
+    };
+  };
 
-    downloadCsv(rows, 'Order_Details');
+  /** Render one schema cell for CSV, where everything is ultimately text. */
+  const csvCell = (col, record) => {
+    const v = col.value(record);
+    if (v instanceof Date) return moment(v).format('YYYY-MM-DD');
+    return v;
+  };
+
+  const exportCSV = () => {
+    const table = getReportTable();
+    const rows = [table.columns.map(c => c.header)];
+
+    table.records.forEach(record => {
+      rows.push(table.columns.map(col => csvCell(col, record)));
+    });
+
+    // A column with no `total` contributes a blank cell to the totals row.
+    rows.push(table.columns.map(col => (col.total ? col.total() : '')));
+
+    const blob = new Blob([buildCsv(rows)], { type: 'text/csv;charset=utf-8;' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = exportFileName(table.name, 'csv');
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    // The previous version never revoked the object URL, leaking the blob for
+    // the lifetime of the window.
+    window.URL.revokeObjectURL(url);
+  };
+
+  /**
+   * Excel export.
+   *
+   * Unlike CSV this carries real column widths, so the date column is readable
+   * the moment the file opens rather than rendering as ######, and dates and
+   * money are written as genuine Excel types so they sort, filter and SUM
+   * without the reader having to convert anything first.
+   */
+  const exportExcel = async () => {
+    const table = getReportTable();
+
+    const headerStyle = {
+      value: null, fontWeight: 'bold', backgroundColor: '#F3F4F6',
+      align: 'left', borderColor: '#D1D5DB', bottomBorderStyle: 'thin',
+    };
+
+    const cellFor = (col, value, bold) => {
+      const base = bold ? { fontWeight: 'bold' } : {};
+      if (value === null || value === undefined || value === '') {
+        return { ...base, value: null, type: String };
+      }
+      if (value instanceof Date) {
+        return { ...base, value, type: Date, format: 'yyyy-mm-dd', align: 'left' };
+      }
+      if (col.type === 'money') {
+        return { ...base, value: Number(value), type: Number, format: '#,##0.00', align: 'right' };
+      }
+      if (col.type === 'int') {
+        // The totals row puts the label "TOTAL" under an integer column.
+        if (typeof value === 'string') return { ...base, value, type: String };
+        return { ...base, value: Number(value), type: Number, format: '#,##0', align: 'right' };
+      }
+      return { ...base, value: String(value), type: String };
+    };
+
+    const data = [table.columns.map(c => ({ ...headerStyle, value: c.header, type: String }))];
+
+    table.records.forEach(record => {
+      data.push(table.columns.map(col => cellFor(col, col.value(record), false)));
+    });
+
+    data.push(table.columns.map(col => cellFor(col, col.total ? col.total() : null, true)));
+
+    // write-excel-file v4 returns a writer rather than taking a fileName
+    // option; `.toFile()` is what actually triggers the download.
+    await writeXlsxFile(data, {
+      columns: table.columns.map(c => ({ width: c.width })),
+      sheet: 'Report',
+      // Keep the header visible when scrolling a long report.
+      stickyRowsCount: 1,
+    }).toFile(exportFileName(table.name, 'xlsx'));
   };
 
   // Process Heatmap Data
@@ -647,6 +719,12 @@ export default function Reports() {
               className="flex items-center gap-2 px-6 py-2.5 bg-gray-900 text-white rounded-lg text-sm font-bold hover:bg-gray-800 transition-colors"
             >
               <Printer size={16} /> Print Report
+            </button>
+            <button
+              onClick={exportExcel}
+              className="flex items-center gap-2 px-6 py-2.5 bg-gray-900 text-white rounded-lg text-sm font-bold hover:bg-gray-800 transition-colors"
+            >
+              <FileSpreadsheet size={16} /> Export Excel
             </button>
             <button
               onClick={exportCSV}

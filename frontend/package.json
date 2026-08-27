@@ -75,6 +75,7 @@
     "tailwindcss-animate": "^1.0.7",
     "three": "^0.171.0",
     "vaul": "^1.1.2",
+    "write-excel-file": "^4.1.1",
     "zod": "^3.24.2"
   },
   "devDependencies": {
@@ -117,7 +118,10 @@
       {
         "from": "../backend",
         "to": "backend",
-        "filter": ["**/*", "!node_modules/**"]
+        "filter": [
+          "**/*",
+          "!node_modules/**"
+        ]
       }
     ],
     "extraFiles": [
