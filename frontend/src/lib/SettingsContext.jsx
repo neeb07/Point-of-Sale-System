@@ -27,6 +27,7 @@ const DEFAULTS = {
   currency_symbol: 'Rs.',
   currency_position: 'before',
   delivery_price: '0',
+  employee_discount_rate: '20',
   auto_print: 'true',
   show_tax: 'true',
   show_cashier: 'true',
@@ -106,6 +107,8 @@ function buildValue(raw, loading, refresh) {
     // Pricing
     taxRate: Math.max(0, Number(raw.tax_rate) || 0),
     deliveryPrice: Math.max(0, Number(raw.delivery_price) || 0),
+    /** Percentage taken off a staff purchase. Applied server-side. */
+    employeeDiscountRate: Math.max(0, Math.min(100, Number(raw.employee_discount_rate) || 0)),
     currencySymbol,
     currencyPosition,
     formatMoney,

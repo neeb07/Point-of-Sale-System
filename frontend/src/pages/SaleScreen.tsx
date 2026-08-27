@@ -42,6 +42,9 @@ interface ReceiptData {
   items: { name: string; quantity: number; price: number }[];
   subtotal: number;
   discount: number;
+  employeeDiscount: number;
+  employeeDiscountRate: number;
+  isEmployee: boolean;
   taxRate: number;
   taxAmount: number;
   deliveryCharge: number;
@@ -67,6 +70,8 @@ export default function SaleScreen({ onNavigate }: SaleScreenProps = {}) {
   const [discountType, setDiscountType] = useState<'flat' | 'percent'>('flat');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('Cash');
   const [tableNumber, setTableNumber] = useState('');
+  /** Staff purchase — applies the configured staff discount automatically. */
+  const [isEmployee, setIsEmployee] = useState(false);
   const [receiptData, setReceiptData] = useState<ReceiptData | null>(null);
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
   const { loading } = usePOS();
@@ -74,7 +79,7 @@ export default function SaleScreen({ onNavigate }: SaleScreenProps = {}) {
 
   // Delivery price, tax rate and the shop's details come from the shared
   // settings provider, which already refetches when the window regains focus.
-  const { restaurant: restaurantDetails, deliveryPrice, taxRate, formatMoney, refresh: refreshSettings } = useSettings();
+  const { restaurant: restaurantDetails, deliveryPrice, taxRate, employeeDiscountRate, formatMoney, refresh: refreshSettings } = useSettings();
 
   const subtotal = cart.reduce((sum, item) => sum + item.price * item.qty, 0);
   const deliveryCharge = orderType === 'Delivery' ? deliveryPrice : 0;
@@ -91,7 +96,13 @@ export default function SaleScreen({ onNavigate }: SaleScreenProps = {}) {
   // so the rider's fee is neither discounted nor taxed. The server recomputes
   // all of this from its own tax_rate setting — these figures are for display
   // only, and the receipt uses whatever the server actually stored.
-  const taxable = Math.max(0, subtotal - discount);
+  // Staff discount comes off the subtotal first; any manual discount then
+  // applies to what remains, so the two can never exceed the order value.
+  // The server recomputes all of this from its own settings.
+  const employeeDiscount = isEmployee ? Math.round(subtotal * employeeDiscountRate) / 100 : 0;
+  const totalDiscount = Math.min(discount + employeeDiscount, subtotal);
+
+  const taxable = Math.max(0, subtotal - totalDiscount);
   const taxAmount = Math.round(taxable * taxRate) / 100;
   const total = taxable + taxAmount + deliveryCharge;
 
@@ -126,6 +137,7 @@ export default function SaleScreen({ onNavigate }: SaleScreenProps = {}) {
     setDiscountType('flat');
     setPaymentMethod('Cash');
     setTableNumber('');
+    setIsEmployee(false);
   };
 
   const handleClearCart = () => resetOrder();
@@ -160,6 +172,7 @@ export default function SaleScreen({ onNavigate }: SaleScreenProps = {}) {
         order_type: orderType,
         delivery_charge: deliveryCharge,
         table_number: tableNumber || null,
+        is_employee: isEmployee,
         cashier_id: currentUser?.id || null,
         cashier_name: currentUser?.name || 'Unknown',
       });
@@ -183,7 +196,12 @@ export default function SaleScreen({ onNavigate }: SaleScreenProps = {}) {
         // arithmetic is only for live display; if the two ever disagree the
         // receipt must match what was actually recorded against the sale.
         subtotal: order.subtotal ?? subtotal,
-        discount: order.discount ?? discount,
+        // The server's `discount` is the combined figure; the receipt shows the
+        // manual and staff portions on separate lines, so take the manual part.
+        discount: order.manual_discount ?? discount,
+        employeeDiscount: order.employee_discount ?? employeeDiscount,
+        employeeDiscountRate: order.employee_discount_rate ?? employeeDiscountRate,
+        isEmployee: (order.is_employee ?? (isEmployee ? 1 : 0)) === 1,
         taxRate: order.tax_rate ?? taxRate,
         taxAmount: order.tax_amount ?? taxAmount,
         deliveryCharge: order.delivery_charge ?? deliveryCharge,
@@ -227,6 +245,9 @@ export default function SaleScreen({ onNavigate }: SaleScreenProps = {}) {
           discountAmount={discount}
           taxRate={taxRate}
           taxAmount={taxAmount}
+          isEmployee={isEmployee}
+          employeeDiscount={employeeDiscount}
+          onIsEmployeeChange={setIsEmployee}
           paymentMethod={paymentMethod}
           onDiscountValueChange={setDiscountValue}
           onDiscountTypeChange={setDiscountType}
@@ -268,6 +289,14 @@ export default function SaleScreen({ onNavigate }: SaleScreenProps = {}) {
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
                 <span style={{ fontSize: 13, color: '#A3A39A' }}>Delivery Charge</span>
                 <span style={{ fontSize: 13, fontWeight: 600, color: '#111110' }}>{formatMoney(deliveryCharge)}</span>
+              </div>
+            )}
+            {employeeDiscount > 0 && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                <span style={{ fontSize: 13, color: '#A3A39A' }}>Staff Discount ({employeeDiscountRate}%)</span>
+                <span style={{ fontSize: 13, fontWeight: 600, color: '#16A34A' }}>
+                  − {formatMoney(employeeDiscount)}
+                </span>
               </div>
             )}
             {discount > 0 && (

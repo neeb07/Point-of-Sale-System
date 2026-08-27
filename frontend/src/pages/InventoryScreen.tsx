@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Plus, Package, Edit2, AlertCircle } from 'lucide-react';
 import { inventoryAPI } from '@/api/index';
+import SearchBar from '@/components/pos-ui/SearchBar';
 
 interface Ingredient {
   id: number;
@@ -13,6 +14,7 @@ interface Ingredient {
 export default function InventoryScreen() {
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
   const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [selectedIngredient, setSelectedIngredient] = useState<Ingredient | null>(null);
@@ -27,6 +29,16 @@ export default function InventoryScreen() {
   const [editAction, setEditAction] = useState<'add' | 'subtract' | 'set'>('add');
   const [editAmount, setEditAmount] = useState('');
   const [editThreshold, setEditThreshold] = useState('');
+
+  // Name or unit, so "pcs" narrows to everything counted in pieces.
+  const visibleIngredients = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return ingredients;
+    return ingredients.filter(i =>
+      String(i.name || '').toLowerCase().includes(q) ||
+      String(i.unit || '').toLowerCase().includes(q)
+    );
+  }, [ingredients, search]);
 
   useEffect(() => {
     fetchInventory();
@@ -147,6 +159,15 @@ export default function InventoryScreen() {
 
       {/* Main Content */}
       <div style={{ flex: 1, padding: 32, overflowY: 'auto' }}>
+        <div style={{ marginBottom: 20 }}>
+          <SearchBar
+            value={search}
+            onChange={setSearch}
+            placeholder="Search ingredients by name or unit..."
+            resultCount={visibleIngredients.length}
+            totalCount={ingredients.length}
+          />
+        </div>
         <div style={{ background: '#FFFFFF', borderRadius: 12, border: '1px solid #EBEBEB', overflow: 'hidden' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
             <thead>
@@ -162,12 +183,16 @@ export default function InventoryScreen() {
                 <tr>
                   <td colSpan={4} style={{ padding: 24, textAlign: 'center', color: '#6B7280' }}>Loading inventory...</td>
                 </tr>
-              ) : ingredients.length === 0 ? (
+              ) : visibleIngredients.length === 0 ? (
                 <tr>
-                  <td colSpan={4} style={{ padding: 24, textAlign: 'center', color: '#6B7280' }}>No ingredients found. Add one to get started.</td>
+                  <td colSpan={4} style={{ padding: 24, textAlign: 'center', color: '#6B7280' }}>
+                    {search.trim()
+                      ? `No ingredients match "${search.trim()}".`
+                      : 'No ingredients found. Add one to get started.'}
+                  </td>
                 </tr>
               ) : (
-                ingredients.map((ing) => {
+                visibleIngredients.map((ing) => {
                   const isLowStock = ing.stock <= ing.low_stock_threshold;
                   return (
                     <tr 

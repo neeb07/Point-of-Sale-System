@@ -91,7 +91,7 @@ export default function Settings() {
   const [logoPreview, setLogoPreview] = useState(null);
   const fileInputRef = useRef(null);
 
-  const [tax, setTax] = useState({ rate: 0, currency: 'Rs.', position: 'before', enableTax: false, deliveryPrice: 0 });
+  const [tax, setTax] = useState({ rate: 0, currency: 'Rs.', position: 'before', enableTax: false, deliveryPrice: 0, employeeRate: 20 });
   const [taxOriginal, setTaxOriginal] = useState(null);
 
   const [receiptSettings, setReceiptSettings] = useState({
@@ -149,6 +149,7 @@ export default function Settings() {
         position: data.currency_position || 'before',
         enableTax: Number(data.tax_rate) > 0,
         deliveryPrice: Number(data.delivery_price) || 0,
+        employeeRate: Number(data.employee_discount_rate) || 0,
       });
       setTaxOriginal({
         rate: Number(data.tax_rate) || 0,
@@ -156,6 +157,7 @@ export default function Settings() {
         position: data.currency_position || 'before',
         enableTax: Number(data.tax_rate) > 0,
         deliveryPrice: Number(data.delivery_price) || 0,
+        employeeRate: Number(data.employee_discount_rate) || 0,
       });
       setReceiptSettings({
         autoPrint: data.auto_print === 'true',
@@ -255,6 +257,7 @@ export default function Settings() {
       currency_symbol: tax.currency,
       currency_position: tax.position,
       delivery_price: String(tax.deliveryPrice),
+      employee_discount_rate: String(tax.employeeRate),
     });
     setTaxOriginal({ ...tax });
     refreshSettings();
@@ -450,6 +453,23 @@ export default function Settings() {
           onChange={(e) => setTax({ ...tax, rate: Number(e.target.value) })}
           style={{ ...INPUT_STYLE, width: 120, opacity: tax.enableTax ? 1 : 0.5 }}
         />
+      </div>
+      <div>
+        <FieldLabel
+          label="Staff Discount"
+          helper="Percentage taken off when the cashier marks an order as a staff purchase"
+        />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <input
+            type="number"
+            min="0"
+            max="100"
+            value={tax.employeeRate}
+            onChange={(e) => setTax({ ...tax, employeeRate: Math.max(0, Math.min(100, Number(e.target.value))) })}
+            style={{ ...INPUT_STYLE, width: 120 }}
+          />
+          <span style={{ fontSize: 13, color: '#6B7280' }}>%</span>
+        </div>
       </div>
       <div>
         <FieldLabel label="Currency Symbol" />

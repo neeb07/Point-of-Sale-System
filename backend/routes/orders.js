@@ -26,7 +26,27 @@ router.post('/', (req, res) => {
   const itemsSubtotal = items.reduce(
     (sum, i) => sum + (Number(i.price) || 0) * (Number(i.quantity) || 0), 0
   );
-  const cappedDiscount = Math.min(safeDiscount, itemsSubtotal);
+  /**
+   * Staff discount.
+   *
+   * Like tax, the rate is read from settings rather than taken from the
+   * request — the client says only *whether* this is a staff purchase, never
+   * how much comes off. It is taken off the subtotal, and any manual discount
+   * then applies to what is left, so the two together can never exceed the
+   * order value.
+   */
+  const isEmployee = req.body.is_employee === true || req.body.is_employee === 1;
+  const empRateRow = db.prepare("SELECT value FROM settings WHERE key = 'employee_discount_rate'").get();
+  const employeeRate = Math.max(0, Math.min(100, Number(empRateRow && empRateRow.value) || 0));
+  const employeeDiscount = isEmployee
+    ? Math.round(itemsSubtotal * employeeRate) / 100
+    : 0;
+
+  const manualDiscount = Math.min(safeDiscount, Math.max(0, itemsSubtotal - employeeDiscount));
+
+  // `discount` stays the combined figure so every existing report, export and
+  // reconciliation (subtotal - discount + tax + delivery = total) is unchanged.
+  const cappedDiscount = Math.min(employeeDiscount + manualDiscount, itemsSubtotal);
 
   // Tax rate comes from settings, never from the request: the client must not
   // be able to choose what tax a sale is charged. It is applied to the
@@ -60,8 +80,8 @@ router.post('/', (req, res) => {
       `INSERT INTO orders
          (total, discount, payment_method, status, cashier_id, cashier_name,
           order_type, delivery_charge, table_number, shift_id, created_at,
-          tax_rate, tax_amount)
-       VALUES (?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'), ?, ?)`
+          tax_rate, tax_amount, is_employee, employee_discount, employee_discount_rate)
+       VALUES (?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'), ?, ?, ?, ?, ?)`
     ).run(
       computedTotal,
       cappedDiscount,
@@ -73,7 +93,10 @@ router.post('/', (req, res) => {
       table_number || null,
       openShift ? openShift.id : null,
       taxRate,
-      taxAmount
+      taxAmount,
+      isEmployee ? 1 : 0,
+      employeeDiscount,
+      isEmployee ? employeeRate : 0
     );
 
     const orderId = orderResult.lastInsertRowid;
@@ -132,6 +155,10 @@ router.post('/', (req, res) => {
       tax_rate: taxRate,
       tax_amount: taxAmount,
       delivery_charge: safeDelivery,
+      is_employee: isEmployee ? 1 : 0,
+      employee_discount: employeeDiscount,
+      employee_discount_rate: employeeRate,
+      manual_discount: manualDiscount,
     });
   } catch (err) {
     console.error('Error creating order:', err);

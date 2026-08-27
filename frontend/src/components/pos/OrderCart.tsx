@@ -21,6 +21,10 @@ interface OrderCartProps {
   /** Tax computed from the shop's configured rate; 0 when tax is disabled. */
   taxRate: number;
   taxAmount: number;
+  /** Staff purchase: applies the configured staff discount automatically. */
+  isEmployee: boolean;
+  employeeDiscount: number;
+  onIsEmployeeChange: (value: boolean) => void;
   paymentMethod: PaymentMethod;
   onDiscountValueChange: (value: string) => void;
   onDiscountTypeChange: (type: 'flat' | 'percent') => void;
@@ -47,6 +51,9 @@ export default function OrderCart({
   discountAmount,
   taxRate,
   taxAmount,
+  isEmployee,
+  employeeDiscount,
+  onIsEmployeeChange,
   paymentMethod,
   onDiscountValueChange,
   onDiscountTypeChange,
@@ -57,12 +64,12 @@ export default function OrderCart({
   onClearCart,
   onCharge,
 }: OrderCartProps) {
-  const { formatMoney, currencySymbol } = useSettings();
+  const { formatMoney, currencySymbol, employeeDiscountRate } = useSettings();
   const subtotal = cart.reduce((sum: number, item: CartItem) => sum + (item.price * item.qty), 0);
   const appliedDelivery = orderType === 'Delivery' ? deliveryCharge : 0;
   // Tax sits between the discount and the delivery fee, matching the order the
   // server applies them in.
-  const total = Math.max(0, subtotal - discountAmount) + taxAmount + appliedDelivery;
+  const total = Math.max(0, subtotal - discountAmount - employeeDiscount) + taxAmount + appliedDelivery;
 
   return (
     <div
@@ -259,6 +266,57 @@ export default function OrderCart({
             </span>
           </div>
         )}
+        {/*
+          Staff purchase. Sits directly under the discount row because it is a
+          second, automatic discount — the cashier flips it instead of typing a
+          percentage, and the rate is set once in Settings so it cannot drift
+          between tills or be keyed in wrong.
+        */}
+        <div style={{
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          marginBottom: 14, paddingBottom: 14, borderBottom: '1px solid #EBEBEB',
+        }}>
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            <span style={{ fontSize: 13, color: '#A3A39A' }}>Staff purchase</span>
+            <span style={{ fontSize: 11, color: '#C4C4BD' }}>
+              {employeeDiscountRate}% off automatically
+            </span>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={isEmployee}
+            aria-label="Staff purchase"
+            onClick={() => onIsEmployeeChange(!isEmployee)}
+            disabled={cart.length === 0}
+            style={{
+              width: 44, height: 24, borderRadius: 12, position: 'relative',
+              border: 'none', padding: 0,
+              cursor: cart.length === 0 ? 'not-allowed' : 'pointer',
+              opacity: cart.length === 0 ? 0.5 : 1,
+              background: isEmployee ? '#DC2626' : '#E5E5E0',
+              transition: 'background 140ms',
+            }}
+          >
+            <span style={{
+              position: 'absolute', top: 3, left: isEmployee ? 23 : 3,
+              width: 18, height: 18, borderRadius: 9, background: '#FFFFFF',
+              transition: 'left 140ms', boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+            }} />
+          </button>
+        </div>
+
+        {employeeDiscount > 0 && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 14 }}>
+            <span style={{ fontSize: 13, color: '#A3A39A' }}>
+              Staff Discount ({employeeDiscountRate}%)
+            </span>
+            <span style={{ fontSize: 13, fontWeight: 600, color: '#16A34A' }}>
+              − {formatMoney(employeeDiscount)}
+            </span>
+          </div>
+        )}
+
         {taxAmount > 0 && (
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 14 }}>
             <span style={{ fontSize: 13, color: '#A3A39A' }}>

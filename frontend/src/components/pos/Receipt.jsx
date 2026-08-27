@@ -105,7 +105,7 @@ const ReceiptItemsTable = ({ items }) => {
   );
 };
 
-const ReceiptTotals = ({ subtotal, discount, taxRate, taxAmount, deliveryCharge, total, orderType }) => {
+const ReceiptTotals = ({ subtotal, discount, employeeDiscount, employeeDiscountRate, taxRate, taxAmount, deliveryCharge, total, orderType }) => {
   const { formatMoney, showTax } = useSettings();
 
   return (
@@ -119,6 +119,14 @@ const ReceiptTotals = ({ subtotal, discount, taxRate, taxAmount, deliveryCharge,
           <div style={{ display: 'flex', justifyContent: 'space-between', color: '#EF4444' }}>
             <span>Discount</span>
             <span>-{formatMoney(discount)}</span>
+          </div>
+        )}
+        {/* Staff purchases carry their own discount line so the customer copy
+            and the till copy both show why the price differs from the menu. */}
+        {employeeDiscount > 0 && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', color: '#16A34A' }}>
+            <span>Staff Discount{employeeDiscountRate ? ` (${employeeDiscountRate}%)` : ''}</span>
+            <span>-{formatMoney(employeeDiscount)}</span>
           </div>
         )}
         {/* The tax rate is set in Settings but never reached the receipt, so a
@@ -219,6 +227,8 @@ export default function Receipt({
   items,
   subtotal,
   discount,
+  employeeDiscount,
+  employeeDiscountRate,
   taxRate,
   taxAmount,
   deliveryCharge,
@@ -256,6 +266,8 @@ export default function Receipt({
       <ReceiptTotals
         subtotal={subtotal}
         discount={discount}
+        employeeDiscount={employeeDiscount || 0}
+        employeeDiscountRate={employeeDiscountRate || 0}
         taxRate={taxRate || 0}
         taxAmount={taxAmount || 0}
         deliveryCharge={deliveryCharge || 0}

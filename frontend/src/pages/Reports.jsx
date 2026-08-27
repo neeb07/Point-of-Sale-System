@@ -88,7 +88,16 @@ export default function Reports() {
       
       setTopItems(tData.map(d => ({ ...d, quantity: d.total_qty })));
       
-      setCategories(cData);
+      // FIX: "Sales by Category" always rendered zero. /reports/by-category
+      // returns `total_revenue` and `total_qty`, but the pie's dataKey, the
+      // centre total and every legend row all read `revenue` — which does not
+      // exist on these rows, so each one formatted `undefined` as 0. Normalise
+      // the shape here, the same way top items already are.
+      setCategories(cData.map(d => ({
+        ...d,
+        revenue: Number(d.total_revenue) || 0,
+        quantity: Number(d.total_qty) || 0,
+      })));
       
       setHeatmapData(hData);
       
@@ -166,6 +175,7 @@ export default function Reports() {
           byDate[date] = {
             orders: 0, qty: 0, gross: 0, discounts: 0,
             delivery: 0, net: 0, cash: 0, card: 0, online: 0,
+            staffOrders: 0, staffDiscount: 0,
           };
         }
         const d = byDate[date];
@@ -175,6 +185,8 @@ export default function Reports() {
         d.discounts += Number(row.discount) || 0;
         d.delivery += Number(row.delivery_charge) || 0;
         d.net += Number(row.total) || 0;
+        if (row.is_employee) d.staffOrders += 1;
+        d.staffDiscount += Number(row.employee_discount) || 0;
         const method = String(row.payment_method || '').toLowerCase();
         if (method === 'cash') d.cash += Number(row.total) || 0;
         else if (method === 'card') d.card += Number(row.total) || 0;
@@ -182,7 +194,7 @@ export default function Reports() {
       });
 
       const records = Object.keys(byDate).sort().map(date => ({ date, ...byDate[date] }));
-      const t = { orders: 0, qty: 0, gross: 0, discounts: 0, delivery: 0, net: 0, cash: 0, card: 0, online: 0 };
+      const t = { orders: 0, qty: 0, gross: 0, discounts: 0, delivery: 0, net: 0, cash: 0, card: 0, online: 0, staffOrders: 0, staffDiscount: 0 };
       records.forEach(r => Object.keys(t).forEach(k => { t[k] += r[k]; }));
 
       return {
@@ -199,6 +211,8 @@ export default function Reports() {
           { header: 'Cash',             width: 12, type: 'money', value: r => money(r.cash),     total: () => money(t.cash) },
           { header: 'Card',             width: 12, type: 'money', value: r => money(r.card),     total: () => money(t.card) },
           { header: 'Online',           width: 12, type: 'money', value: r => money(r.online),   total: () => money(t.online) },
+          { header: 'Staff Orders',     width: 13, type: 'int',   value: r => r.staffOrders,     total: () => t.staffOrders },
+          { header: 'Staff Discount',   width: 14, type: 'money', value: r => money(r.staffDiscount), total: () => money(t.staffDiscount) },
         ],
       };
     }
@@ -231,8 +245,9 @@ export default function Reports() {
     }
 
     // Detailed — one row per order.
-    const t = { lines: 0, qty: 0, subtotal: 0, discount: 0, delivery: 0, total: 0 };
+    const t = { lines: 0, qty: 0, subtotal: 0, discount: 0, delivery: 0, total: 0, employeeDiscount: 0 };
     detailedReport.forEach(r => {
+      t.employeeDiscount += Number(r.employee_discount) || 0;
       t.lines += Number(r.line_count) || 0;
       t.qty += Number(r.total_qty) || 0;
       t.subtotal += Number(r.subtotal) || 0;
@@ -253,6 +268,8 @@ export default function Reports() {
         { header: 'Table/Token',     width: 13, type: 'text',  value: r => r.table_number || '' },
         { header: 'Payment Method',  width: 16, type: 'text',  value: r => r.payment_method || '' },
         { header: 'Status',          width: 12, type: 'text',  value: r => r.status || '' },
+        { header: 'Staff Purchase',  width: 14, type: 'text',  value: r => (r.is_employee ? 'Yes' : 'No') },
+        { header: 'Staff Discount',  width: 14, type: 'money', value: r => money(r.employee_discount), total: () => money(t.employeeDiscount) },
         { header: 'Items',           width: 52, type: 'text',  value: r => r.items || '' },
         { header: 'Distinct Items',  width: 14, type: 'int',   value: r => Number(r.line_count) || 0, total: () => t.lines },
         { header: 'Total Qty',       width: 11, type: 'int',   value: r => Number(r.total_qty) || 0,  total: () => t.qty },
@@ -636,6 +653,7 @@ export default function Reports() {
                       <th className="py-3 px-4">Time</th>
                       <th className="py-3 px-4">Items</th>
                       <th className="py-3 px-4 text-center">Payment</th>
+                      <th className="py-3 px-4 text-center">Staff</th>
                       <th className="py-3 px-4 text-right">Subtotal</th>
                       <th className="py-3 px-4 text-right">Discount</th>
                       <th className="py-3 px-4 text-right text-orange-600">Total</th>
@@ -694,6 +712,18 @@ export default function Reports() {
                           {row.payment_method}
                         </span>
                       </td>
+                      <td className="py-3 px-4 text-center">
+                        {row.is_employee ? (
+                          <span
+                            className="px-2 py-1 rounded text-[10px] font-bold bg-amber-100 text-amber-700"
+                            title={`Staff purchase — ${formatMoney(row.employee_discount || 0)} off`}
+                          >
+                            STAFF
+                          </span>
+                        ) : (
+                          <span className="text-gray-300">—</span>
+                        )}
+                      </td>
                       <td className="py-3 px-4 text-right text-gray-600">{formatMoney(row.subtotal || 0)}</td>
                       <td className="py-3 px-4 text-right text-red-500">{row.discount > 0 ? `-${formatMoney(row.discount)}` : '—'}</td>
                       <td className="py-3 px-4 text-right font-bold text-gray-900">{formatMoney(row.total || 0)}</td>
@@ -702,7 +732,7 @@ export default function Reports() {
                 )}
                 {(reportFormat === 'items' ? lineItems.length : detailedReport.length) === 0 && (
                   <tr>
-                    <td colSpan={reportFormat === 'summary' ? 5 : 7} className="py-8 text-center text-gray-400">
+                    <td colSpan={reportFormat === 'summary' ? 5 : reportFormat === 'items' ? 7 : 8} className="py-8 text-center text-gray-400">
                       No orders found for this date range.
                     </td>
                   </tr>

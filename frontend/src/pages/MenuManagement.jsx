@@ -4,6 +4,7 @@ import { Plus, Pencil, Trash2, X, Pizza, Sandwich, Coffee, Package, Loader2, Dru
 import { usePOS } from '@/lib/POSContext';
 import { MENU_CATEGORIES, DEFAULT_CATEGORY } from '@/lib/constants';
 import { useSettings } from '@/lib/SettingsContext';
+import SearchBar from '@/components/pos-ui/SearchBar';
 
 /**
  * FIX (Bug 2): this file used to declare 22 invented categories ('Starters',
@@ -54,6 +55,7 @@ const categoryGradient = {
 export default function MenuManagement() {
   const { formatMoney } = useSettings();
   const { menuItems, addMenuItem, updateMenuItem, deleteMenuItem, loading } = usePOS();
+  const [search, setSearch] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
 
@@ -63,6 +65,16 @@ export default function MenuManagement() {
     const live = menuItems.map(i => i.category).filter(Boolean);
     return Array.from(new Set([...MENU_CATEGORIES, ...live]));
   }, [menuItems]);
+
+  // Match on name or category so "burger" and "Burgers" both narrow the list.
+  const visibleItems = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return menuItems;
+    return menuItems.filter(i =>
+      String(i.name || '').toLowerCase().includes(q) ||
+      String(i.category || '').toLowerCase().includes(q)
+    );
+  }, [menuItems, search]);
 
   const openAdd = () => { setEditingItem(null); setModalOpen(true); };
   const openEdit = (item) => { setEditingItem(item); setModalOpen(true); };
@@ -103,8 +115,18 @@ export default function MenuManagement() {
           </button>
         </div>
 
+        <div style={{ marginBottom: 20 }}>
+          <SearchBar
+            value={search}
+            onChange={setSearch}
+            placeholder="Search items by name or category..."
+            resultCount={visibleItems.length}
+            totalCount={menuItems.length}
+          />
+        </div>
+
         {/* Item List */}
-        {menuItems.map(item => {
+        {visibleItems.map(item => {
           const Icon = categoryIcon[item.category] || Package;
           const gradient = categoryGradient[item.category] || categoryGradient.Extras;
           return (

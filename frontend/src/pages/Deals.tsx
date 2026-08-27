@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Plus, Pencil, Trash2, Tag, X, Upload, Package, ChevronDown } from 'lucide-react';
 import { dealsAPI, menuAPI } from '../api/index';
 import { DEAL_GROUPS } from '@/lib/constants';
 import { useSettings } from '@/lib/SettingsContext';
+import SearchBar from '@/components/pos-ui/SearchBar';
 
 interface Variant {
   id: number;
@@ -71,6 +72,19 @@ const GREEN = '#22C55E';
 export default function Deals() {
   const { formatMoney, currencySymbol } = useSettings();
   const [deals, setDeals] = useState<Deal[]>([]);
+  const [search, setSearch] = useState('');
+
+  // Name, description or group — a cashier looking for "student" should find
+  // the Student Deal whether that word is in the title or the group label.
+  const visibleDeals = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return deals;
+    return deals.filter(d =>
+      String(d.name || '').toLowerCase().includes(q) ||
+      String(d.description || '').toLowerCase().includes(q) ||
+      String(d.deal_group || '').toLowerCase().includes(q)
+    );
+  }, [deals, search]);
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
@@ -309,10 +323,22 @@ export default function Deals() {
         </div>
       )}
 
+      {!loading && deals.length > 0 && (
+        <div style={{ marginBottom: 18 }}>
+          <SearchBar
+            value={search}
+            onChange={setSearch}
+            placeholder="Search deals by name, description or group..."
+            resultCount={visibleDeals.length}
+            totalCount={deals.length}
+          />
+        </div>
+      )}
+
       {/* Deals List */}
       {!loading && deals.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          {deals.map(deal => {
+          {visibleDeals.map(deal => {
             const originalTotal = deal.items.reduce((s, i) => s + lineUnitPrice(i) * i.quantity, 0);
             const savingsAmt = originalTotal - deal.price;
             const savingsPct = originalTotal > 0 ? Math.round((savingsAmt / originalTotal) * 100) : 0;

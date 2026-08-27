@@ -181,6 +181,23 @@ export default function Orders() {
       render: (row) => <span style={{ fontSize: 13, color: '#374151' }}>{row.cashier_name || 'Unknown'}</span>,
     },
     {
+      key: 'is_employee',
+      label: 'Staff',
+      // Marks a staff purchase in the order list so a discounted total is
+      // explainable at a glance rather than looking like a mis-ring.
+      render: (row) => (row.is_employee ? (
+        <span
+          title={`Staff purchase — ${formatCurrency(row.employee_discount || 0)} off`}
+          style={{
+            padding: '2px 8px', borderRadius: 999, fontSize: 10, fontWeight: 700,
+            background: '#FEF3C7', color: '#B45309',
+          }}
+        >
+          STAFF
+        </span>
+      ) : <span style={{ color: '#D1D5DB' }}>—</span>),
+    },
+    {
       key: 'total',
       label: 'Total',
       render: (row) => <span style={{ fontWeight: 700 }}>{formatCurrency(row.total)}</span>,
@@ -240,12 +257,17 @@ export default function Orders() {
         price: i.price,
       })),
       subtotal: itemsSubtotal,
-      discount: Number(order.discount) || 0,
+      discount: Math.max(0, (Number(order.discount) || 0) - (Number(order.employee_discount) || 0)),
       // The rate stored on the order, not the current setting: a reprint must
       // show the tax the customer was actually charged, even after the shop
       // changes its rate.
       taxRate: Number(order.tax_rate) || 0,
       taxAmount: Number(order.tax_amount) || 0,
+      // `discount` on the order is the combined figure, so the manual portion
+      // is whatever is left once the staff discount is taken out.
+      employeeDiscount: Number(order.employee_discount) || 0,
+      isEmployee: Number(order.is_employee) === 1,
+      employeeDiscountRate: Number(order.employee_discount_rate) || 0,
       deliveryCharge,
       total: Number(order.total) || 0,
       restaurant: restaurantDetails,

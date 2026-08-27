@@ -230,6 +230,16 @@ try { db.exec("ALTER TABLE orders ADD COLUMN table_number TEXT DEFAULT NULL;"); 
 try { db.exec("ALTER TABLE orders ADD COLUMN tax_rate REAL DEFAULT 0;"); } catch(e) {}
 try { db.exec("ALTER TABLE orders ADD COLUMN tax_amount REAL DEFAULT 0;"); } catch(e) {}
 
+// Staff discount. `discount` continues to hold the *combined* discount so
+// every existing report, export and reconciliation keeps working untouched;
+// these two columns record how much of it was the staff portion and flag the
+// order as a staff purchase so it can be identified in reporting.
+try { db.exec("ALTER TABLE orders ADD COLUMN is_employee INTEGER DEFAULT 0;"); } catch(e) {}
+try { db.exec("ALTER TABLE orders ADD COLUMN employee_discount REAL DEFAULT 0;"); } catch(e) {}
+// The rate too, so a reprint shows the discount actually given even after
+// the owner changes the percentage — same reasoning as tax_rate.
+try { db.exec("ALTER TABLE orders ADD COLUMN employee_discount_rate REAL DEFAULT 0;"); } catch(e) {}
+
 // Menu items are retired rather than deleted. A hard DELETE failed outright
 // with "FOREIGN KEY constraint failed" whenever the item belonged to a deal,
 // and when it did succeed it broke sales-by-category for every past order
@@ -419,7 +429,9 @@ const upsertSetting = db.prepare(
   ['currency_symbol', 'Rs.'],
   ['receipt_footer', 'Thank you for visiting! Eat, Heat, Repeat!'],
   ['auto_print', 'true'],
-  ['delivery_price', '0']
+  ['delivery_price', '0'],
+  // Percentage taken off a staff purchase when the cashier flags one.
+  ['employee_discount_rate', '20']
 ].forEach(([k, v]) => upsertSetting.run(k, v));
 
 // Safety net: delivery_price for existing installs
