@@ -25,11 +25,12 @@ never destroys a shop's trading history.
 
 ## Running locally
 
-Install both halves:
+Install the frontend first — the backend's install step compiles
+`better-sqlite3` against Electron, so Electron has to be present already:
 
 ```bash
-cd backend  && npm install
-cd ../frontend && npm install
+cd frontend && npm install
+cd ../backend && npm install
 ```
 
 Then run the whole stack — backend, Vite dev server and Electron together:
@@ -39,12 +40,37 @@ cd frontend
 npm run electron:dev
 ```
 
-To work on the frontend alone against a already-running backend:
+To work on the frontend alone against an already-running backend:
 
 ```bash
 cd frontend && npm run dev     # http://localhost:5173
-cd backend  && npm run dev     # http://localhost:3001
+cd backend  && npm run dev     # http://localhost:3001, restarts on change
 ```
+
+### Why `node server.js` does not work
+
+`better-sqlite3` is a native module, and its compiled binary loads only on the
+Node ABI it was built against:
+
+| Runtime | `NODE_MODULE_VERSION` |
+|---|---|
+| Plain `node` (v24) | 137 |
+| Electron 42 | 146 |
+
+There is one `better_sqlite3.node` on disk, so it can satisfy exactly one of
+them. The packaged app spawns the backend on Electron's Node
+(`ELECTRON_RUN_AS_NODE=1`), so the binary is built for Electron and
+`npm start` / `npm run dev` launch the backend the same way. Running
+`node server.js` directly uses plain Node and fails to load the module.
+
+If you run `npm rebuild better-sqlite3`, it rebuilds for plain Node and the
+desktop app stops starting. Restore it with:
+
+```bash
+cd backend && npm run rebuild:electron
+```
+
+The same applies after any `npm install` that rebuilds native modules.
 
 Vite proxies `/api` to port 3001 in development. Note that application code
 must always call the API through `src/api/index.ts`, which uses an absolute

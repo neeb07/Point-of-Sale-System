@@ -30,7 +30,36 @@ if (fs.existsSync(PENDING_RESTORE)) {
   }
 }
 
-const db = new Database(DB_PATH);
+/**
+ * better-sqlite3 is a native module: its compiled binary loads only on the
+ * Node ABI it was built for. Plain Node 24 is NODE_MODULE_VERSION 137 and
+ * Electron 42 is 146, and there is a single binary on disk, so running the
+ * backend on the "wrong" runtime fails here with a stack trace that does not
+ * say what to do about it. Translate it into instructions.
+ */
+let db;
+try {
+  db = new Database(DB_PATH);
+} catch (err) {
+  if (err.code === 'ERR_DLOPEN_FAILED' || /NODE_MODULE_VERSION/.test(err.message)) {
+    const wanted = process.versions.modules;
+    console.error(
+      `\nbetter-sqlite3 was built for a different Node ABI than this runtime ` +
+      `(this process needs NODE_MODULE_VERSION ${wanted}).\n\n` +
+      `The backend is meant to run on Electron's Node, which is how the app\n` +
+      `spawns it in production. Start it with:\n\n` +
+      `  npm start          (from the backend folder)\n` +
+      `  npm run dev        (same, with restart-on-change)\n\n` +
+      `Running "node server.js" directly uses plain Node instead and will not\n` +
+      `load the module. If you have run "npm rebuild better-sqlite3", that\n` +
+      `rebuilt it for plain Node and the desktop app will no longer start —\n` +
+      `restore it with:\n\n` +
+      `  npm run rebuild:electron\n`
+    );
+    process.exit(1);
+  }
+  throw err;
+}
 
 // Crash protection + performance
 db.pragma('journal_mode = WAL');

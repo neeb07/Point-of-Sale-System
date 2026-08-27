@@ -4,9 +4,10 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "nodemon server.js",
-    "postinstall": "electron-rebuild -f -w better-sqlite3"
+    "start": "node scripts/run-backend.js",
+    "dev": "node scripts/run-backend.js --watch",
+    "rebuild:electron": "node scripts/rebuild-native.js",
+    "postinstall": "node scripts/rebuild-native.js"
   },
   "keywords": [],
   "author": "",
