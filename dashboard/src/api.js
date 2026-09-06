@@ -41,3 +41,23 @@ export const auth = {
 export const live = {
   read: () => request('GET', '/live'),
 };
+
+const qs = (params) => new URLSearchParams(params).toString();
+
+export const reports = {
+  kpi: (p) => request('GET', `/reports/kpi?${qs(p)}`),
+  byCategory: (p) => request('GET', `/reports/by-category?${qs(p)}`),
+  topItems: (p) => request('GET', `/reports/top-items?${qs(p)}`),
+  cashierPerformance: (p) => request('GET', `/reports/cashier-performance?${qs(p)}`),
+  detailed: (p) => request('GET', `/reports/detailed?${qs(p)}`),
+  lineItems: (p) => request('GET', `/reports/line-items?${qs(p)}`),
+  expensesByCategory: (p) => request('GET', `/reports/expenses-by-category?${qs(p)}`),
+  expensesDetail: (p) => request('GET', `/reports/expenses-detail?${qs(p)}`),
+  daily: (p) => request('GET', `/reports/daily?${qs(p)}`),
+};
+
+export const branches = {
+  list: () => request('GET', '/branches'),
+  /** How current each branch's synced data actually is. */
+  completeness: () => request('GET', '/branches/completeness'),
+};

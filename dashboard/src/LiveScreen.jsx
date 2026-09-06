@@ -11,7 +11,7 @@ import { money, count, ago, timeOfDay } from './format';
  * it was fetched — so the whole page is greyed out and banner-ed instead. That
  * failure is invisible to a per-card badge.
  */
-export default function LiveScreen({ user, onSignOut }) {
+export default function LiveScreen({ user, onSignOut, embedded = false }) {
   const { data, error, fetchedAt, pageAgeMs, pageStale, reload } = useLive(true);
 
   const branches = data?.branches || [];
@@ -32,28 +32,28 @@ export default function LiveScreen({ user, onSignOut }) {
   const allReporting = reporting.length === branches.length && branches.length > 0;
 
   return (
-    <div style={{ minHeight: '100vh', background: '#F5F5F0' }}>
-      <header style={{
-        background: '#FFFFFF', borderBottom: '1px solid #E5E7EB',
-        padding: '14px 24px', display: 'flex', alignItems: 'center',
-        justifyContent: 'space-between', gap: 16, flexWrap: 'wrap',
-      }}>
-        <div>
-          <div style={{ fontSize: 18, fontWeight: 800, color: '#111827' }}>Blaze — Live</div>
-          <div style={{ fontSize: 12, color: '#6B7280' }}>
-            {fetchedAt ? `Updated ${ago(pageAgeMs)}` : 'Connecting…'}
+    <div style={embedded ? undefined : { minHeight: '100vh', background: '#F5F5F0' }}>
+      {/* Standalone only: inside the shell the header already exists. */}
+      {!embedded && (
+        <header style={{
+          background: '#FFFFFF', borderBottom: '1px solid #E5E7EB',
+          padding: '14px 24px', display: 'flex', alignItems: 'center',
+          justifyContent: 'space-between', gap: 16, flexWrap: 'wrap',
+        }}>
+          <div>
+            <div style={{ fontSize: 18, fontWeight: 800, color: '#111827' }}>Blaze — Live</div>
           </div>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <span style={{ fontSize: 13, color: '#6B7280' }}>{user.email}</span>
-          <button onClick={onSignOut} style={{
-            border: '1px solid #E5E7EB', background: '#FFFFFF', borderRadius: 8,
-            padding: '7px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer', color: '#374151',
-          }}>
-            Sign out
-          </button>
-        </div>
-      </header>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span style={{ fontSize: 13, color: '#6B7280' }}>{user.email}</span>
+            <button onClick={onSignOut} style={{
+              border: '1px solid #E5E7EB', background: '#FFFFFF', borderRadius: 8,
+              padding: '7px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer', color: '#374151',
+            }}>
+              Sign out
+            </button>
+          </div>
+        </header>
+      )}
 
       {/*
         The page's own staleness. Rendered outside the dimmed region so it stays
@@ -88,6 +88,12 @@ export default function LiveScreen({ user, onSignOut }) {
       }}>
         {!data && !error && (
           <p style={{ color: '#6B7280' }}>Loading…</p>
+        )}
+
+        {fetchedAt && (
+          <div style={{ fontSize: 12, color: '#9CA3AF', marginBottom: 12 }}>
+            Refreshed {ago(pageAgeMs)}
+          </div>
         )}
 
         {branches.length > 0 && (

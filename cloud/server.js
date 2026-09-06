@@ -58,6 +58,10 @@ app.use('/api/auth', require('./routes/auth'));
 // each is guarded inside the router rather than at the mount.
 app.use('/api/live', require('./routes/live'));
 
+// Both-branch reporting. Every route inside requires a signed-in owner.
+app.use('/api/reports', require('./routes/reports'));
+app.use('/api/branches', require('./routes/branches'));
+
 /*
  * Serve the dashboard build from this same process, and therefore the same
  * origin as the API.

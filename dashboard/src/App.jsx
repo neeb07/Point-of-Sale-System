@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { auth } from './api';
 import LoginScreen from './LoginScreen';
 import LiveScreen from './LiveScreen';
+import ReportsScreen from './ReportsScreen';
+import Shell from './Shell';
 
 /**
  * The session cookie is httpOnly, so this code cannot read it. Whether anyone
@@ -32,6 +34,6 @@ export default function App() {
   }
 
   return user
-    ? <LiveScreen user={user} onSignOut={signOut} />
+    ? <Shell user={user} onSignOut={signOut} />
     : <LoginScreen onSignedIn={setUser} />;
 }

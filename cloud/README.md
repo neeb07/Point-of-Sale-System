@@ -68,6 +68,7 @@ proxies to it. This process never faces the internet directly.
    User=virtiqo
    WorkingDirectory=/home/virtiqo/apps/blaze-cloud
    Environment=NODE_ENV=production
+   Environment=TZ=Asia/Karachi
    Environment=PORT=4000
    Environment=BLAZE_CLOUD_DATA=/home/virtiqo/apps/blaze-cloud-data
    ExecStart=/usr/bin/node server.js
@@ -91,8 +92,15 @@ proxies to it. This process never faces the internet directly.
   file locking is unreliable over NFS. Normally a non-issue on a VPS; worth one
   look before committing.
 
-`NODE_ENV=production` matters: it is what makes the session cookie `Secure`.
-Set it, or sessions travel unencrypted.
+Two environment variables are load-bearing:
+
+- **`NODE_ENV=production`** is what makes the session cookie `Secure`. Without
+  it, sessions travel unencrypted.
+- **`TZ=Asia/Karachi`** must match the shop. The tills write every timestamp in
+  their own local wall-clock time, and the reports group by calendar day, so a
+  server left on UTC would file the first five hours of every trading day under
+  the day before — silently, and only for the early morning, which is exactly
+  the kind of discrepancy nobody notices until the month does not add up.
 
 ## Why SQLite
 
@@ -136,5 +144,8 @@ middleware/session.js       httpOnly cookie -> req.user; sessions on disk
 routes/auth.js          owner login / logout / me, rate limited
 routes/ping.js          till pairing check; returns branch identity and clock skew
 routes/live.js          heartbeat ingest (branch key) + live read (session)
+routes/ingest.js        sales batches, idempotent on (branch_id, local_id)
+routes/reports.js       ported from backend/routes/reports.js, near-verbatim
+routes/branches.js      branch list, and how complete each branch's data is
 scripts/provision.js    create branches and the owner account
 ```
