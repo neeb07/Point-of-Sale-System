@@ -83,3 +83,5 @@ coverage/
 .eslintcache
 
 frontend/release/
+# Cloud pairing: holds this branch's API key. Never commit.
+cloud-sync.json

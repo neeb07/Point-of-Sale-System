@@ -82,6 +82,10 @@ app.use('/api/staff', require('./routes/staff'));
 // The daily WhatsApp report sends the shop's figures out of the building.
 app.use('/api/whatsapp', requireAdmin, require('./routes/whatsapp'));
 
+// Which branch this machine reports as, and whether cloud sync is paired.
+// Admin-only: it is configuration, not till work.
+app.use('/api/sync', requireAdmin, require('./routes/sync'));
+
 // Taking money and running the till: both roles.
 app.use('/api/orders', requireAuth, require('./routes/orders'));
 // Petty cash out of the drawer is till work, so both roles record it.

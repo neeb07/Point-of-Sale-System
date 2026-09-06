@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db/database');
-const { branchIdForStaff, recordCustomer, openShiftIdFor } = require('../db/branch');
+const { resolveBranchId, recordCustomer, openShiftIdFor } = require('../db/branch');
 
 // Create a new completed order
 router.post('/', (req, res) => {
@@ -110,10 +110,10 @@ router.post('/', (req, res) => {
       (customer_name && String(customer_name).trim()) || null,
       (customer_phone && String(customer_phone).trim()) || null,
       (customer_address && String(customer_address).trim()) || null,
-      // The sale belongs to the branch its cashier works at. Stamped at write
-      // time rather than derived later, so moving a manager between branches
-      // never rewrites the history of sales they already rang up.
-      branchIdForStaff(req.user && req.user.staffId)
+      // The sale belongs to the branch the till is standing in. Stamped at
+      // write time rather than derived later, so moving a manager between
+      // branches never rewrites the history of sales they already rang up.
+      resolveBranchId(req)
     );
 
     const orderId = orderResult.lastInsertRowid;
@@ -317,7 +317,11 @@ const voidOrder = (req, res) => {
             SET status = 'voided',
                 voided_at = datetime('now', 'localtime'),
                 voided_by = ?,
-                voided_by_id = ?
+                voided_by_id = ?,
+                -- Back to pending: the cloud may already hold this order as a
+                -- completed sale, and a void that never goes up would leave
+                -- the dashboard reporting revenue the shop did not take.
+                sync_state = 'pending'
           WHERE id = ?`
       ).run(
         (req.user && req.user.name) || 'Unknown',

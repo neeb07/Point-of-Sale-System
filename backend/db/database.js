@@ -286,7 +286,71 @@ if (branchCount === 0) {
 try { db.exec("ALTER TABLE staff ADD COLUMN branch_id INTEGER DEFAULT NULL;"); } catch(e) {}
 try { db.exec("ALTER TABLE orders ADD COLUMN branch_id INTEGER DEFAULT NULL;"); } catch(e) {}
 try { db.exec("ALTER TABLE expenses ADD COLUMN branch_id INTEGER DEFAULT NULL;"); } catch(e) {}
+// A shift is a drawer at a place, so it needs a branch of its own. Without one
+// the only way to tell where a drawer was counted is through the staff member
+// who opened it, which breaks for an account with no branch and silently lies
+// if that person is ever reassigned.
+try { db.exec("ALTER TABLE shifts ADD COLUMN branch_id INTEGER DEFAULT NULL;"); } catch(e) {}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_orders_branch ON orders(branch_id);"); } catch(e) {}
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_shifts_branch ON shifts(branch_id);"); } catch(e) {}
+
+/*
+ * Sync state, for the push to the cloud.
+ *
+ * 'pending' means this row has changed since the cloud last confirmed it.
+ * Rows are marked pending on insert and again on any edit that matters — a
+ * void changes an order the cloud may already hold, so it has to go up again.
+ * Only a confirmed 200 flips a row to 'synced': on a flaky link the till often
+ * cannot tell whether a batch landed, so it must assume it did not.
+ *
+ * Existing rows default to 'pending' so the first sync backfills the shop's
+ * whole history rather than silently starting from today.
+ */
+try { db.exec("ALTER TABLE orders ADD COLUMN sync_state TEXT DEFAULT 'pending';"); } catch(e) {}
+try { db.exec("ALTER TABLE shifts ADD COLUMN sync_state TEXT DEFAULT 'pending';"); } catch(e) {}
+try { db.exec("ALTER TABLE expenses ADD COLUMN sync_state TEXT DEFAULT 'pending';"); } catch(e) {}
+// The push queries these constantly ("what is still pending?"), so each gets a
+// partial index — far smaller than a full one, because the pending set is
+// normally tiny next to the synced history behind it.
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_orders_sync ON orders(sync_state) WHERE sync_state = 'pending';"); } catch(e) {}
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_shifts_sync ON shifts(sync_state) WHERE sync_state = 'pending';"); } catch(e) {}
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_expenses_sync ON expenses(sync_state) WHERE sync_state = 'pending';"); } catch(e) {}
+
+/*
+ * Backfill the branch on shifts recorded before the column existed.
+ *
+ * The only evidence available after the fact is who opened the drawer, so that
+ * is what is used. Where that person has no branch either — accounts predating
+ * branches, and the owner's own account — the shift stays NULL rather than
+ * being guessed at. NULL already means "unassigned" everywhere else that reads
+ * a branch, so an honest gap costs nothing and a wrong guess would quietly
+ * misfile a day's cash.
+ *
+ * Guarded by a settings key so it runs exactly once: after this, shifts are
+ * stamped at open time from the machine's own identity, which is better
+ * evidence than the staff record, and re-running would overwrite that.
+ */
+try {
+  const done = db.prepare(
+    "SELECT value FROM settings WHERE key = 'migration_shifts_branch_backfill'"
+  ).get();
+
+  if (!done) {
+    db.transaction(() => {
+      const filled = db.prepare(`
+        UPDATE shifts
+           SET branch_id = (SELECT s.branch_id FROM staff s WHERE s.id = shifts.staff_id)
+         WHERE branch_id IS NULL
+      `).run().changes;
+      db.prepare(
+        "INSERT INTO settings (key, value) VALUES ('migration_shifts_branch_backfill', '1') ON CONFLICT(key) DO UPDATE SET value = '1'"
+      ).run();
+      if (filled) console.log(`Backfilled branch on ${filled} shift(s).`);
+    })();
+  }
+} catch (e) {
+  console.error('Shift branch backfill failed:', e.message);
+}
 
 /*
  * Delivery customers.

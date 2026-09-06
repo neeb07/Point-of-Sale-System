@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db/database');
-const { branchIdForStaff, openShiftIdFor } = require('../db/branch');
+const { resolveBranchId, openShiftIdFor } = require('../db/branch');
 const { isAdminRole } = require('../middleware/auth');
 const { localToday } = require('../db/local-date');
 
@@ -122,7 +122,7 @@ router.post('/', (req, res) => {
       description ? String(description).trim() : null,
       Math.round(value * 100) / 100,
       fromDrawer,
-      branchIdForStaff(req.user && req.user.staffId)
+      resolveBranchId(req)
     );
 
     const created = db.prepare('SELECT * FROM expenses WHERE id = ?').get(info.lastInsertRowid);

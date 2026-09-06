@@ -5,6 +5,7 @@
  * they live here rather than being duplicated across orders and expenses.
  */
 const db = require('./database');
+const { tillBranchId } = require('./till-identity');
 
 /**
  * Which branch a member of staff belongs to.
@@ -85,6 +86,23 @@ function recordCustomer({ name, phone, address, total }) {
 }
 
 /**
+ * The branch a row being written right now belongs to.
+ *
+ * The machine wins over the staff record, deliberately. A manager assigned to
+ * E-18 who covers a shift at CBR Town is standing at the CBR Town drawer, and
+ * that is CBR Town's cash — filing it under E-18 because of their staff record
+ * would misstate both branches at once. The staff record is only a fallback for
+ * a till that has not been paired to a branch, which is the normal state of a
+ * single-shop install.
+ *
+ * Use this for every write. `branchIdForStaff` remains for the one job it is
+ * still right for: asking which branch a *person* belongs to.
+ */
+function resolveBranchId(req) {
+  return tillBranchId() || branchIdForStaff(req && req.user && req.user.staffId);
+}
+
+/**
  * The open shift belonging to a member of staff, if they have one.
  *
  * Sales and drawer payouts attach to the till the person is actually working,
@@ -100,4 +118,4 @@ function openShiftIdFor(staffId) {
   return row ? row.id : null;
 }
 
-module.exports = { branchIdForStaff, recordCustomer, normalisePhone, openShiftIdFor };
+module.exports = { branchIdForStaff, resolveBranchId, recordCustomer, normalisePhone, openShiftIdFor };
