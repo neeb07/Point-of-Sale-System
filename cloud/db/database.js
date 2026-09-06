@@ -140,6 +140,11 @@ db.exec(`
   );
 `);
 
+// The synced sales tables live in their own file — they are the bulk of the
+// schema and they mirror the till's, so keeping them apart makes the drift
+// against backend/db/database.js easy to see.
+require('./sales-schema').createSalesTables(db);
+
 module.exports = db;
 module.exports.DB_PATH = DB_PATH;
 module.exports.DATA_DIR = DATA_DIR;

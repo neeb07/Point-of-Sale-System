@@ -148,6 +148,17 @@ router.post('/close', (req, res) => {
 
     const closed = db.prepare('SELECT * FROM shifts WHERE id = ?').get(shift.id);
     res.json(withTotals(closed));
+
+    /*
+     * Closing the drawer is the natural end of the trading day, so push now
+     * rather than waiting for the timer — it is what gives the owner their
+     * end-of-day figures without anyone remembering to press anything.
+     *
+     * Deliberately after res.json and deliberately not awaited: the manager is
+     * standing at the till waiting for their variance, and must never wait on
+     * the network to get it.
+     */
+    require('../sync/push').syncOnce().catch(() => { /* the timer will retry */ });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

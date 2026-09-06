@@ -49,6 +49,7 @@ app.get('/api/health', (req, res) => {
 
 // --- Till-facing: branch key ------------------------------------------------
 app.use('/api/ping', requireBranch, require('./routes/ping'));
+app.use('/api/ingest', require('./routes/ingest'));
 
 // --- Owner-facing: session cookie -------------------------------------------
 app.use('/api/auth', require('./routes/auth'));

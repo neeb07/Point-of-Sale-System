@@ -15,6 +15,7 @@ const express = require('express');
 const router = express.Router();
 const { publicStatus } = require('../db/till-identity');
 const heartbeat = require('../sync/heartbeat');
+const push = require('../sync/push');
 
 /**
  * Where this till thinks it is and whether it is paired.
@@ -28,10 +29,23 @@ router.get('/status', (req, res) => {
     res.json({
       ...publicStatus(),
       ...heartbeat.status(),
-      // Populated once the sales push exists; present now so the Settings
-      // screen can be built against the final shape.
-      queue_depth: 0,
+      ...push.status(),
     });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * Push everything pending, now.
+ *
+ * The "Sync now" button. Admin-only like the rest of this router, and awaited
+ * so the caller learns what actually happened rather than being told "started".
+ */
+router.post('/now', async (req, res) => {
+  try {
+    const result = await push.syncOnce();
+    res.json({ ...result, ...push.status() });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

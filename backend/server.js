@@ -132,6 +132,8 @@ app.use((err, req, res, next) => {
  * single-shop install behaves exactly as it did before.
  */
 require('./sync/heartbeat').start();
+// The sales push: batched, retried, and never in the sale path.
+require('./sync/push').start();
 
 const server = app.listen(PORT, HOST, () => {
   console.log(`POS Backend running on http://${HOST}:${PORT}`);
