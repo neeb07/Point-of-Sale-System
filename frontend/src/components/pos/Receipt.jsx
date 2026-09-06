@@ -68,6 +68,31 @@ const ReceiptMeta = ({ orderInfo }) => {
   );
 };
 
+/**
+ * Where the order is going. Printed on every copy of a delivery order — the
+ * kitchen bags it, the rider drives it, the till keeps the record — and hidden
+ * entirely when the cashier skipped the prompt or the order is dine-in.
+ */
+const ReceiptCustomer = ({ customer }) => {
+  const has = customer && (customer.name || customer.phone || customer.address);
+  if (!has) return null;
+  return (
+    <div style={{ padding: '12px 20px', fontSize: 12, color: '#374151' }}>
+      <div style={{
+        fontSize: 11, color: '#9CA3AF', textTransform: 'uppercase',
+        fontWeight: 700, marginBottom: 6, letterSpacing: 0.5,
+      }}>
+        Deliver To
+      </div>
+      {customer.name && <div style={{ fontWeight: 700, fontSize: 13 }}>{customer.name}</div>}
+      {customer.phone && <div style={{ marginTop: 2 }}>{customer.phone}</div>}
+      {customer.address && (
+        <div style={{ marginTop: 2, lineHeight: 1.35 }}>{customer.address}</div>
+      )}
+    </div>
+  );
+};
+
 const ReceiptDivider = ({ dashed = true }) => (
   <div
     style={{
@@ -77,14 +102,21 @@ const ReceiptDivider = ({ dashed = true }) => (
   />
 );
 
-const ReceiptItemsTable = ({ items }) => {
+/**
+ * `showPrices` is false on the kitchen copy.
+ *
+ * The kitchen needs to know what to cook and how many; money is not their
+ * concern, and printing it on the ticket that goes back into the kitchen is a
+ * quiet way of showing every customer's bill to everyone working there.
+ */
+const ReceiptItemsTable = ({ items, showPrices = true }) => {
   const { formatMoney } = useSettings();
   return (
   <div style={{ padding: '16px 20px' }}>
     <div style={{ display: 'flex', fontSize: 11, color: '#9CA3AF', textTransform: 'uppercase', fontWeight: 600, marginBottom: 12 }}>
       <div style={{ flex: 1 }}>Item</div>
-      <div style={{ width: 60, textAlign: 'center' }}>Qty</div>
-      <div style={{ width: 80, textAlign: 'right' }}>Amount</div>
+      <div style={{ width: 60, textAlign: showPrices ? 'center' : 'right' }}>Qty</div>
+      {showPrices && <div style={{ width: 80, textAlign: 'right' }}>Amount</div>}
     </div>
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       {items.map((item, idx) => (
@@ -92,12 +124,20 @@ const ReceiptItemsTable = ({ items }) => {
           <div style={{ flex: 1, fontWeight: 500, fontSize: 13, color: '#374151' }}>
             {item.name}
           </div>
-          <div style={{ width: 60, textAlign: 'center', fontSize: 13, color: '#6B7280' }}>
+          <div style={{
+            width: 60,
+            textAlign: showPrices ? 'center' : 'right',
+            fontSize: showPrices ? 13 : 15,
+            fontWeight: showPrices ? 400 : 700,
+            color: showPrices ? '#6B7280' : '#111827',
+          }}>
             x{item.quantity}
           </div>
-          <div style={{ width: 80, textAlign: 'right', fontWeight: 700, fontSize: 13, color: '#111827' }}>
-            {formatMoney(item.price * item.quantity)}
-          </div>
+          {showPrices && (
+            <div style={{ width: 80, textAlign: 'right', fontWeight: 700, fontSize: 13, color: '#111827' }}>
+              {formatMoney(item.price * item.quantity)}
+            </div>
+          )}
         </div>
       ))}
     </div>
@@ -235,7 +275,11 @@ export default function Receipt({
   total,
   restaurant,
   copyType,
+  customer,
 }) {
+  // The kitchen ticket carries what to cook, not what it costs.
+  const showPrices = copyType !== 'kitchen';
+
   // Settings offers a paper size but nothing applied it, so an 80mm roll and a
   // 58mm roll both received the same fixed 340px layout.
   const { paperSize } = useSettings();
@@ -260,20 +304,23 @@ export default function Receipt({
       <CopyBanner copyType={copyType} />
       <ReceiptHeader restaurant={restaurant} />
       <ReceiptMeta orderInfo={orderInfo} />
+      <ReceiptCustomer customer={customer} />
       <ReceiptDivider />
-      <ReceiptItemsTable items={items} />
+      <ReceiptItemsTable items={items} showPrices={showPrices} />
       <ReceiptDivider />
-      <ReceiptTotals
-        subtotal={subtotal}
-        discount={discount}
-        employeeDiscount={employeeDiscount || 0}
-        employeeDiscountRate={employeeDiscountRate || 0}
-        taxRate={taxRate || 0}
-        taxAmount={taxAmount || 0}
-        deliveryCharge={deliveryCharge || 0}
-        total={total}
-        orderType={orderInfo?.orderType}
-      />
+      {showPrices && (
+        <ReceiptTotals
+          subtotal={subtotal}
+          discount={discount}
+          employeeDiscount={employeeDiscount || 0}
+          employeeDiscountRate={employeeDiscountRate || 0}
+          taxRate={taxRate || 0}
+          taxAmount={taxAmount || 0}
+          deliveryCharge={deliveryCharge || 0}
+          total={total}
+          orderType={orderInfo?.orderType}
+        />
+      )}
       <ReceiptFooter restaurant={restaurant} />
     </div>
   );

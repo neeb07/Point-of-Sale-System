@@ -233,6 +233,18 @@ export const shiftsAPI = {
   summary: (id: number) => request<Record<string, unknown>>('GET', `/shifts/${id}/summary`),
 };
 
+export const expensesAPI = {
+  categories: () => request<string[]>('GET', '/expenses/categories'),
+  list: (params: Record<string, string> = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return request<{ expenses: Record<string, unknown>[]; totals: Record<string, number> }>(
+      'GET', `/expenses${qs ? `?${qs}` : ''}`);
+  },
+  create: (data: { category: string; description?: string; amount: number; from_drawer: boolean }) =>
+    request<Record<string, unknown>>('POST', '/expenses', data),
+  remove: (id: number) => request<{ success: boolean }>('DELETE', `/expenses/${id}`),
+};
+
 export const dealsAPI = {
   getAll: () => request('GET', '/deals'),
   getOne: (id: number) => request('GET', `/deals/${id}`),

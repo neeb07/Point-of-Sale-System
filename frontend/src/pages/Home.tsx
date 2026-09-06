@@ -9,6 +9,7 @@ import Settings from '@/pages/Settings';
 import Deals from '@/pages/Deals';
 import InventoryScreen from '@/pages/InventoryScreen';
 import ShiftsScreen from '@/pages/ShiftsScreen';
+import ExpensesScreen from '@/pages/ExpensesScreen';
 import LoginScreen from '@/pages/LoginScreen';
 import AccessDenied from '@/components/AccessDenied';
 import { POSProvider } from '@/lib/POSContext';
@@ -24,6 +25,7 @@ const screens: Record<string, React.ComponentType<{ onNavigate?: (page: string) 
   settings: Settings,
   inventory: InventoryScreen,
   shifts: ShiftsScreen,
+  expenses: ExpensesScreen,
 };
 
 /**

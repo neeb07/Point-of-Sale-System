@@ -23,6 +23,21 @@ const shiftTotalsStmt = db.prepare(`
   WHERE shift_id = ? AND status != 'voided'
 `);
 
+/**
+ * Cash paid out of the drawer during the shift.
+ *
+ * Rider fuel, staff lunch and the like leave the till but are not sales, so
+ * without this the drawer is expected to hold money that was handed out hours
+ * ago and every shift closes short by exactly what was spent.
+ */
+const shiftExpensesStmt = db.prepare(`
+  SELECT
+    COALESCE(SUM(amount), 0) AS drawer_expenses,
+    COUNT(*)                 AS expense_count
+  FROM expenses
+  WHERE shift_id = ? AND from_drawer = 1
+`);
+
 const getOpenShiftStmt = db.prepare(
   "SELECT * FROM shifts WHERE status = 'open' ORDER BY opened_at DESC LIMIT 1"
 );
@@ -30,7 +45,25 @@ const getOpenShiftStmt = db.prepare(
 function withTotals(shift) {
   if (!shift) return null;
   const totals = shiftTotalsStmt.get(shift.id);
-  return { ...shift, ...totals };
+  const spend = shiftExpensesStmt.get(shift.id);
+
+  // What the drawer should hold right now: the float, plus cash taken in,
+  // minus cash paid back out. Card and online sales never touch it.
+  const expectedCash =
+    Number(shift.opening_cash || 0) +
+    Number(totals.cash_revenue || 0) -
+    Number(spend.drawer_expenses || 0);
+
+  return {
+    ...shift,
+    ...totals,
+    ...spend,
+    // A closed shift keeps the figure recorded at the time; a live one is
+    // computed so the screen updates as sales and payouts happen.
+    expected_cash: shift.status === 'closed' && shift.expected_cash !== null
+      ? shift.expected_cash
+      : expectedCash,
+  };
 }
 
 // GET the currently open shift (or null)
@@ -110,10 +143,15 @@ router.post('/close', (req, res) => {
     if (!shift) return res.status(404).json({ error: 'No open shift to close' });
 
     const totals = shiftTotalsStmt.get(shift.id);
+    const spend = shiftExpensesStmt.get(shift.id);
 
-    // Expected drawer = what you started with + cash taken during the shift.
-    // Card/online sales never touch the drawer, so they are excluded.
-    const expected = Number(shift.opening_cash || 0) + Number(totals.cash_revenue || 0);
+    // Expected drawer = float + cash taken in - cash paid out of the till.
+    // Card and online sales never touch the drawer, so they are excluded, and
+    // petty cash handed out has to come off or the count is short by that much.
+    const expected =
+      Number(shift.opening_cash || 0) +
+      Number(totals.cash_revenue || 0) -
+      Number(spend.drawer_expenses || 0);
     const actual = Number(closing_cash) || 0;
 
     db.prepare(`

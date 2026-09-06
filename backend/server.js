@@ -84,6 +84,8 @@ app.use('/api/whatsapp', requireAdmin, require('./routes/whatsapp'));
 
 // Taking money and running the till: both roles.
 app.use('/api/orders', requireAuth, require('./routes/orders'));
+// Petty cash out of the drawer is till work, so both roles record it.
+app.use('/api/expenses', requireAuth, require('./routes/expenses'));
 app.use('/api/shifts', requireAuth, require('./routes/shifts'));
 app.use('/api/reports', requireAuth, require('./routes/reports'));
 

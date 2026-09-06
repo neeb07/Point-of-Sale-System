@@ -50,6 +50,7 @@ interface ReceiptData {
   deliveryCharge: number;
   total: number;
   restaurant: RestaurantDetails;
+  customer?: { name: string; phone: string; address: string };
 }
 
 interface SaleScreenProps {
@@ -72,6 +73,17 @@ export default function SaleScreen({ onNavigate }: SaleScreenProps = {}) {
   const [tableNumber, setTableNumber] = useState('');
   /** Staff purchase — applies the configured staff discount automatically. */
   const [isEmployee, setIsEmployee] = useState(false);
+
+  /**
+   * Delivery details, asked for after the sale is confirmed and before the
+   * receipt appears. Every field is optional — a regular the shop already
+   * knows can be skipped — but when given they print on all three copies so
+   * the kitchen bags the right order and the rider knows where to take it.
+   */
+  const [deliveryModalOpen, setDeliveryModalOpen] = useState(false);
+  const [customerName, setCustomerName] = useState('');
+  const [customerPhone, setCustomerPhone] = useState('');
+  const [customerAddress, setCustomerAddress] = useState('');
   const [receiptData, setReceiptData] = useState<ReceiptData | null>(null);
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
   const { loading } = usePOS();
@@ -138,6 +150,9 @@ export default function SaleScreen({ onNavigate }: SaleScreenProps = {}) {
     setPaymentMethod('Cash');
     setTableNumber('');
     setIsEmployee(false);
+    setCustomerName('');
+    setCustomerPhone('');
+    setCustomerAddress('');
   };
 
   const handleClearCart = () => resetOrder();
@@ -152,8 +167,21 @@ export default function SaleScreen({ onNavigate }: SaleScreenProps = {}) {
 
   const handleCharge = () => setConfirmModalOpen(true);
 
-  const confirmCharge = async () => {
+  /**
+   * Confirming a delivery asks who it is going to before anything is printed.
+   * Anything else goes straight through.
+   */
+  const confirmCharge = () => {
     setConfirmModalOpen(false);
+    if (orderType === 'Delivery') {
+      setDeliveryModalOpen(true);
+      return;
+    }
+    placeOrder();
+  };
+
+  const placeOrder = async (customer?: { name: string; phone: string; address: string }) => {
+    setDeliveryModalOpen(false);
     try {
       const items = cart.map((c: CartItem) => ({
         id: c.id,
@@ -173,6 +201,9 @@ export default function SaleScreen({ onNavigate }: SaleScreenProps = {}) {
         delivery_charge: deliveryCharge,
         table_number: tableNumber || null,
         is_employee: isEmployee,
+        customer_name: customer?.name || null,
+        customer_phone: customer?.phone || null,
+        customer_address: customer?.address || null,
         cashier_id: currentUser?.id || null,
         cashier_name: currentUser?.name || 'Unknown',
       });
@@ -207,6 +238,11 @@ export default function SaleScreen({ onNavigate }: SaleScreenProps = {}) {
         deliveryCharge: order.delivery_charge ?? deliveryCharge,
         total: order.total ?? total,
         restaurant: restaurantDetails,
+        customer: {
+          name: order.customer_name ?? customer?.name ?? '',
+          phone: order.customer_phone ?? customer?.phone ?? '',
+          address: order.customer_address ?? customer?.address ?? '',
+        },
       });
 
       resetOrder();
@@ -259,6 +295,98 @@ export default function SaleScreen({ onNavigate }: SaleScreenProps = {}) {
           onCharge={handleCharge}
         />
       </div>
+
+      {/*
+        Delivery details, asked once the sale is confirmed and before the
+        receipt prints. Skip is a first-class option: a regular the shop
+        already knows should not hold up the queue, and a half-filled address
+        is worse than none.
+      */}
+      <Modal
+        isOpen={deliveryModalOpen}
+        onClose={() => setDeliveryModalOpen(false)}
+        title="Delivery Details"
+        width={440}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ fontSize: 13, color: '#6B6B63', lineHeight: 1.5 }}>
+            These print on the receipt so the rider knows where the order is going.
+            All optional — skip if the customer is a regular.
+          </div>
+
+          {[
+            { label: 'Customer Name', value: customerName, set: setCustomerName, ph: 'e.g. Ahmed Khan', type: 'text' },
+            { label: 'Phone Number', value: customerPhone, set: setCustomerPhone, ph: 'e.g. 0300-1234567', type: 'tel' },
+          ].map(f => (
+            <div key={f.label}>
+              <label style={{ fontSize: 13, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 6 }}>
+                {f.label}
+              </label>
+              <input
+                type={f.type}
+                value={f.value}
+                onChange={(e) => f.set(e.target.value)}
+                placeholder={f.ph}
+                style={{
+                  width: '100%', height: 44, borderRadius: 8,
+                  border: '1.5px solid #EBEBEB', background: '#FFFFFF',
+                  padding: '0 12px', fontSize: 14, color: '#111110',
+                  outline: 'none', fontFamily: 'Inter, sans-serif',
+                }}
+                onFocus={(e) => { e.currentTarget.style.borderColor = '#DC2626'; }}
+                onBlur={(e) => { e.currentTarget.style.borderColor = '#EBEBEB'; }}
+              />
+            </div>
+          ))}
+
+          <div>
+            <label style={{ fontSize: 13, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 6 }}>
+              Delivery Address
+            </label>
+            <textarea
+              value={customerAddress}
+              onChange={(e) => setCustomerAddress(e.target.value)}
+              placeholder="House / street / area"
+              rows={3}
+              style={{
+                width: '100%', borderRadius: 8,
+                border: '1.5px solid #EBEBEB', background: '#FFFFFF',
+                padding: '10px 12px', fontSize: 14, color: '#111110',
+                outline: 'none', fontFamily: 'Inter, sans-serif', resize: 'vertical',
+              }}
+              onFocus={(e) => { e.currentTarget.style.borderColor = '#DC2626'; }}
+              onBlur={(e) => { e.currentTarget.style.borderColor = '#EBEBEB'; }}
+            />
+          </div>
+
+          <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
+            <button
+              onClick={() => placeOrder()}
+              style={{
+                flex: 1, height: 44, borderRadius: 8,
+                border: '1.5px solid #EBEBEB', background: '#FFFFFF',
+                color: '#6B6B63', fontSize: 14, fontWeight: 600, cursor: 'pointer',
+              }}
+            >
+              Skip
+            </button>
+            <button
+              onClick={() => placeOrder({
+                name: customerName.trim(),
+                phone: customerPhone.trim(),
+                address: customerAddress.trim(),
+              })}
+              style={{
+                flex: 2, height: 44, borderRadius: 8, border: 'none',
+                background: '#111111', color: '#FFFFFF',
+                fontSize: 14, fontWeight: 600, cursor: 'pointer',
+              }}
+            >
+              Save &amp; Print Receipt
+            </button>
+          </div>
+        </div>
+      </Modal>
 
       <ReceiptModal
         open={!!receiptData}

@@ -258,6 +258,37 @@ try { db.exec("UPDATE staff SET role = 'Manager' WHERE role = 'Cashier';"); } ca
 try { db.exec("ALTER TABLE orders ADD COLUMN voided_by TEXT DEFAULT NULL;"); } catch(e) {}
 try { db.exec("ALTER TABLE orders ADD COLUMN voided_by_id INTEGER DEFAULT NULL;"); } catch(e) {}
 
+// Delivery orders capture the customer's details before the receipt prints, so
+// the rider knows where the food is going. All optional — the cashier can skip
+// the prompt when a regular rings up.
+try { db.exec("ALTER TABLE orders ADD COLUMN customer_name TEXT DEFAULT NULL;"); } catch(e) {}
+try { db.exec("ALTER TABLE orders ADD COLUMN customer_phone TEXT DEFAULT NULL;"); } catch(e) {}
+try { db.exec("ALTER TABLE orders ADD COLUMN customer_address TEXT DEFAULT NULL;"); } catch(e) {}
+
+/*
+ * Petty cash going out — rider fuel, staff lunch, and so on.
+ *
+ * `from_drawer` is the important one: money handed out of the till has to come
+ * off the drawer's expected balance, or every shift closes short by exactly the
+ * amount that was spent. It is attached to the shift that was open at the time
+ * so the reconciliation stays with the right trading period.
+ */
+db.exec(`
+  CREATE TABLE IF NOT EXISTS expenses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    shift_id INTEGER DEFAULT NULL,
+    staff_id INTEGER DEFAULT NULL,
+    staff_name TEXT,
+    category TEXT NOT NULL,
+    description TEXT,
+    amount REAL NOT NULL,
+    from_drawer INTEGER DEFAULT 1,
+    created_at DATETIME DEFAULT (datetime('now', 'localtime'))
+  );
+`);
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_expenses_shift ON expenses(shift_id);"); } catch(e) {}
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_expenses_created ON expenses(created_at);"); } catch(e) {}
+
 // Menu items are retired rather than deleted. A hard DELETE failed outright
 // with "FOREIGN KEY constraint failed" whenever the item belonged to a deal,
 // and when it did succeed it broke sales-by-category for every past order

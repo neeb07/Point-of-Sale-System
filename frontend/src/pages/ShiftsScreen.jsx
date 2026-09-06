@@ -77,13 +77,11 @@ export default function ShiftsScreen() {
   const cashRevenue = Number(currentShift?.cash_revenue || 0);
 
   /**
-   * Expected drawer = opening float + cash sales only. Card and online sales
-   * never touch the till, so including them would guarantee a variance.
-   * The server computes this too; this is the live preview.
+   * Taken from the server, which nets off cash paid out of the drawer during
+   * the shift. Recomputing it here as float + cash sales would ignore the
+   * payouts and show a drawer that is short by exactly what was handed out.
    */
-  const expectedCash = shiftOpen
-    ? Number(currentShift?.opening_cash || 0) + cashRevenue
-    : 0;
+  const expectedCash = shiftOpen ? Number(currentShift?.expected_cash || 0) : 0;
   const cashDiff = (Number(actualCash) || 0) - expectedCash;
 
   const duration = (() => {
@@ -178,6 +176,14 @@ export default function ShiftsScreen() {
             <Row label="Revenue so far" value={formatMoney(currentShift?.total_revenue || 0)} />
             <Row muted label="Cash" value={formatMoney(cashRevenue)} />
             <Row muted label="Card / Online" value={formatMoney(currentShift?.non_cash_revenue || 0)} />
+            {/* Cash handed out during the shift. Without this line the expected
+                drawer looks wrong to whoever counts it. */}
+            {Number(currentShift?.drawer_expenses || 0) > 0 && (
+              <Row
+                label={`Paid out (${currentShift.expense_count} expense${currentShift.expense_count === 1 ? '' : 's'})`}
+                value={`− ${formatMoney(currentShift.drawer_expenses)}`}
+              />
+            )}
             <div style={{ borderTop: '1px solid #F3F4F6', margin: '12px 0' }} />
             <Row label="Expected in drawer" value={formatMoney(expectedCash)} />
             <button
@@ -263,6 +269,9 @@ export default function ShiftsScreen() {
           <Row label="Discounts given" value={formatMoney(currentShift?.total_discounts || 0)} />
           <Row muted label="Opening float" value={formatMoney(currentShift?.opening_cash || 0)} />
           <Row muted label="Cash sales" value={formatMoney(cashRevenue)} />
+          {Number(currentShift?.drawer_expenses || 0) > 0 && (
+            <Row muted label="Less cash paid out" value={`− ${formatMoney(currentShift.drawer_expenses)}`} />
+          )}
           <Row label="Expected in drawer" value={formatMoney(expectedCash)} />
 
           <div>

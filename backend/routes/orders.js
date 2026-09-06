@@ -7,6 +7,7 @@ router.post('/', (req, res) => {
   const {
     items, total, discount, payment_method, cashier_id, cashier_name,
     order_type, delivery_charge, table_number,
+    customer_name, customer_phone, customer_address,
   } = req.body;
 
   if (!items || items.length === 0) {
@@ -80,8 +81,9 @@ router.post('/', (req, res) => {
       `INSERT INTO orders
          (total, discount, payment_method, status, cashier_id, cashier_name,
           order_type, delivery_charge, table_number, shift_id, created_at,
-          tax_rate, tax_amount, is_employee, employee_discount, employee_discount_rate)
-       VALUES (?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'), ?, ?, ?, ?, ?)`
+          tax_rate, tax_amount, is_employee, employee_discount, employee_discount_rate,
+          customer_name, customer_phone, customer_address)
+       VALUES (?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'), ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       computedTotal,
       cappedDiscount,
@@ -101,7 +103,11 @@ router.post('/', (req, res) => {
       taxAmount,
       isEmployee ? 1 : 0,
       employeeDiscount,
-      isEmployee ? employeeRate : 0
+      isEmployee ? employeeRate : 0,
+      // Delivery details are optional — the cashier may skip the prompt.
+      (customer_name && String(customer_name).trim()) || null,
+      (customer_phone && String(customer_phone).trim()) || null,
+      (customer_address && String(customer_address).trim()) || null
     );
 
     const orderId = orderResult.lastInsertRowid;
@@ -164,6 +170,9 @@ router.post('/', (req, res) => {
       employee_discount: employeeDiscount,
       employee_discount_rate: employeeRate,
       manual_discount: manualDiscount,
+      customer_name: (customer_name && String(customer_name).trim()) || null,
+      customer_phone: (customer_phone && String(customer_phone).trim()) || null,
+      customer_address: (customer_address && String(customer_address).trim()) || null,
     });
   } catch (err) {
     console.error('Error creating order:', err);

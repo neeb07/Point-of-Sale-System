@@ -266,6 +266,13 @@ export default function Orders() {
       // `discount` on the order is the combined figure, so the manual portion
       // is whatever is left once the staff discount is taken out.
       employeeDiscount: Number(order.employee_discount) || 0,
+      // A reprint of a delivery has to carry the address, or the rider gets a
+      // ticket that does not say where to go.
+      customer: {
+        name: order.customer_name || '',
+        phone: order.customer_phone || '',
+        address: order.customer_address || '',
+      },
       isEmployee: Number(order.is_employee) === 1,
       employeeDiscountRate: Number(order.employee_discount_rate) || 0,
       deliveryCharge,

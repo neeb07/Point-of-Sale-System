@@ -1,5 +1,5 @@
 import React from 'react';
-import { Home as HomeIcon, User, ClipboardList, BarChart2, Settings, LogOut, Utensils, Tag, Package, Clock } from 'lucide-react';
+import { Home as HomeIcon, User, ClipboardList, BarChart2, Settings, LogOut, Utensils, Tag, Package, Clock, Wallet } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 
 interface NavItem {
@@ -35,6 +35,7 @@ const ADMIN_NAV: NavItem[] = [
   { id: 'inventory',icon: Package,       label: 'Inventory', adminOnly: true },
   { id: 'cashier',  icon: User,          label: 'Staff',     adminOnly: true },
   { id: 'shifts',   icon: Clock,         label: 'Shifts' },
+  { id: 'expenses', icon: Wallet,        label: 'Expenses' },
   { id: 'sale',     icon: HomeIcon,      label: 'Sale' },
   { id: 'settings', icon: Settings,      label: 'Settings',  adminOnly: true },
 ];
@@ -54,6 +55,7 @@ const MANAGER_NAV: NavItem[] = [
   { id: 'deals',    icon: Tag,           label: 'Deals' },
   { id: 'inventory',icon: Package,       label: 'Inventory' },
   { id: 'shifts',   icon: Clock,         label: 'Shifts' },
+  { id: 'expenses', icon: Wallet,        label: 'Expenses' },
   { id: 'reports',  icon: BarChart2,     label: 'Reports' },
 ];
 
