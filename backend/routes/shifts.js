@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db/database');
+const { isAdminRole } = require('../middleware/auth');
 
 /**
  * Shift management.
@@ -38,9 +39,27 @@ const shiftExpensesStmt = db.prepare(`
   WHERE shift_id = ? AND from_drawer = 1
 `);
 
-const getOpenShiftStmt = db.prepare(
-  "SELECT * FROM shifts WHERE status = 'open' ORDER BY opened_at DESC LIMIT 1"
+/*
+ * A shift belongs to the person who opened it.
+ *
+ * There used to be one global open shift, so whoever signed in next saw — and
+ * could close — somebody else's drawer, and their sales were filed against it.
+ * With a manager per branch that is not just untidy, it is wrong: two people
+ * counting one drawer they did not both fill cannot reconcile it.
+ *
+ * Every lookup is therefore keyed on the staff member. An administrator is not
+ * exempt: their own till work is their own shift, and they read across
+ * everybody's takings on the Reports screen instead.
+ */
+const getOpenShiftForStmt = db.prepare(
+  "SELECT * FROM shifts WHERE status = 'open' AND staff_id IS ? ORDER BY opened_at DESC LIMIT 1"
 );
+
+/** The signed-in person's open shift, or null. */
+function openShiftFor(req) {
+  const staffId = (req.user && req.user.staffId) || null;
+  return getOpenShiftForStmt.get(staffId) || null;
+}
 
 function withTotals(shift) {
   if (!shift) return null;
@@ -69,7 +88,7 @@ function withTotals(shift) {
 // GET the currently open shift (or null)
 router.get('/current', (req, res) => {
   try {
-    const shift = getOpenShiftStmt.get();
+    const shift = openShiftFor(req);
     res.json(shift ? withTotals(shift) : null);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -79,10 +98,17 @@ router.get('/current', (req, res) => {
 // GET recent closed shifts
 router.get('/history', (req, res) => {
   const limit = Math.min(Number(req.query.limit) || 10, 50);
+  // Past shifts follow the same rule as the open one: a manager sees their own
+  // history, an administrator sees the whole shop's.
+  const isAdmin = !req.user || isAdminRole(req.user.role);
   try {
-    const shifts = db.prepare(
-      "SELECT * FROM shifts WHERE status = 'closed' ORDER BY closed_at DESC LIMIT ?"
-    ).all(limit);
+    const shifts = isAdmin
+      ? db.prepare(
+          "SELECT * FROM shifts WHERE status = 'closed' ORDER BY closed_at DESC LIMIT ?"
+        ).all(limit)
+      : db.prepare(
+          "SELECT * FROM shifts WHERE status = 'closed' AND staff_id IS ? ORDER BY closed_at DESC LIMIT ?"
+        ).all(req.user.staffId, limit);
     res.json(shifts.map(withTotals));
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -94,6 +120,13 @@ router.get('/:id/summary', (req, res) => {
   try {
     const shift = db.prepare('SELECT * FROM shifts WHERE id = ?').get(req.params.id);
     if (!shift) return res.status(404).json({ error: 'Shift not found' });
+
+    // Guarding the listings alone would leave the drawer readable by anyone
+    // who guessed an id, which is the whole of what is being protected here.
+    const isAdmin = !req.user || isAdminRole(req.user.role);
+    if (!isAdmin && shift.staff_id !== req.user.staffId) {
+      return res.status(403).json({ error: 'That shift belongs to another member of staff.' });
+    }
 
     const topItems = db.prepare(`
       SELECT oi.name, SUM(oi.quantity) AS total_qty, SUM(oi.price * oi.quantity) AS total_revenue
@@ -116,16 +149,24 @@ router.post('/open', (req, res) => {
   const { opening_cash, staff_id, staff_name } = req.body;
 
   try {
-    const existing = getOpenShiftStmt.get();
+    // Only this person's own open shift blocks them. Another manager having a
+    // drawer open at the same time is the normal case, not a conflict.
+    const existing = openShiftFor(req);
     if (existing) {
-      return res.status(409).json({ error: 'A shift is already open. Close it first.' });
+      return res.status(409).json({ error: 'You already have a shift open. Close it first.' });
     }
 
     // Local wall-clock, not CURRENT_TIMESTAMP's UTC — see db/database.js.
     const result = db.prepare(`
       INSERT INTO shifts (staff_id, staff_name, opening_cash, status, opened_at)
       VALUES (?, ?, ?, 'open', datetime('now', 'localtime'))
-    `).run(staff_id || null, staff_name || 'Unknown', Number(opening_cash) || 0);
+    `).run(
+      // Ownership comes from the session, never the request body: it decides
+      // who may later see and close this drawer.
+      (req.user && req.user.staffId) || staff_id || null,
+      (req.user && req.user.name) || staff_name || 'Unknown',
+      Number(opening_cash) || 0
+    );
 
     const shift = db.prepare('SELECT * FROM shifts WHERE id = ?').get(result.lastInsertRowid);
     res.status(201).json(withTotals(shift));
@@ -139,8 +180,8 @@ router.post('/close', (req, res) => {
   const { closing_cash } = req.body;
 
   try {
-    const shift = getOpenShiftStmt.get();
-    if (!shift) return res.status(404).json({ error: 'No open shift to close' });
+    const shift = openShiftFor(req);
+    if (!shift) return res.status(404).json({ error: 'You have no open shift to close' });
 
     const totals = shiftTotalsStmt.get(shift.id);
     const spend = shiftExpensesStmt.get(shift.id);

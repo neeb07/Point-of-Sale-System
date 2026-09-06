@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db/database');
+const { localToday } = require('../db/local-date');
 const bcrypt = require('bcryptjs');
 const saltRounds = 10;
 const {
@@ -320,7 +321,8 @@ router.post('/login', async (req, res) => {
  * their own figures on the reports screen, which is scoped to them.
  */
 router.get('/performance', requireAdmin, (req, res) => {
-  const today = new Date().toISOString().split('T')[0];
+  // Local wall-clock — see db/local-date.js.
+  const today = localToday();
   const from = req.query.from || today;
   const to = req.query.to || today;
 

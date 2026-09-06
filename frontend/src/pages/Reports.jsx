@@ -47,6 +47,8 @@ export default function Reports() {
    */
   const [branches, setBranches] = useState([]);
   const [branchId, setBranchId] = useState('');
+  /** Names of report sections whose request failed, shown in a banner. */
+  const [loadErrors, setLoadErrors] = useState([]);
 
   const [reportFormat, setReportFormat] = useState('summary');
   // Shop name (used to name the exported file) and money formatting both
@@ -93,7 +95,19 @@ export default function Reports() {
       // `branch` is only ever sent by an administrator, and an empty value
       // means "all branches" rather than "no branch".
       const params = branchId ? { from, to, branch: branchId } : { from, to };
-      const [kData, rData, tData, cData, hData, cpData, dData, liData, exCat, exDetail] = await Promise.all([
+
+      /*
+       * `allSettled`, not `all`.
+       *
+       * These ten requests fill ten independent panels, but `Promise.all`
+       * rejects the moment any one of them does — so a single failing endpoint
+       * left the entire Reports screen blank, KPIs and charts included, with
+       * nothing on screen to say why. One broken panel should cost one panel.
+       *
+       * Each result falls back to an empty value of the right shape, and the
+       * failures are logged and surfaced in a banner rather than swallowed.
+       */
+      const settled = await Promise.allSettled([
         reportsAPI.kpi(params),
         reportsAPI.revenueOverTime({ ...params, groupBy: activeFilter === 'today' ? 'hour' : 'day' }),
         reportsAPI.topItems(params),
@@ -105,6 +119,39 @@ export default function Reports() {
         reportsAPI.expensesByCategory(params),
         reportsAPI.expensesDetail(params)
       ]);
+
+      const NAMES = ['Summary', 'Revenue over time', 'Top items', 'Sales by category',
+        'Busiest hours', 'Staff performance', 'Order details', 'Item sales',
+        'Expenses by category', 'Expense details'];
+
+      const failed = [];
+      settled.forEach((r, i) => {
+        if (r.status === 'rejected') {
+          failed.push(NAMES[i]);
+          console.error(`Report section "${NAMES[i]}" failed to load:`, r.reason);
+        }
+      });
+      setLoadErrors(failed);
+
+      const val = (i, fallback) => {
+        if (settled[i].status !== 'fulfilled' || settled[i].value == null) return fallback;
+        // An endpoint that answered with something other than the expected
+        // shape must not take the panel down either — several of these are
+        // mapped over immediately below.
+        if (Array.isArray(fallback) && !Array.isArray(settled[i].value)) return fallback;
+        return settled[i].value;
+      };
+
+      const kData   = val(0, {});
+      const rData   = val(1, []);
+      const tData   = val(2, []);
+      const cData   = val(3, []);
+      const hData   = val(4, []);
+      const cpData  = val(5, []);
+      const dData   = val(6, []);
+      const liData  = val(7, []);
+      const exCat   = val(8, []);
+      const exDetail = val(9, []);
       
       // Transform backend data to match frontend expectations
       setKpi({
@@ -576,6 +623,17 @@ export default function Reports() {
 
       <div className="p-6 space-y-6 max-w-7xl mx-auto w-full print:p-0 print:block">
         
+        {/*
+          Say so when a panel could not load, rather than showing an empty
+          chart that reads as "no sales". The rest of the page still renders.
+        */}
+        {loadErrors.length > 0 && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 print:hidden">
+            <span className="font-semibold">Some sections could not be loaded:</span>{' '}
+            {loadErrors.join(', ')}. The figures shown exclude them.
+          </div>
+        )}
+
         {/* Section 1 - KPI Cards */}
         <div className="grid grid-cols-4 gap-4 print:hidden">
           <KpiCard title="Total Revenue" value={formatMoney(kpi.revenue)} icon={DollarSign} color="#DC2626" />

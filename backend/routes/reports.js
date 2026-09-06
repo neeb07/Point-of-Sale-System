@@ -3,6 +3,7 @@ const router = express.Router();
 const db = require('../db/database');
 
 const { isAdminRole } = require('../middleware/auth');
+const { localToday } = require('../db/local-date');
 
 /**
  * Narrow a report to what the caller is entitled to, and to what they asked for.
@@ -53,7 +54,9 @@ function scopeExpenses(req, alias = 'expenses') {
 }
 
 function getDateRange(req) {
-  const today = new Date().toISOString().split('T')[0];
+  // Local wall-clock, not toISOString's UTC — at UTC+5 that named yesterday
+  // for the first five hours of every trading day.
+  const today = localToday();
   const from = req.query.from || today;
   const to = req.query.to || today;
   return { from, to };
@@ -407,6 +410,7 @@ router.get('/line-items', (req, res) => {
       FROM order_items oi
       JOIN orders o ON oi.order_id = o.id
       LEFT JOIN menu_items m ON oi.menu_item_id = m.id AND oi.is_deal = 0
+      LEFT JOIN branches br ON br.id = o.branch_id
       WHERE DATE(o.created_at) BETWEEN DATE(?) AND DATE(?)
         ${includeVoided ? '' : "AND o.status != 'voided'"}${scope.sql}
       ORDER BY o.created_at ASC, oi.id ASC

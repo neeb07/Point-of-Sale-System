@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db/database');
-const { branchIdForStaff, recordCustomer } = require('../db/branch');
+const { branchIdForStaff, recordCustomer, openShiftIdFor } = require('../db/branch');
 
 // Create a new completed order
 router.post('/', (req, res) => {
@@ -70,9 +70,10 @@ router.post('/', (req, res) => {
   const createOrder = db.transaction(() => {
     // FIX (Bug 5): attach the order to the open shift so shift totals are
     // derived from real sales instead of hardcoded demo numbers.
-    const openShift = db.prepare(
-      "SELECT id FROM shifts WHERE status = 'open' ORDER BY opened_at DESC LIMIT 1"
-    ).get();
+    // The cashier's own open shift — not whichever shift is open globally,
+    // which with two managers trading at once filed one's sales against the
+    // other's drawer.
+    const openShiftId = openShiftIdFor(req.user && req.user.staffId);
 
     const orderResult = db.prepare(
       // created_at is set explicitly to local wall-clock time. The column
@@ -99,7 +100,7 @@ router.post('/', (req, res) => {
       order_type || 'Dine-in',
       safeDelivery,
       table_number || null,
-      openShift ? openShift.id : null,
+      openShiftId,
       taxRate,
       taxAmount,
       isEmployee ? 1 : 0,

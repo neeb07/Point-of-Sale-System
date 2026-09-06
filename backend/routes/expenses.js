@@ -1,7 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db/database');
-const { branchIdForStaff } = require('../db/branch');
+const { branchIdForStaff, openShiftIdFor } = require('../db/branch');
+const { isAdminRole } = require('../middleware/auth');
+const { localToday } = require('../db/local-date');
 
 /**
  * Petty cash paid out — rider fuel, staff lunch, a repair, and so on.
@@ -34,35 +36,50 @@ const CATEGORIES = [
 router.get('/categories', (req, res) => res.json(CATEGORIES));
 
 /**
- * List expenses for a date range, newest first.
+ * Restrict a manager to their own spending.
  *
- * Deliberately not scoped per user, unlike the sales reports. The drawer
- * belongs to the shift rather than to a person: if one user records a payout
- * and another counts the till, hiding the first user's entry would make the
- * count impossible to reconcile.
+ * An administrator sees everything the shop paid out. A manager sees only what
+ * they recorded themselves, so the E-18 manager's fuel money never appears on
+ * the CBR Town manager's screen — and neither of them can read the owner's
+ * outgoings.
+ *
+ * The filter comes from the session, not from a query parameter, so a manager
+ * cannot ask for somebody else's figures. This matches how the sales reports
+ * are scoped, and it costs nothing in reconciliation: a manager only ever
+ * counts a drawer against their own shift, and the payouts that moved that
+ * drawer are their own by construction.
  */
+function scope(req, alias = 'e') {
+  if (!req.user || isAdminRole(req.user.role)) return { sql: '', params: [] };
+  return { sql: ` AND ${alias}.staff_id = ?`, params: [req.user.staffId] };
+}
+
+/** List expenses for a date range, newest first. */
 router.get('/', (req, res) => {
-  const today = new Date().toISOString().split('T')[0];
+  // Local wall-clock, not toISOString's UTC: at UTC+5 that named yesterday
+  // for the first five hours of every trading day.
+  const today = localToday();
   const from = req.query.from || today;
   const to = req.query.to || today;
+  const mine = scope(req);
 
   try {
     const rows = db.prepare(`
       SELECT e.*, s.status AS shift_status
       FROM expenses e
       LEFT JOIN shifts s ON s.id = e.shift_id
-      WHERE DATE(e.created_at) BETWEEN DATE(?) AND DATE(?)
+      WHERE DATE(e.created_at) BETWEEN DATE(?) AND DATE(?)${mine.sql}
       ORDER BY e.created_at DESC, e.id DESC
-    `).all(from, to);
+    `).all(from, to, ...mine.params);
 
     const totals = db.prepare(`
       SELECT
         COALESCE(SUM(amount), 0) AS total,
         COALESCE(SUM(CASE WHEN from_drawer = 1 THEN amount ELSE 0 END), 0) AS from_drawer_total,
         COUNT(*) AS count
-      FROM expenses
-      WHERE DATE(created_at) BETWEEN DATE(?) AND DATE(?)
-    `).get(from, to);
+      FROM expenses e
+      WHERE DATE(e.created_at) BETWEEN DATE(?) AND DATE(?)${mine.sql}
+    `).get(from, to, ...mine.params);
 
     res.json({ expenses: rows, totals });
   } catch (err) {
@@ -86,9 +103,9 @@ router.post('/', (req, res) => {
     // Attach to the open shift so the drawer maths lands in the right period.
     // With no shift open the expense is still recorded, it just cannot move a
     // drawer that is not counted.
-    const openShift = db.prepare(
-      "SELECT id FROM shifts WHERE status = 'open' ORDER BY opened_at DESC LIMIT 1"
-    ).get();
+    // The recorder's own open shift, so a payout only ever moves the drawer
+    // that person is actually counting.
+    const openShiftId = openShiftIdFor(req.user && req.user.staffId);
 
     const fromDrawer = from_drawer === false || from_drawer === 0 ? 0 : 1;
 
@@ -97,7 +114,7 @@ router.post('/', (req, res) => {
         (shift_id, staff_id, staff_name, category, description, amount, from_drawer, branch_id, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
     `).run(
-      fromDrawer && openShift ? openShift.id : null,
+      fromDrawer ? openShiftId : null,
       // Attribution comes from the session, never the request body.
       (req.user && req.user.staffId) || null,
       (req.user && req.user.name) || 'Unknown',
@@ -113,7 +130,7 @@ router.post('/', (req, res) => {
       ...created,
       // Tells the UI whether this actually moved a drawer, so it can say so
       // rather than implying a reconciliation that did not happen.
-      affected_shift: Boolean(fromDrawer && openShift),
+      affected_shift: Boolean(fromDrawer && openShiftId),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -132,7 +149,6 @@ router.delete('/:id', (req, res) => {
     const row = db.prepare('SELECT * FROM expenses WHERE id = ?').get(req.params.id);
     if (!row) return res.status(404).json({ error: 'Expense not found' });
 
-    const { isAdminRole } = require('../middleware/auth');
     const isAdmin = req.user && isAdminRole(req.user.role);
     const isOwnEntry = req.user && row.staff_id === req.user.staffId;
 

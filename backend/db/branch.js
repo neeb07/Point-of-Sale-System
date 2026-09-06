@@ -84,4 +84,20 @@ function recordCustomer({ name, phone, address, total }) {
   return r.lastInsertRowid;
 }
 
-module.exports = { branchIdForStaff, recordCustomer, normalisePhone };
+/**
+ * The open shift belonging to a member of staff, if they have one.
+ *
+ * Sales and drawer payouts attach to the till the person is actually working,
+ * not merely to whichever shift happens to be open. With two managers trading
+ * at once the old global lookup filed one of them's takings against the
+ * other's drawer, so neither could be reconciled.
+ */
+function openShiftIdFor(staffId) {
+  if (!staffId) return null;
+  const row = db.prepare(
+    "SELECT id FROM shifts WHERE status = 'open' AND staff_id = ? ORDER BY opened_at DESC LIMIT 1"
+  ).get(staffId);
+  return row ? row.id : null;
+}
+
+module.exports = { branchIdForStaff, recordCustomer, normalisePhone, openShiftIdFor };
