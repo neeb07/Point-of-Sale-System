@@ -15,6 +15,8 @@
  */
 
 const express = require('express');
+const path = require('path');
+const fs = require('fs');
 const cookieParser = require('cookie-parser');
 
 const db = require('./db/database');
@@ -50,6 +52,37 @@ app.use('/api/ping', requireBranch, require('./routes/ping'));
 
 // --- Owner-facing: session cookie -------------------------------------------
 app.use('/api/auth', require('./routes/auth'));
+
+// Mixed: the write half takes a branch key, the read half a session cookie, so
+// each is guarded inside the router rather than at the mount.
+app.use('/api/live', require('./routes/live'));
+
+/*
+ * Serve the dashboard build from this same process, and therefore the same
+ * origin as the API.
+ *
+ * That is what lets the session cookie be a plain SameSite=Lax httpOnly cookie
+ * with no CORS negotiation and no SameSite=None. Serving the UI from a
+ * different host would make the cookie a cross-site one, which modern browsers
+ * increasingly refuse outright.
+ *
+ * Optional: if the build is absent, the API still runs. Useful in development,
+ * where Vite serves the UI itself and proxies /api across.
+ */
+const DASHBOARD_DIST = process.env.BLAZE_DASHBOARD_DIST
+  || path.join(__dirname, '..', 'dashboard', 'dist');
+
+if (fs.existsSync(path.join(DASHBOARD_DIST, 'index.html'))) {
+  app.use(express.static(DASHBOARD_DIST));
+  // Anything not matched above and not under /api is a client-side route, so
+  // hand back index.html rather than a 404.
+  app.get(/^\/(?!api\/).*/, (req, res) => {
+    res.sendFile(path.join(DASHBOARD_DIST, 'index.html'));
+  });
+  console.log(`Serving dashboard from ${DASHBOARD_DIST}`);
+} else {
+  console.log('No dashboard build found — API only. (Run `npm run build` in dashboard/.)');
+}
 
 // 404 as JSON, so a dashboard fetch gets a parseable body rather than HTML.
 app.use((req, res) => res.status(404).json({ error: 'Not found' }));

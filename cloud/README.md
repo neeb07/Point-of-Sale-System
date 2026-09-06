@@ -106,6 +106,26 @@ Same engine, same schema, so that file is copied rather than ported.
 At two branches with a single writer, SQLite in WAL mode is comfortably
 over-specified.
 
+## The dashboard
+
+The React app lives in `dashboard/`. In production this process serves its
+build, so the UI and the API share one origin — which is what lets the session
+cookie be a plain `SameSite=Lax` httpOnly cookie with no CORS to negotiate.
+
+```
+cd dashboard && npm install && npm run build    # then start the cloud
+```
+
+In development run them apart; Vite proxies `/api` across:
+
+```
+cd cloud     && npm start      # 127.0.0.1:4000
+cd dashboard && npm run dev    # 127.0.0.1:5174
+```
+
+Override the build location with `BLAZE_DASHBOARD_DIST` if the two are deployed
+separately. If no build is present the API still runs.
+
 ## Layout
 
 ```
@@ -115,5 +135,6 @@ middleware/branch-auth.js   Bearer branch key -> req.branch
 middleware/session.js       httpOnly cookie -> req.user; sessions on disk
 routes/auth.js          owner login / logout / me, rate limited
 routes/ping.js          till pairing check; returns branch identity and clock skew
+routes/live.js          heartbeat ingest (branch key) + live read (session)
 scripts/provision.js    create branches and the owner account
 ```

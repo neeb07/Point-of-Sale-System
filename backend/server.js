@@ -124,6 +124,15 @@ app.use((err, req, res, next) => {
 });
 
 // Port conflict handling
+/*
+ * Cloud heartbeat.
+ *
+ * Started after the routes are mounted, and only when this till has been paired
+ * (see db/till-identity.js). An unpaired till never opens a socket, so a
+ * single-shop install behaves exactly as it did before.
+ */
+require('./sync/heartbeat').start();
+
 const server = app.listen(PORT, HOST, () => {
   console.log(`POS Backend running on http://${HOST}:${PORT}`);
 });

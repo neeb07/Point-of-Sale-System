@@ -14,6 +14,7 @@
 const express = require('express');
 const router = express.Router();
 const { publicStatus } = require('../db/till-identity');
+const heartbeat = require('../sync/heartbeat');
 
 /**
  * Where this till thinks it is and whether it is paired.
@@ -26,10 +27,9 @@ router.get('/status', (req, res) => {
   try {
     res.json({
       ...publicStatus(),
-      // Populated once the sync agent exists; present now so the Settings
+      ...heartbeat.status(),
+      // Populated once the sales push exists; present now so the Settings
       // screen can be built against the final shape.
-      last_success_at: null,
-      last_error: null,
       queue_depth: 0,
     });
   } catch (err) {
