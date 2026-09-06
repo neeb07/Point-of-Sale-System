@@ -11,6 +11,8 @@ import { useAuth } from '@/context/AuthContext';
 import moment from 'moment';
 import { PAYMENT_METHODS, type PaymentMethod } from '@/lib/constants';
 import { useSettings } from '@/lib/SettingsContext';
+import CustomerLookup from '@/components/pos/CustomerLookup';
+import type { Customer } from '@/api/index';
 
 interface CartItem {
   id: number;
@@ -311,11 +313,21 @@ export default function SaleScreen({ onNavigate }: SaleScreenProps = {}) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <div style={{ fontSize: 13, color: '#6B6B63', lineHeight: 1.5 }}>
             These print on the receipt so the rider knows where the order is going.
-            All optional — skip if the customer is a regular.
+            Start typing a name or number to pull up a previous customer. All
+            optional — skip if there is nothing to record.
           </div>
 
+          <CustomerLookup
+            value={customerName}
+            onChange={setCustomerName}
+            onPick={(c: Customer) => {
+              setCustomerName(c.name || '');
+              setCustomerPhone(c.phone || '');
+              setCustomerAddress(c.address || '');
+            }}
+          />
+
           {[
-            { label: 'Customer Name', value: customerName, set: setCustomerName, ph: 'e.g. Ahmed Khan', type: 'text' },
             { label: 'Phone Number', value: customerPhone, set: setCustomerPhone, ph: 'e.g. 0300-1234567', type: 'tel' },
           ].map(f => (
             <div key={f.label}>

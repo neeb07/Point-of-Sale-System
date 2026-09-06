@@ -140,6 +140,11 @@ export const reportsAPI = {
   detailed: (params: ReportParams) => request<Record<string, unknown>>('GET', `/reports/detailed?${new URLSearchParams(params as Record<string, string>).toString()}`),
   /** One row per item sold, for the item-level CSV export. */
   lineItems: (params: ReportParams) => request<Record<string, unknown>[]>('GET', `/reports/line-items?${new URLSearchParams(params as Record<string, string>).toString()}`),
+  /** What the money went out on, grouped — the mirror of byCategory. */
+  expensesByCategory: (params: ReportParams) => request<Record<string, unknown>[]>('GET', `/reports/expenses-by-category?${new URLSearchParams(params as Record<string, string>).toString()}`),
+  /** Every payout in the period, for the table and the export. */
+  expensesDetail: (params: ReportParams) => request<Record<string, unknown>[]>('GET', `/reports/expenses-detail?${new URLSearchParams(params as Record<string, string>).toString()}`),
+  daily: (params: ReportParams) => request<Record<string, unknown>[]>('GET', `/reports/daily?${new URLSearchParams(params as Record<string, string>).toString()}`),
 };
 
 export const settingsAPI = {
@@ -243,6 +248,31 @@ export const expensesAPI = {
   create: (data: { category: string; description?: string; amount: number; from_drawer: boolean }) =>
     request<Record<string, unknown>>('POST', '/expenses', data),
   remove: (id: number) => request<{ success: boolean }>('DELETE', `/expenses/${id}`),
+};
+
+/** Delivery customers, built up automatically from delivery orders. */
+export interface Customer {
+  id: number;
+  name: string | null;
+  phone: string | null;
+  address: string | null;
+  order_count: number;
+  total_spent: number;
+  last_order_at: string | null;
+}
+
+export const customersAPI = {
+  /** Type-ahead lookup by name or phone; no term returns the most recent. */
+  search: (q: string) =>
+    request<Customer[]>('GET', `/customers?q=${encodeURIComponent(q)}`),
+  /** The whole book, for the owner's demographics view. Admin only. */
+  all: () => request<Customer[]>('GET', '/customers/all'),
+};
+
+export interface Branch { id: number; name: string; active: number }
+
+export const branchesAPI = {
+  getAll: () => request<Branch[]>('GET', '/branches'),
 };
 
 export const dealsAPI = {

@@ -86,6 +86,10 @@ app.use('/api/whatsapp', requireAdmin, require('./routes/whatsapp'));
 app.use('/api/orders', requireAuth, require('./routes/orders'));
 // Petty cash out of the drawer is till work, so both roles record it.
 app.use('/api/expenses', requireAuth, require('./routes/expenses'));
+// The customer book is written only as a side effect of a delivery sale, so
+// this route is read-only; the branch list is reference data every till needs.
+app.use('/api/customers', requireAuth, require('./routes/customers'));
+app.use('/api/branches', requireAuth, require('./routes/branches'));
 app.use('/api/shifts', requireAuth, require('./routes/shifts'));
 app.use('/api/reports', requireAuth, require('./routes/reports'));
 

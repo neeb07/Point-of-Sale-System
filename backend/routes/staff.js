@@ -65,6 +65,7 @@ router.get('/', requireAdmin, (req, res) => {
     const staff = db.prepare(`
       SELECT
         s.id, s.name, s.role, s.color, s.active,
+        s.branch_id, b.name AS branch_name,
         (SELECT COUNT(*) FROM orders o
           WHERE o.cashier_id = s.id
             AND o.status != 'voided'
@@ -74,6 +75,7 @@ router.get('/', requireAdmin, (req, res) => {
             AND o.status != 'voided'
             AND DATE(o.created_at) = DATE('now', 'localtime')) AS todayRevenue
       FROM staff s
+      LEFT JOIN branches b ON b.id = s.branch_id
       ORDER BY s.role DESC, s.name ASC
     `).all();
 
@@ -89,7 +91,7 @@ router.get('/', requireAdmin, (req, res) => {
 
 // POST new staff
 router.post('/', requireAdmin, async (req, res) => {
-  const { name, role, pin, color } = req.body;
+  const { name, role, pin, color, branch_id } = req.body;
   if (!name || !pin) return res.status(400).json({ error: 'Name and PIN required' });
   if (role !== undefined && !ASSIGNABLE_ROLES.includes(role)) {
     return res.status(400).json({ error: `Role must be one of: ${ASSIGNABLE_ROLES.join(', ')}` });
@@ -97,9 +99,16 @@ router.post('/', requireAdmin, async (req, res) => {
 
   try {
     const hashedPin = await bcrypt.hash(String(pin), saltRounds);
-    const insert = db.prepare('INSERT INTO staff (name, role, pin, color, active) VALUES (?, ?, ?, ?, 1)');
-    const info = insert.run(name, role || 'Manager', hashedPin, color || '#DC2626');
-    res.json({ id: info.lastInsertRowid, name, role, color: color || '#DC2626', active: 1 });
+    // A manager runs one site, so their sales and expenses are stamped with
+    // it. An admin oversees both and is deliberately left unassigned.
+    const branchId = branch_id ? Number(branch_id) : null;
+    if (branchId && !db.prepare('SELECT id FROM branches WHERE id = ?').get(branchId)) {
+      return res.status(400).json({ error: 'Unknown branch' });
+    }
+
+    const insert = db.prepare('INSERT INTO staff (name, role, pin, color, active, branch_id) VALUES (?, ?, ?, ?, 1, ?)');
+    const info = insert.run(name, role || 'Manager', hashedPin, color || '#DC2626', branchId);
+    res.json({ id: info.lastInsertRowid, name, role, color: color || '#DC2626', active: 1, branch_id: branchId });
   } catch (err) {
     if (err.message.includes('UNIQUE constraint')) {
       return res.status(400).json({ error: 'PIN already in use by another staff member' });
@@ -110,7 +119,7 @@ router.post('/', requireAdmin, async (req, res) => {
 
 // PUT update staff (toggle active, update role, etc)
 router.put('/:id', requireAdmin, async (req, res) => {
-  const { active, role, pin, name, color } = req.body;
+  const { active, role, pin, name, color, branch_id } = req.body;
   try {
     const target = db.prepare('SELECT id, role, active FROM staff WHERE id = ?').get(req.params.id);
     if (!target) return res.status(404).json({ error: 'Staff member not found' });
@@ -142,6 +151,16 @@ router.put('/:id', requireAdmin, async (req, res) => {
     }
     if (color !== undefined) {
       db.prepare('UPDATE staff SET color = ? WHERE id = ?').run(color, req.params.id);
+    }
+
+    if (branch_id !== undefined) {
+      const branchId = branch_id ? Number(branch_id) : null;
+      if (branchId && !db.prepare('SELECT id FROM branches WHERE id = ?').get(branchId)) {
+        return res.status(400).json({ error: 'Unknown branch' });
+      }
+      // Only future rows are affected — orders already recorded keep the
+      // branch they were rung up at.
+      db.prepare('UPDATE staff SET branch_id = ? WHERE id = ?').run(branchId, req.params.id);
     }
     if (pin) {
       const hashedPin = await bcrypt.hash(String(pin), saltRounds);
@@ -269,7 +288,7 @@ router.post('/login', async (req, res) => {
   if (status.locked) return lockedResponse(res, status);
 
   const member = db.prepare(
-    'SELECT id, name, role, color, pin FROM staff WHERE id = ? AND active = 1'
+    'SELECT id, name, role, color, pin, branch_id FROM staff WHERE id = ? AND active = 1'
   ).get(staff_id);
 
   // A missing or inactive account and a wrong PIN return the same failure, so

@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db/database');
+const { branchIdForStaff, recordCustomer } = require('../db/branch');
 
 // Create a new completed order
 router.post('/', (req, res) => {
@@ -82,8 +83,8 @@ router.post('/', (req, res) => {
          (total, discount, payment_method, status, cashier_id, cashier_name,
           order_type, delivery_charge, table_number, shift_id, created_at,
           tax_rate, tax_amount, is_employee, employee_discount, employee_discount_rate,
-          customer_name, customer_phone, customer_address)
-       VALUES (?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'), ?, ?, ?, ?, ?, ?, ?, ?)`
+          customer_name, customer_phone, customer_address, branch_id)
+       VALUES (?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'), ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       computedTotal,
       cappedDiscount,
@@ -107,10 +108,26 @@ router.post('/', (req, res) => {
       // Delivery details are optional — the cashier may skip the prompt.
       (customer_name && String(customer_name).trim()) || null,
       (customer_phone && String(customer_phone).trim()) || null,
-      (customer_address && String(customer_address).trim()) || null
+      (customer_address && String(customer_address).trim()) || null,
+      // The sale belongs to the branch its cashier works at. Stamped at write
+      // time rather than derived later, so moving a manager between branches
+      // never rewrites the history of sales they already rang up.
+      branchIdForStaff(req.user && req.user.staffId)
     );
 
     const orderId = orderResult.lastInsertRowid;
+
+    // Remember whoever this went out to, so the next time they call the
+    // cashier can pick them from the list instead of taking the address down
+    // again. Only delivery orders — a walk-in has nothing worth keeping.
+    if ((order_type || 'Dine-in') === 'Delivery') {
+      recordCustomer({
+        name: customer_name,
+        phone: customer_phone,
+        address: customer_address,
+        total: computedTotal,
+      });
+    }
 
     // is_deal is recorded so reporting can distinguish a deal from a menu item
     // — they share an id space in this column, which previously made deal

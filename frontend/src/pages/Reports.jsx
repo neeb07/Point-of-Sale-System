@@ -1,7 +1,7 @@
 // @ts-nocheck
 import React, { useState, useEffect, useMemo } from 'react';
-import { DollarSign, ShoppingBag, TrendingUp, Tag, Printer, Download, FileSpreadsheet } from 'lucide-react';
-import { reportsAPI } from '@/api/index';
+import { DollarSign, ShoppingBag, TrendingUp, Tag, Printer, Download, FileSpreadsheet, Wallet } from 'lucide-react';
+import { reportsAPI, branchesAPI } from '@/api/index';
 import { buildCsv, money } from '@/lib/csv';
 import { useSettings } from '@/lib/SettingsContext';
 import { useAuth } from '@/context/AuthContext';
@@ -27,7 +27,7 @@ export default function Reports() {
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState('');
   
-  const [kpi, setKpi] = useState({ revenue: 0, orders: 0, avg_order_value: 0, total_discounts: 0 });
+  const [kpi, setKpi] = useState({ revenue: 0, orders: 0, avg_order_value: 0, total_discounts: 0, total_expenses: 0, drawer_expenses: 0, expense_count: 0, net_revenue: 0 });
   const [revenueData, setRevenueData] = useState([]);
   const [topItems, setTopItems] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -35,6 +35,18 @@ export default function Reports() {
   const [cashierPerformance, setCashierPerformance] = useState([]);
   const [detailedReport, setDetailedReport] = useState([]);
   const [lineItems, setLineItems] = useState([]);
+  const [expenseCategories, setExpenseCategories] = useState([]);
+  const [expenseDetail, setExpenseDetail] = useState([]);
+
+  /*
+   * Branch filter — administrators only.
+   *
+   * A manager is already restricted to their own sales, so a branch picker
+   * would only ever return their own figures or an empty report; the backend
+   * ignores the parameter for them and the control is hidden here.
+   */
+  const [branches, setBranches] = useState([]);
+  const [branchId, setBranchId] = useState('');
 
   const [reportFormat, setReportFormat] = useState('summary');
   // Shop name (used to name the exported file) and money formatting both
@@ -67,10 +79,21 @@ export default function Reports() {
     }
   }, [activeFilter, customFrom, customTo]);
 
+  useEffect(() => {
+    if (!isAdmin) return;
+    branchesAPI.getAll()
+      .then(rows => setBranches(Array.isArray(rows) ? rows : []))
+      // Without the list the picker simply does not appear; the report still
+      // loads, covering every branch.
+      .catch(() => setBranches([]));
+  }, [isAdmin]);
+
   const loadData = async () => {
     try {
-      const params = { from, to };
-      const [kData, rData, tData, cData, hData, cpData, dData, liData] = await Promise.all([
+      // `branch` is only ever sent by an administrator, and an empty value
+      // means "all branches" rather than "no branch".
+      const params = branchId ? { from, to, branch: branchId } : { from, to };
+      const [kData, rData, tData, cData, hData, cpData, dData, liData, exCat, exDetail] = await Promise.all([
         reportsAPI.kpi(params),
         reportsAPI.revenueOverTime({ ...params, groupBy: activeFilter === 'today' ? 'hour' : 'day' }),
         reportsAPI.topItems(params),
@@ -78,7 +101,9 @@ export default function Reports() {
         reportsAPI.hourlyHeatmap(params),
         reportsAPI.cashierPerformance(params),
         reportsAPI.detailed(params),
-        reportsAPI.lineItems(params)
+        reportsAPI.lineItems(params),
+        reportsAPI.expensesByCategory(params),
+        reportsAPI.expensesDetail(params)
       ]);
       
       // Transform backend data to match frontend expectations
@@ -86,8 +111,16 @@ export default function Reports() {
         revenue: kData.total_revenue || 0,
         orders: kData.total_orders || 0,
         avg_order_value: kData.avg_order_value || 0,
-        total_discounts: kData.total_discounts || 0
+        total_discounts: kData.total_discounts || 0,
+        // What went out, and what is actually left after it.
+        total_expenses: kData.total_expenses || 0,
+        drawer_expenses: kData.drawer_expenses || 0,
+        expense_count: kData.expense_count || 0,
+        net_revenue: kData.net_revenue ?? ((kData.total_revenue || 0) - (kData.total_expenses || 0)),
       });
+
+      setExpenseCategories(Array.isArray(exCat) ? exCat : []);
+      setExpenseDetail(Array.isArray(exDetail) ? exDetail : []);
       
       setRevenueData(rData.map(d => ({ ...d, date: d.period })));
       
@@ -129,7 +162,9 @@ export default function Reports() {
     if (activeFilter !== 'custom' || (customFrom && customTo)) {
       loadData();
     }
-  }, [from, to]);
+    // Switching branch re-runs every query, so the whole page — charts,
+    // tables and the export — always describes one branch at a time.
+  }, [from, to, branchId]);
 
 
   const PIE_COLORS = ['#DC2626', '#3B82F6', '#10B981', '#8B5CF6', '#F43F5E', '#06B6D4'];
@@ -198,9 +233,43 @@ export default function Reports() {
         else d.online += Number(row.total) || 0;
       });
 
-      const records = Object.keys(byDate).sort().map(date => ({ date, ...byDate[date] }));
-      const t = { orders: 0, qty: 0, gross: 0, discounts: 0, delivery: 0, net: 0, cash: 0, card: 0, online: 0, staffOrders: 0, staffDiscount: 0 };
-      records.forEach(r => Object.keys(t).forEach(k => { t[k] += r[k]; }));
+      /*
+       * Fold the day's payouts in alongside its takings.
+       *
+       * Keyed off the expense's own date rather than the order list, so a day
+       * the shop was shut but still paid a supplier gets its own row instead
+       * of being dropped — which would quietly overstate the period's net.
+       */
+      expenseDetail.forEach(e => {
+        const date = moment(e.created_at).format('YYYY-MM-DD');
+        if (!byDate[date]) {
+          byDate[date] = {
+            orders: 0, qty: 0, gross: 0, discounts: 0,
+            delivery: 0, net: 0, cash: 0, card: 0, online: 0,
+            staffOrders: 0, staffDiscount: 0, expenses: 0, drawerExpenses: 0,
+          };
+        }
+        const d = byDate[date];
+        d.expenses = (d.expenses || 0) + (Number(e.amount) || 0);
+        if (e.from_drawer) d.drawerExpenses = (d.drawerExpenses || 0) + (Number(e.amount) || 0);
+      });
+
+      const records = Object.keys(byDate).sort().map(date => {
+        const d = byDate[date];
+        const expenses = d.expenses || 0;
+        return {
+          date,
+          ...d,
+          expenses,
+          drawerExpenses: d.drawerExpenses || 0,
+          // What the day actually left behind, which is the figure the owner
+          // is looking for and the one the KPI row leads with.
+          netRevenue: (d.net || 0) - expenses,
+        };
+      });
+
+      const t = { orders: 0, qty: 0, gross: 0, discounts: 0, delivery: 0, net: 0, cash: 0, card: 0, online: 0, staffOrders: 0, staffDiscount: 0, expenses: 0, drawerExpenses: 0, netRevenue: 0 };
+      records.forEach(r => Object.keys(t).forEach(k => { t[k] += (r[k] || 0); }));
 
       return {
         name: 'Sales_Summary',
@@ -218,6 +287,40 @@ export default function Reports() {
           { header: 'Online',           width: 12, type: 'money', value: r => money(r.online),   total: () => money(t.online) },
           { header: 'Staff Orders',     width: 13, type: 'int',   value: r => r.staffOrders,     total: () => t.staffOrders },
           { header: 'Staff Discount',   width: 14, type: 'money', value: r => money(r.staffDiscount), total: () => money(t.staffDiscount) },
+          { header: 'Expenses',         width: 12, type: 'money', value: r => money(r.expenses),      total: () => money(t.expenses) },
+          { header: 'Paid From Drawer', width: 17, type: 'money', value: r => money(r.drawerExpenses), total: () => money(t.drawerExpenses) },
+          { header: 'Net Revenue',      width: 13, type: 'money', value: r => money(r.netRevenue),    total: () => money(t.netRevenue) },
+        ],
+      };
+    }
+
+    /*
+     * Expenses — one row per payout.
+     *
+     * Its own format rather than a column on another report: an expense has no
+     * order, no items and no payment method, so forcing it into the sales
+     * tables would leave most of every row blank.
+     */
+    if (reportFormat === 'expenses') {
+      const t = { amount: 0, drawer: 0 };
+      expenseDetail.forEach(r => {
+        t.amount += Number(r.amount) || 0;
+        if (r.from_drawer) t.drawer += Number(r.amount) || 0;
+      });
+
+      return {
+        name: 'Expenses',
+        records: expenseDetail,
+        columns: [
+          { header: 'Date',           width: 13, type: 'date',  value: r => excelDate(r.created_at), total: () => 'TOTAL' },
+          { header: 'Time',           width: 11, type: 'text',  value: r => moment(r.created_at).format('hh:mm A') },
+          { header: 'Branch',         width: 18, type: 'text',  value: r => r.branch_name || 'Unassigned' },
+          { header: 'Category',       width: 20, type: 'text',  value: r => r.category || '' },
+          { header: 'Description',    width: 40, type: 'text',  value: r => r.description || '' },
+          { header: 'Recorded By',    width: 18, type: 'text',  value: r => r.staff_name || 'Unknown' },
+          { header: 'From Drawer',    width: 13, type: 'text',  value: r => (r.from_drawer ? 'Yes' : 'No') },
+          { header: 'Shift #',        width: 9,  type: 'text',  value: r => (r.shift_id == null ? '' : r.shift_id) },
+          { header: 'Amount',         width: 13, type: 'money', value: r => money(r.amount), total: () => money(t.amount) },
         ],
       };
     }
@@ -236,6 +339,7 @@ export default function Reports() {
           { header: 'Order #',        width: 9,  type: 'int',   value: r => r.order_id, total: () => 'TOTAL' },
           { header: 'Date',           width: 13, type: 'date',  value: r => excelDate(r.created_at) },
           { header: 'Time',           width: 11, type: 'text',  value: r => moment(r.created_at).format('hh:mm A') },
+          { header: 'Branch',         width: 18, type: 'text',  value: r => r.branch_name || 'Unassigned' },
           { header: 'Cashier',        width: 16, type: 'text',  value: r => r.cashier_name || 'Unknown' },
           { header: 'Order Type',     width: 13, type: 'text',  value: r => r.order_type || 'Dine-in' },
           { header: 'Table/Token',    width: 13, type: 'text',  value: r => r.table_number || '' },
@@ -268,6 +372,7 @@ export default function Reports() {
         { header: 'Order #',         width: 9,  type: 'int',   value: r => r.id, total: () => 'TOTAL' },
         { header: 'Date',            width: 13, type: 'date',  value: r => excelDate(r.created_at) },
         { header: 'Time',            width: 11, type: 'text',  value: r => moment(r.created_at).format('hh:mm A') },
+        { header: 'Branch',          width: 18, type: 'text',  value: r => r.branch_name || 'Unassigned' },
         { header: 'Cashier',         width: 16, type: 'text',  value: r => r.cashier_name || 'Unknown' },
         { header: 'Order Type',      width: 13, type: 'text',  value: r => r.order_type || 'Dine-in' },
         { header: 'Table/Token',     width: 13, type: 'text',  value: r => r.table_number || '' },
@@ -275,6 +380,11 @@ export default function Reports() {
         { header: 'Status',          width: 12, type: 'text',  value: r => r.status || '' },
         { header: 'Staff Purchase',  width: 14, type: 'text',  value: r => (r.is_employee ? 'Yes' : 'No') },
         { header: 'Staff Discount',  width: 14, type: 'money', value: r => money(r.employee_discount), total: () => money(t.employeeDiscount) },
+        // Who the delivery went to. Blank on a dine-in order, and blank on a
+        // delivery where the cashier skipped the prompt.
+        { header: 'Customer',        width: 20, type: 'text',  value: r => r.customer_name || '' },
+        { header: 'Customer Phone',  width: 16, type: 'text',  value: r => r.customer_phone || '' },
+        { header: 'Customer Address',width: 34, type: 'text',  value: r => r.customer_address || '' },
         { header: 'Items',           width: 52, type: 'text',  value: r => r.items || '' },
         { header: 'Distinct Items',  width: 14, type: 'int',   value: r => Number(r.line_count) || 0, total: () => t.lines },
         { header: 'Total Qty',       width: 11, type: 'int',   value: r => Number(r.total_qty) || 0,  total: () => t.qty },
@@ -399,6 +509,31 @@ export default function Reports() {
       {/* Top Section - Date Filter Bar */}
       <div className="sticky top-0 z-10 flex items-center bg-white border-b border-gray-200 px-5 print:hidden" style={{ minHeight: 52 }}>
         <div className="flex items-center gap-2 overflow-x-auto whitespace-nowrap hide-scrollbar">
+          {/*
+            Which branch these figures describe. Sits ahead of the date chips
+            because it changes what the whole page is about, not just its
+            window — everything below, including the export, follows it.
+          */}
+          {isAdmin && branches.length > 0 && (
+            <>
+              <select
+                value={branchId}
+                onChange={e => setBranchId(e.target.value)}
+                className="text-xs font-semibold px-3 py-1.5 rounded-full border cursor-pointer focus:outline-none"
+                style={{
+                  background: branchId ? '#B91C1C' : '#FFFFFF',
+                  color: branchId ? '#FFFFFF' : '#374151',
+                  borderColor: branchId ? '#B91C1C' : '#D1D5DB',
+                }}
+              >
+                <option value="">All Branches</option>
+                {branches.map(b => (
+                  <option key={b.id} value={b.id}>{b.name}</option>
+                ))}
+              </select>
+              <div className="h-5 w-px bg-gray-300 mx-1" />
+            </>
+          )}
           {FILTER_CHIPS.map(chip => (
             <button
               key={chip.value}
@@ -447,6 +582,28 @@ export default function Reports() {
           <KpiCard title="Orders Processed" value={kpi.orders} icon={ShoppingBag} color="#3B82F6" />
           <KpiCard title="Avg. Order Value" value={formatMoney(kpi.avg_order_value)} icon={TrendingUp} color="#10B981" />
           <KpiCard title="Discounts Given" value={formatMoney(kpi.total_discounts)} icon={Tag} color="#EF4444" subtitle={`across ${detailedReport.filter(d => d.discount > 0).length} orders`} />
+        </div>
+
+        {/*
+          Takings alone flatter the day. A shop can ring up 40,000 and still be
+          down if 9,000 went out on fuel and supplies, so what was spent and
+          what is actually left get their own row directly beneath.
+        */}
+        <div className="grid grid-cols-2 gap-4 print:hidden">
+          <KpiCard
+            title="Expenses"
+            value={formatMoney(kpi.total_expenses)}
+            icon={Wallet}
+            color="#F59E0B"
+            subtitle={`${kpi.expense_count} ${kpi.expense_count === 1 ? 'entry' : 'entries'}${kpi.drawer_expenses ? ` · ${formatMoney(kpi.drawer_expenses)} from the drawer` : ''}`}
+          />
+          <KpiCard
+            title="Net Revenue"
+            value={formatMoney(kpi.net_revenue)}
+            icon={TrendingUp}
+            color={kpi.net_revenue < 0 ? '#DC2626' : '#059669'}
+            subtitle="Revenue less expenses"
+          />
         </div>
 
         {/* Section 2 - Revenue Over Time */}
@@ -518,6 +675,89 @@ export default function Reports() {
             </div>
           </div>
         </div>
+
+        {/*
+          Where the Money Went — the mirror of Sales by Category above.
+          Together the two answer the whole question: what came in, and what
+          went out. Only rendered when there is something to show, so a day
+          with no payouts is not padded with an empty panel.
+        */}
+        {expenseDetail.length > 0 && (
+          <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm print:hidden">
+            <div className="flex items-baseline justify-between mb-4">
+              <h3 className="text-sm font-bold text-gray-800">Where the Money Went</h3>
+              <span className="text-xs text-gray-500">
+                {formatMoney(kpi.total_expenses)} across {expenseDetail.length}{' '}
+                {expenseDetail.length === 1 ? 'entry' : 'entries'}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-6">
+              <div>
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">By category</p>
+                <div className="space-y-2">
+                  {expenseCategories.map(c => {
+                    const share = kpi.total_expenses > 0
+                      ? Math.round((Number(c.total) / kpi.total_expenses) * 100) : 0;
+                    return (
+                      <div key={c.category}>
+                        <div className="flex items-center justify-between text-sm mb-1">
+                          <span className="text-gray-700">{c.category}</span>
+                          <span className="font-medium text-gray-900">
+                            {formatMoney(c.total)}
+                            <span className="text-gray-400 font-normal ml-1">{share}%</span>
+                          </span>
+                        </div>
+                        <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
+                          <div className="h-full rounded-full" style={{ width: `${share}%`, background: '#F59E0B' }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div>
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Every entry</p>
+                <div className="overflow-y-auto" style={{ maxHeight: 260 }}>
+                  <table className="w-full text-xs">
+                    <thead className="sticky top-0 bg-white">
+                      <tr className="text-left text-gray-500 border-b border-gray-200">
+                        <th className="py-1.5 font-semibold">Date</th>
+                        <th className="py-1.5 font-semibold">Category</th>
+                        <th className="py-1.5 font-semibold">Recorded by</th>
+                        <th className="py-1.5 font-semibold text-right">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {expenseDetail.map(e => (
+                        <tr key={e.id} className="border-b border-gray-100">
+                          <td className="py-1.5 text-gray-600 whitespace-nowrap">
+                            {moment(e.created_at).format('DD MMM, HH:mm')}
+                          </td>
+                          <td className="py-1.5 text-gray-800">
+                            {e.category}
+                            {e.description ? <span className="text-gray-400"> — {e.description}</span> : null}
+                          </td>
+                          <td className="py-1.5 text-gray-600">{e.staff_name || '—'}</td>
+                          <td className="py-1.5 text-right font-medium text-gray-900 whitespace-nowrap">
+                            {formatMoney(e.amount)}
+                            {/* Marks money taken out of the till, which is what
+                                a shift's expected cash is reconciled against. */}
+                            {e.from_drawer ? <span className="text-amber-600 ml-1" title="Paid out of the drawer">&bull;</span> : null}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="text-[11px] text-gray-400 mt-2">
+                  <span className="text-amber-600">&bull;</span> paid out of the cash drawer
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Section 4 - Hourly Heatmap */}
         <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm print:hidden">
@@ -621,6 +861,12 @@ export default function Reports() {
                 >
                   Item Sales
                 </button>
+                <button
+                  onClick={() => setReportFormat('expenses')}
+                  className={`px-4 py-1.5 text-xs font-semibold rounded-md ${reportFormat === 'expenses' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500'}`}
+                >
+                  Expenses
+                </button>
               </div>
             </div>
           </div>
@@ -640,7 +886,20 @@ export default function Reports() {
                       <th className="py-3 px-4 text-center">Total Orders</th>
                       <th className="py-3 px-4 text-right">Gross Sales</th>
                       <th className="py-3 px-4 text-right">Discounts</th>
+                      <th className="py-3 px-4 text-right">Net Sales</th>
+                      <th className="py-3 px-4 text-right">Expenses</th>
+                      {/* Net of expenses — the figure the day actually left
+                          behind, and the one the KPI row leads with. */}
                       <th className="py-3 px-4 text-right text-orange-600">Net Revenue</th>
+                    </>
+                  ) : reportFormat === 'expenses' ? (
+                    <>
+                      <th className="py-3 px-4">Date</th>
+                      <th className="py-3 px-4">Category</th>
+                      <th className="py-3 px-4">Description</th>
+                      <th className="py-3 px-4">Recorded By</th>
+                      <th className="py-3 px-4 text-center">From Drawer</th>
+                      <th className="py-3 px-4 text-right text-orange-600">Amount</th>
                     </>
                   ) : reportFormat === 'items' ? (
                     <>
@@ -672,7 +931,7 @@ export default function Reports() {
                   Object.entries(
                     detailedReport.reduce((acc, row) => {
                       const date = moment(row.created_at).format('YYYY-MM-DD');
-                      if (!acc[date]) acc[date] = { date, orders: 0, revenue: 0, discounts: 0, net: 0 };
+                      if (!acc[date]) acc[date] = { date, orders: 0, revenue: 0, discounts: 0, net: 0, expenses: 0 };
                       acc[date].orders += 1;
                       // Gross (pre-discount) vs net (what was actually taken).
                       // These were both summing `total`, so the two money
@@ -682,14 +941,40 @@ export default function Reports() {
                       acc[date].discounts += Number(row.discount) || 0;
                       acc[date].net += Number(row.total) || 0;
                       return acc;
-                    }, {})
+                    }, expenseDetail.reduce((acc, e) => {
+                      // Seed the grouping with the expense days, so a day the
+                      // shop was shut but still paid out still gets a row.
+                      const date = moment(e.created_at).format('YYYY-MM-DD');
+                      if (!acc[date]) acc[date] = { date, orders: 0, revenue: 0, discounts: 0, net: 0, expenses: 0 };
+                      acc[date].expenses += Number(e.amount) || 0;
+                      return acc;
+                    }, {}))
                   ).sort((a,b) => a[0].localeCompare(b[0])).map(([date, d], i) => (
                     <tr key={date} className={`border-b border-gray-100 ${i % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}>
                       <td className="py-3 px-4 font-medium text-gray-900">{moment(date).format('MMM D, YYYY')}</td>
                       <td className="py-3 px-4 text-center text-gray-600">{d.orders}</td>
                       <td className="py-3 px-4 text-right text-gray-600">{formatMoney(d.revenue)}</td>
                       <td className="py-3 px-4 text-right text-red-500">-{formatMoney(d.discounts)}</td>
-                      <td className="py-3 px-4 text-right font-bold text-gray-900">{formatMoney(d.net)}</td>
+                      <td className="py-3 px-4 text-right text-gray-600">{formatMoney(d.net)}</td>
+                      <td className="py-3 px-4 text-right text-amber-600">{d.expenses > 0 ? `-${formatMoney(d.expenses)}` : '—'}</td>
+                      <td className="py-3 px-4 text-right font-bold text-gray-900">{formatMoney(d.net - d.expenses)}</td>
+                    </tr>
+                  ))
+                ) : reportFormat === 'expenses' ? (
+                  expenseDetail.map((e, i) => (
+                    <tr key={e.id} className={`border-b border-gray-100 ${i % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}>
+                      <td className="py-3 px-4 text-gray-500 text-xs whitespace-nowrap">{moment(e.created_at).format('MMM D, hh:mm A')}</td>
+                      <td className="py-3 px-4 font-medium text-gray-900">{e.category}</td>
+                      <td className="py-3 px-4 text-gray-600 text-xs">{e.description || '—'}</td>
+                      <td className="py-3 px-4 text-gray-600 text-xs">{e.staff_name || 'Unknown'}</td>
+                      <td className="py-3 px-4 text-center">
+                        {e.from_drawer ? (
+                          <span className="px-2 py-1 rounded text-[10px] font-bold bg-amber-100 text-amber-700">DRAWER</span>
+                        ) : (
+                          <span className="text-gray-300">—</span>
+                        )}
+                      </td>
+                      <td className="py-3 px-4 text-right font-bold text-gray-900">{formatMoney(e.amount)}</td>
                     </tr>
                   ))
                 ) : reportFormat === 'items' ? (
@@ -735,10 +1020,20 @@ export default function Reports() {
                     </tr>
                   ))
                 )}
-                {(reportFormat === 'items' ? lineItems.length : detailedReport.length) === 0 && (
+                {(reportFormat === 'items' ? lineItems.length
+                  : reportFormat === 'expenses' ? expenseDetail.length
+                  // Summary now has expense-only days, so it is empty only
+                  // when there were neither sales nor payouts.
+                  : reportFormat === 'summary' ? detailedReport.length + expenseDetail.length
+                  : detailedReport.length) === 0 && (
                   <tr>
-                    <td colSpan={reportFormat === 'summary' ? 5 : reportFormat === 'items' ? 7 : 8} className="py-8 text-center text-gray-400">
-                      No orders found for this date range.
+                    <td
+                      colSpan={reportFormat === 'summary' ? 7 : reportFormat === 'expenses' ? 6 : reportFormat === 'items' ? 7 : 8}
+                      className="py-8 text-center text-gray-400"
+                    >
+                      {reportFormat === 'expenses'
+                        ? 'No expenses recorded for this date range.'
+                        : 'No orders found for this date range.'}
                     </td>
                   </tr>
                 )}

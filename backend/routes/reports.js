@@ -5,21 +5,51 @@ const db = require('../db/database');
 const { isAdminRole } = require('../middleware/auth');
 
 /**
- * Restrict a manager to their own takings.
+ * Narrow a report to what the caller is entitled to, and to what they asked for.
  *
- * An administrator sees the whole shop. A manager sees only the sales they
- * rang up themselves, so with a manager per branch neither can read the
- * other's figures — or the shop's combined total — from the reports screen.
+ * Two filters, both applied here so that every query in this file gets them
+ * without twelve chances to forget one:
  *
- * The filter is applied here, from the session, rather than taken from a query
- * parameter: the client cannot ask to see somebody else's numbers.
+ * 1. **Who.** An administrator sees the whole shop. A manager sees only the
+ *    sales they rang up themselves, so with a manager per branch neither can
+ *    read the other's figures — or the shop's combined total. This comes from
+ *    the session, never from a query parameter: the client cannot ask to see
+ *    somebody else's numbers.
+ *
+ * 2. **Where.** An administrator may narrow to one branch with `?branch=<id>`.
+ *    A manager cannot: they are already restricted to their own sales, and
+ *    letting them pass a branch would only ever return their own figures or an
+ *    empty report, so the parameter is ignored for them.
  *
  * `alias` is the table reference used by the calling query — most say
  * `FROM orders`, the joined ones alias it to `o`.
  */
-function userScope(req, alias = 'orders') {
-  if (!req.user || isAdminRole(req.user.role)) return { sql: '', params: [] };
-  return { sql: ` AND ${alias}.cashier_id = ?`, params: [req.user.staffId] };
+function scopeOrders(req, alias = 'orders') {
+  const isAdmin = !req.user || isAdminRole(req.user.role);
+  if (!isAdmin) {
+    return { sql: ` AND ${alias}.cashier_id = ?`, params: [req.user.staffId] };
+  }
+
+  const branch = Number(req.query.branch);
+  if (!branch) return { sql: '', params: [] };
+  return { sql: ` AND ${alias}.branch_id = ?`, params: [branch] };
+}
+
+/**
+ * The same two filters, for the expenses table.
+ *
+ * Kept separate from `scopeOrders` because the columns differ — an expense is
+ * attributed by `staff_id`, an order by `cashier_id` — and conflating them
+ * would silently return every branch's spending on a scoped report.
+ */
+function scopeExpenses(req, alias = 'expenses') {
+  const isAdmin = !req.user || isAdminRole(req.user.role);
+  if (!isAdmin) {
+    return { sql: ` AND ${alias}.staff_id = ?`, params: [req.user.staffId] };
+  }
+  const branch = Number(req.query.branch);
+  if (!branch) return { sql: '', params: [] };
+  return { sql: ` AND ${alias}.branch_id = ?`, params: [branch] };
 }
 
 function getDateRange(req) {
@@ -32,7 +62,8 @@ function getDateRange(req) {
 // KPI summary
 router.get('/kpi', (req, res) => {
   const { from, to } = getDateRange(req);
-  const scope = userScope(req);
+  const scope = scopeOrders(req);
+  const expScope = scopeExpenses(req);
   try {
     const summary = db.prepare(`
       SELECT
@@ -57,6 +88,27 @@ router.get('/kpi', (req, res) => {
       AND status != 'voided'${scope.sql}
     `).get(prevFrom.toISOString().split('T')[0], prevTo.toISOString().split('T')[0], ...scope.params);
 
+    /*
+     * Expenses belong on the headline, not in a corner.
+     *
+     * Takings alone flatter the day: a shop can ring up 40,000 and still be
+     * down if 9,000 went out on fuel and supplies. `net_revenue` is what the
+     * owner actually keeps, and it is the figure the KPI row leads with.
+     *
+     * Every expense counts here, not only the ones paid out of the drawer —
+     * the drawer flag is about reconciling the till, whereas this is about
+     * what the day cost. That distinction is preserved in the split below so
+     * the two questions never get confused.
+     */
+    const expenses = db.prepare(`
+      SELECT
+        COALESCE(SUM(amount), 0) AS total_expenses,
+        COALESCE(SUM(CASE WHEN from_drawer = 1 THEN amount ELSE 0 END), 0) AS drawer_expenses,
+        COUNT(*) AS expense_count
+      FROM expenses
+      WHERE DATE(created_at) BETWEEN DATE(?) AND DATE(?)${expScope.sql}
+    `).get(from, to, ...expScope.params);
+
     const revenueTrend = prev.total_revenue > 0
       ? (((summary.total_revenue - prev.total_revenue) / prev.total_revenue) * 100).toFixed(1)
       : 0;
@@ -64,7 +116,13 @@ router.get('/kpi', (req, res) => {
       ? (((summary.total_orders - prev.total_orders) / prev.total_orders) * 100).toFixed(1)
       : 0;
 
-    res.json({ ...summary, revenue_trend: revenueTrend, orders_trend: ordersTrend });
+    res.json({
+      ...summary,
+      ...expenses,
+      net_revenue: summary.total_revenue - expenses.total_expenses,
+      revenue_trend: revenueTrend,
+      orders_trend: ordersTrend,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -74,7 +132,7 @@ router.get('/kpi', (req, res) => {
 router.get('/revenue-over-time', (req, res) => {
   const { from, to } = getDateRange(req);
   const groupBy = req.query.groupBy || 'day';
-  const scope = userScope(req);
+  const scope = scopeOrders(req);
   try {
     let query;
     if (groupBy === 'hour') {
@@ -121,7 +179,7 @@ router.get('/revenue-over-time', (req, res) => {
 // Top selling items
 router.get('/top-items', (req, res) => {
   const { from, to } = getDateRange(req);
-  const scope = userScope(req, 'o');
+  const scope = scopeOrders(req, 'o');
   try {
     const items = db.prepare(`
       SELECT
@@ -153,7 +211,7 @@ router.get('/top-items', (req, res) => {
 // Sales by category
 router.get('/by-category', (req, res) => {
   const { from, to } = getDateRange(req);
-  const scope = userScope(req, 'o');
+  const scope = scopeOrders(req, 'o');
   try {
     // A deal records the *deal's* id in order_items.menu_item_id, which shares
     // an id space with menu_items. A plain JOIN therefore matched a deal to an
@@ -172,6 +230,7 @@ router.get('/by-category', (req, res) => {
       FROM order_items oi
       JOIN orders o ON oi.order_id = o.id
       LEFT JOIN menu_items m ON oi.menu_item_id = m.id AND oi.is_deal = 0
+      LEFT JOIN branches br ON br.id = o.branch_id
       WHERE DATE(o.created_at) BETWEEN DATE(?) AND DATE(?)
       AND o.status != 'voided'${scope.sql}
       GROUP BY category
@@ -192,7 +251,7 @@ router.get('/by-category', (req, res) => {
 
 // Hourly heatmap — last 7 days by default
 router.get('/hourly-heatmap', (req, res) => {
-  const scope = userScope(req);
+  const scope = scopeOrders(req);
   try {
     const data = db.prepare(`
       SELECT
@@ -224,7 +283,7 @@ router.get('/hourly-heatmap', (req, res) => {
 // Cashier performance
 router.get('/cashier-performance', (req, res) => {
   const { from, to } = getDateRange(req);
-  const scope = userScope(req, 'o');
+  const scope = scopeOrders(req, 'o');
   try {
     const data = db.prepare(`
       SELECT
@@ -266,7 +325,7 @@ router.get('/cashier-performance', (req, res) => {
 router.get('/detailed', (req, res) => {
   const { from, to } = getDateRange(req);
   const includeVoided = req.query.include_voided === '1' || req.query.include_voided === 'true';
-  const scope = userScope(req, 'o');
+  const scope = scopeOrders(req, 'o');
 
   try {
     const orders = db.prepare(`
@@ -291,12 +350,14 @@ router.get('/detailed', (req, res) => {
         o.customer_address,
         o.delivery_charge,
         o.total,
+        br.name AS branch_name,
         COALESCE(SUM(oi.price * oi.quantity), 0) AS subtotal,
         COALESCE(SUM(oi.quantity), 0)            AS total_qty,
         COUNT(oi.id)                             AS line_count,
         GROUP_CONCAT(oi.name || ' x' || oi.quantity, ', ') AS items
       FROM orders o
       LEFT JOIN order_items oi ON oi.order_id = o.id
+      LEFT JOIN branches br ON br.id = o.branch_id
       WHERE DATE(o.created_at) BETWEEN DATE(?) AND DATE(?)
         ${includeVoided ? '' : "AND o.status != 'voided'"}${scope.sql}
       GROUP BY o.id
@@ -322,7 +383,7 @@ router.get('/detailed', (req, res) => {
 router.get('/line-items', (req, res) => {
   const { from, to } = getDateRange(req);
   const includeVoided = req.query.include_voided === '1' || req.query.include_voided === 'true';
-  const scope = userScope(req, 'o');
+  const scope = scopeOrders(req, 'o');
 
   try {
     const rows = db.prepare(`
@@ -334,6 +395,7 @@ router.get('/line-items', (req, res) => {
         o.table_number,
         o.payment_method,
         o.status,
+        br.name         AS branch_name,
         oi.name         AS item_name,
         CASE
           WHEN oi.is_deal = 1 THEN 'Deals'
@@ -359,22 +421,120 @@ router.get('/line-items', (req, res) => {
 // Daily summary
 router.get('/daily', (req, res) => {
   const { from, to } = getDateRange(req);
-  const scope = userScope(req);
+  const scope = scopeOrders(req);
+  const expScope = scopeExpenses(req);
   try {
+    /*
+     * The day-by-day summary, with what was spent set against what was taken.
+     *
+     * The list of days is a UNION of both tables rather than just the sales
+     * table. A day the shop was shut but still paid a supplier has expenses
+     * and no orders; driving the report off orders alone would drop that day
+     * entirely and quietly overstate the period's net.
+     */
     const data = db.prepare(`
+      WITH days AS (
+        SELECT DISTINCT DATE(created_at) AS date FROM orders
+         WHERE DATE(created_at) BETWEEN DATE(?) AND DATE(?)
+           AND status != 'voided'${scope.sql}
+        UNION
+        SELECT DISTINCT DATE(created_at) AS date FROM expenses
+         WHERE DATE(created_at) BETWEEN DATE(?) AND DATE(?)${expScope.sql}
+      )
       SELECT
-        DATE(created_at) as date,
-        COUNT(*) as total_orders,
-        COALESCE(SUM(total), 0) as total_revenue,
-        COALESCE(SUM(discount), 0) as total_discounts,
-        COALESCE(AVG(total), 0) as avg_order_value
-      FROM orders
-      WHERE DATE(created_at) BETWEEN DATE(?) AND DATE(?)
-      AND status != 'voided'${scope.sql}
-      GROUP BY DATE(created_at)
-      ORDER BY date DESC
-    `).all(from, to, ...scope.params);
+        d.date,
+        COALESCE(o.total_orders, 0)     AS total_orders,
+        COALESCE(o.total_revenue, 0)    AS total_revenue,
+        COALESCE(o.total_discounts, 0)  AS total_discounts,
+        COALESCE(o.avg_order_value, 0)  AS avg_order_value,
+        COALESCE(x.total_expenses, 0)   AS total_expenses,
+        COALESCE(x.drawer_expenses, 0)  AS drawer_expenses,
+        COALESCE(o.total_revenue, 0) - COALESCE(x.total_expenses, 0) AS net_revenue
+      FROM days d
+      LEFT JOIN (
+        SELECT DATE(created_at) AS date,
+               COUNT(*) AS total_orders,
+               SUM(total) AS total_revenue,
+               SUM(discount) AS total_discounts,
+               AVG(total) AS avg_order_value
+          FROM orders
+         WHERE status != 'voided'${scope.sql}
+         GROUP BY DATE(created_at)
+      ) o ON o.date = d.date
+      LEFT JOIN (
+        SELECT DATE(created_at) AS date,
+               SUM(amount) AS total_expenses,
+               SUM(CASE WHEN from_drawer = 1 THEN amount ELSE 0 END) AS drawer_expenses
+          FROM expenses
+         WHERE 1 = 1${expScope.sql}
+         GROUP BY DATE(created_at)
+      ) x ON x.date = d.date
+      ORDER BY d.date DESC
+    `).all(
+      from, to, ...scope.params,
+      from, to, ...expScope.params,
+      ...scope.params,
+      ...expScope.params
+    );
     res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * Expenses grouped by what the money went on.
+ *
+ * The mirror image of Sales by Category: that answers where the money came
+ * from, this answers where it went. Together they are the whole day.
+ */
+router.get('/expenses-by-category', (req, res) => {
+  const { from, to } = getDateRange(req);
+  const scope = scopeExpenses(req);
+  try {
+    res.json(db.prepare(`
+      SELECT
+        category,
+        COUNT(*) AS entries,
+        COALESCE(SUM(amount), 0) AS total,
+        COALESCE(SUM(CASE WHEN from_drawer = 1 THEN amount ELSE 0 END), 0) AS from_drawer_total
+      FROM expenses
+      WHERE DATE(created_at) BETWEEN DATE(?) AND DATE(?)${scope.sql}
+      GROUP BY category
+      ORDER BY total DESC
+    `).all(from, to, ...scope.params));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * Every expense in the period, line by line.
+ *
+ * Feeds both the on-screen table and the CSV/Excel export, so the owner can
+ * account for each payout individually — who recorded it, what for, whether it
+ * came out of the till, and which branch it belongs to.
+ */
+router.get('/expenses-detail', (req, res) => {
+  const { from, to } = getDateRange(req);
+  const scope = scopeExpenses(req, 'e');
+  try {
+    res.json(db.prepare(`
+      SELECT
+        e.id,
+        e.created_at,
+        e.category,
+        e.description,
+        e.amount,
+        e.from_drawer,
+        e.staff_name,
+        e.shift_id,
+        b.name AS branch_name
+      FROM expenses e
+      LEFT JOIN branches b ON b.id = e.branch_id
+      WHERE DATE(e.created_at) BETWEEN DATE(?) AND DATE(?)${scope.sql}
+      ORDER BY e.created_at DESC, e.id DESC
+    `).all(from, to, ...scope.params));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

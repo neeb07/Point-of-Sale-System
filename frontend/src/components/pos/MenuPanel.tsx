@@ -59,6 +59,35 @@ function getFoodImage(name: string): string {
   return `https://image.pollinations.ai/prompt/${prompt}?width=300&height=200&nologo=true&seed=${seed}`;
 }
 
+/**
+ * The category a customer picks a pizza flavour from.
+ *
+ * Deals were built against the old `Pizza` category, whose 35 items have since
+ * been retired; the seven live flavours sit in `Regular Pizza`. A deal slot is
+ * therefore recognised by *any* pizza category, but the flavours offered are
+ * always and only the regular ones — the deal price is set for a regular
+ * pizza, so letting a speciality be chosen would sell it below cost.
+ */
+const FLAVOUR_CATEGORY = 'Regular Pizza';
+const isPizzaLine = (category?: string) => !!category && category.includes('Pizza');
+
+/**
+ * One entry per pizza the deal actually includes.
+ *
+ * A line for two pizzas becomes two slots, because a customer buying a
+ * two-pizza deal will usually want two different flavours — collapsing them
+ * into one choice is the commonest way to get this wrong.
+ */
+function pizzaSlots(deal: Deal): { key: string; size: string | null }[] {
+  const slots: { key: string; size: string | null }[] = [];
+  (deal.items || []).filter(i => isPizzaLine(i.category)).forEach((line, li) => {
+    for (let n = 0; n < Math.max(1, line.quantity || 1); n++) {
+      slots.push({ key: `${li}-${n}`, size: line.variant_label || null });
+    }
+  });
+  return slots;
+}
+
 // DEAL_GROUPS previously lived here AND in Deals.tsx. Single source of
 // truth is now @/lib/constants so the two can never drift apart again.
 
@@ -70,6 +99,10 @@ export default function MenuPanel({ onAddToCart, search }: MenuPanelProps) {
   const [deals, setDeals] = useState<Deal[]>([]);
   const [dealsLoading, setDealsLoading] = useState(true);
   const [selectedVariantItem, setSelectedVariantItem] = useState<MenuItem | null>(null);
+  // The deal awaiting a flavour choice, and the flavour picked for each of its
+  // pizza slots (slot key -> flavour name).
+  const [flavourDeal, setFlavourDeal] = useState<Deal | null>(null);
+  const [flavourChoices, setFlavourChoices] = useState<Record<string, string>>({});
   const [selectedTopping, setSelectedTopping] = useState<number>(0);
 
   useEffect(() => {
@@ -233,7 +266,17 @@ export default function MenuPanel({ onAddToCart, search }: MenuPanelProps) {
         }}
       >
         {showDeals && filteredDeals.map(deal => (
-          <DealCard key={deal.id} deal={deal} onAdd={() => onAddToCart({ id: deal.id, name: deal.name, price: deal.price, isDeal: true })} />
+          <DealCard key={deal.id} deal={deal} onAdd={() => {
+            // A deal containing a pizza cannot go to the kitchen without a
+            // flavour, so ask before it reaches the cart rather than leaving
+            // the cashier to remember.
+            if (pizzaSlots(deal).length > 0) {
+              setFlavourDeal(deal);
+              setFlavourChoices({});
+            } else {
+              onAddToCart({ id: deal.id, name: deal.name, price: deal.price, isDeal: true });
+            }
+          }} />
         ))}
         {activeCategory !== 'Deals' && filteredItems.map(item => (
           <ItemCard key={item.id} item={item} onAdd={() => {
@@ -246,6 +289,122 @@ export default function MenuPanel({ onAddToCart, search }: MenuPanelProps) {
           }} />
         ))}
       </div>
+
+      {/*
+        Pizza flavour for a deal.
+
+        The deal's own price is unchanged — this only records which flavour the
+        kitchen should make. The chosen flavours are appended to the cart line's
+        name, which is what is stored on the order and printed on the kitchen
+        ticket, so the flavour survives a reprint.
+      */}
+      {flavourDeal && (() => {
+        const slots = pizzaSlots(flavourDeal);
+        const flavours = menuItems.filter(
+          (m: MenuItem) => m.category === FLAVOUR_CATEGORY
+        );
+        const allChosen = slots.every(sl => flavourChoices[sl.key]);
+
+        const confirm = () => {
+          const chosen = slots.map(sl => flavourChoices[sl.key]).filter(Boolean);
+          onAddToCart({
+            id: flavourDeal.id,
+            name: chosen.length ? `${flavourDeal.name} (${chosen.join(', ')})` : flavourDeal.name,
+            price: flavourDeal.price,
+            isDeal: true,
+          });
+          setFlavourDeal(null);
+          setFlavourChoices({});
+        };
+
+        return (
+          <div
+            style={{
+              position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+              backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 50,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}
+            onClick={() => setFlavourDeal(null)}
+          >
+            <div
+              style={{
+                background: '#FFFFFF', borderRadius: 16, width: '90%', maxWidth: 460,
+                maxHeight: '85vh', overflowY: 'auto', padding: 24,
+                display: 'flex', flexDirection: 'column', gap: 16,
+              }}
+              onClick={e => e.stopPropagation()}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 19, fontWeight: 700, color: '#111110' }}>
+                    {flavourDeal.name}
+                  </h3>
+                  <p style={{ margin: '4px 0 0', fontSize: 13, color: '#6B6B63' }}>
+                    {slots.length === 1
+                      ? 'Choose the pizza flavour'
+                      : `Choose a flavour for each of the ${slots.length} pizzas`}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setFlavourDeal(null)}
+                  style={{ background: 'none', border: 'none', fontSize: 22, color: '#9A9A92', cursor: 'pointer', lineHeight: 1 }}
+                >
+                  &times;
+                </button>
+              </div>
+
+              {flavours.length === 0 && (
+                <p style={{ fontSize: 13, color: '#DC2626', margin: 0 }}>
+                  No {FLAVOUR_CATEGORY} flavours are on the menu, so none can be chosen.
+                </p>
+              )}
+
+              {slots.map((slot, idx) => (
+                <div key={slot.key}>
+                  <p style={{ fontSize: 13, fontWeight: 600, color: '#374151', margin: '0 0 8px' }}>
+                    Pizza {slots.length > 1 ? idx + 1 : ''}{slot.size ? ` — ${slot.size}` : ''}
+                  </p>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
+                    {flavours.map((f: MenuItem) => {
+                      const picked = flavourChoices[slot.key] === f.name;
+                      return (
+                        <button
+                          key={f.id}
+                          onClick={() => setFlavourChoices(prev => ({ ...prev, [slot.key]: f.name }))}
+                          style={{
+                            padding: '11px 12px', borderRadius: 10, textAlign: 'left',
+                            fontSize: 14, fontWeight: 600,
+                            border: `1.5px solid ${picked ? '#DC2626' : '#EBEBEB'}`,
+                            background: picked ? '#FEEFD0' : '#FFFFFF',
+                            color: picked ? '#DC2626' : '#111110',
+                            cursor: 'pointer', transition: 'all 0.15s',
+                          }}
+                        >
+                          {f.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+
+              <button
+                onClick={confirm}
+                disabled={!allChosen}
+                style={{
+                  height: 46, borderRadius: 10, border: 'none', marginTop: 4,
+                  background: allChosen ? '#111111' : '#EBEBEB',
+                  color: allChosen ? '#FFFFFF' : '#9A9A92',
+                  fontSize: 15, fontWeight: 700,
+                  cursor: allChosen ? 'pointer' : 'not-allowed',
+                }}
+              >
+                {allChosen ? 'Add to Order' : 'Choose a flavour to continue'}
+              </button>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Variant Selection Modal */}
       {selectedVariantItem && (

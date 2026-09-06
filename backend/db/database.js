@@ -258,6 +258,64 @@ try { db.exec("UPDATE staff SET role = 'Manager' WHERE role = 'Cashier';"); } ca
 try { db.exec("ALTER TABLE orders ADD COLUMN voided_by TEXT DEFAULT NULL;"); } catch(e) {}
 try { db.exec("ALTER TABLE orders ADD COLUMN voided_by_id INTEGER DEFAULT NULL;"); } catch(e) {}
 
+/*
+ * Branches.
+ *
+ * The shop runs two, and the owner needs each one's figures separately. Staff
+ * belong to a branch, and every sale and expense is stamped with the branch of
+ * whoever recorded it, so a report can be filtered to one site.
+ *
+ * This is also the groundwork the two-branch cloud sync needs: without a branch
+ * on each row there is no way to tell two tills' data apart once it is merged.
+ */
+db.exec(`
+  CREATE TABLE IF NOT EXISTS branches (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    active INTEGER DEFAULT 1,
+    created_at DATETIME DEFAULT (datetime('now', 'localtime'))
+  );
+`);
+
+const branchCount = db.prepare('SELECT COUNT(*) AS c FROM branches').get().c;
+if (branchCount === 0) {
+  const insertBranch = db.prepare('INSERT INTO branches (name) VALUES (?)');
+  ['E-18 Branch', 'CBR Town Branch'].forEach(n => insertBranch.run(n));
+}
+
+try { db.exec("ALTER TABLE staff ADD COLUMN branch_id INTEGER DEFAULT NULL;"); } catch(e) {}
+try { db.exec("ALTER TABLE orders ADD COLUMN branch_id INTEGER DEFAULT NULL;"); } catch(e) {}
+try { db.exec("ALTER TABLE expenses ADD COLUMN branch_id INTEGER DEFAULT NULL;"); } catch(e) {}
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_orders_branch ON orders(branch_id);"); } catch(e) {}
+
+/*
+ * Delivery customers.
+ *
+ * Built up from delivery orders so a regular does not have to dictate their
+ * address every time — the cashier types a few letters of the name and picks
+ * them. Keyed on the phone number where there is one, since that is what
+ * actually identifies a household; two "Ahmed"s at different addresses stay
+ * separate, and the same Ahmed ringing from a new address updates his record
+ * rather than creating a duplicate.
+ */
+db.exec(`
+  CREATE TABLE IF NOT EXISTS customers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT,
+    phone TEXT,
+    address TEXT,
+    order_count INTEGER DEFAULT 0,
+    total_spent REAL DEFAULT 0,
+    first_order_at DATETIME,
+    last_order_at DATETIME,
+    created_at DATETIME DEFAULT (datetime('now', 'localtime'))
+  );
+`);
+// Partial index: many customers may have no phone, but a phone that is given
+// must identify exactly one of them.
+try { db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone) WHERE phone IS NOT NULL;"); } catch(e) {}
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_customers_name ON customers(name);"); } catch(e) {}
+
 // Delivery orders capture the customer's details before the receipt prints, so
 // the rider knows where the food is going. All optional — the cashier can skip
 // the prompt when a regular rings up.

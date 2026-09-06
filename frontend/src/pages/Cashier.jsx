@@ -5,7 +5,7 @@ import PageHeader from '@/components/pos-ui/PageHeader';
 import DataTable from '@/components/pos-ui/DataTable';
 import Modal from '@/components/pos-ui/Modal';
 import Toast from '@/components/pos-ui/Toast';
-import { staffAPI } from '@/api/index';
+import { staffAPI, branchesAPI } from '@/api/index';
 import { useSettings } from '@/lib/SettingsContext';
 
 const AVATAR_COLORS = ['#DC2626', '#8B5CF6', '#3B82F6', '#10B981', '#EF4444', '#F59E0B'];
@@ -121,6 +121,12 @@ function StaffCard({ staff, onEdit, onResetPin, onToggleActive, menuOpen, onMenu
         <span style={{ background: '#F3F4F6', color: '#374151', fontSize: 12, fontWeight: 600, padding: '3px 12px', borderRadius: 9999 }}>
           {staff.role}
         </span>
+        {/* Which site they run — an admin covers both and shows nothing. */}
+        {staff.branch_name && (
+          <span style={{ background: '#FEF2F2', color: '#B91C1C', fontSize: 12, fontWeight: 600, padding: '3px 12px', borderRadius: 9999, marginLeft: 6 }}>
+            {staff.branch_name}
+          </span>
+        )}
       </div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 8 }}>
         <div style={{ width: 8, height: 8, borderRadius: 9999, background: isActive ? '#22C55E' : '#D1D5DB' }} />
@@ -150,8 +156,17 @@ export default function Cashier() {
   const [toast, setToast] = useState(null);
   const [perfDate, setPerfDate] = useState('today');
   const [performance, setPerformance] = useState([]);
-  const [form, setForm] = useState({ name: '', role: 'Manager', color: '#DC2626', pin: '', confirmPin: '' });
+  const [form, setForm] = useState({ name: '', role: 'Manager', color: '#DC2626', pin: '', confirmPin: '', branch_id: '' });
+  const [branches, setBranches] = useState([]);
   const [errors, setErrors] = useState({});
+
+  useEffect(() => {
+    // Without the list the branch picker simply does not appear and accounts
+    // are created unassigned, which is what happened before branches existed.
+    branchesAPI.getAll()
+      .then(rows => setBranches(Array.isArray(rows) ? rows : []))
+      .catch(() => setBranches([]));
+  }, []);
 
   const loadStaff = async () => {
     try {
@@ -215,14 +230,14 @@ export default function Cashier() {
 
   const openAdd = () => {
     setEditingStaff(null);
-    setForm({ name: '', role: 'Cashier', color: '#DC2626', pin: '', confirmPin: '' });
+    setForm({ name: '', role: 'Manager', color: '#DC2626', pin: '', confirmPin: '', branch_id: '' });
     setErrors({});
     setModalOpen(true);
   };
 
   const openEdit = (s) => {
     setEditingStaff(s);
-    setForm({ name: s.name, role: s.role, color: s.color || '#DC2626', pin: '', confirmPin: '' });
+    setForm({ name: s.name, role: s.role, color: s.color || '#DC2626', pin: '', confirmPin: '', branch_id: s.branch_id ? String(s.branch_id) : '' });
     setErrors({});
     setModalOpen(true);
   };
@@ -242,9 +257,9 @@ export default function Cashier() {
     if (!validate()) return;
     try {
       if (editingStaff) {
-        await staffAPI.update(editingStaff.id, { name: form.name, role: form.role, color: form.color, pin: form.pin || undefined });
+        await staffAPI.update(editingStaff.id, { name: form.name, role: form.role, color: form.color, pin: form.pin || undefined, branch_id: form.branch_id ? Number(form.branch_id) : null });
       } else {
-        await staffAPI.create({ name: form.name, role: form.role, pin: form.pin, color: form.color });
+        await staffAPI.create({ name: form.name, role: form.role, pin: form.pin, color: form.color, branch_id: form.branch_id ? Number(form.branch_id) : null });
       }
       setModalOpen(false);
       loadStaff();
@@ -415,6 +430,42 @@ export default function Cashier() {
               ))}
             </div>
           </div>
+
+          {/*
+            Which branch this person runs.
+
+            Offered only for a manager: an admin oversees both sites, so tying
+            them to one would stamp their own sales and expenses with a single
+            branch and skew that branch's figures.
+          */}
+          {form.role === 'Manager' && branches.length > 0 && (
+            <div>
+              <label style={{ fontSize: 14, fontWeight: 600, color: '#111827' }}>Branch</label>
+              <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+                {branches.map((b) => {
+                  const picked = String(form.branch_id) === String(b.id);
+                  return (
+                    <button
+                      key={b.id}
+                      onClick={() => setForm({ ...form, branch_id: picked ? '' : String(b.id) })}
+                      style={{
+                        padding: '8px 16px', borderRadius: 8, fontSize: 14, cursor: 'pointer',
+                        background: picked ? '#DC2626' : '#FFFFFF',
+                        color: picked ? '#FFFFFF' : '#374151',
+                        border: picked ? '1px solid #DC2626' : '1px solid #E5E7EB',
+                      }}
+                    >
+                      {b.name}
+                    </button>
+                  );
+                })}
+              </div>
+              <div style={{ fontSize: 12, color: '#6B7280', marginTop: 6 }}>
+                Every sale and expense they record is filed under this branch.
+                {editingStaff ? ' Changing it does not move sales they have already rung up.' : ''}
+              </div>
+            </div>
+          )}
 
           <div>
             <label style={{ fontSize: 14, fontWeight: 600, color: '#111827' }}>Avatar Color</label>

@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db/database');
+const { branchIdForStaff } = require('../db/branch');
 
 /**
  * Petty cash paid out — rider fuel, staff lunch, a repair, and so on.
@@ -93,8 +94,8 @@ router.post('/', (req, res) => {
 
     const info = db.prepare(`
       INSERT INTO expenses
-        (shift_id, staff_id, staff_name, category, description, amount, from_drawer, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
+        (shift_id, staff_id, staff_name, category, description, amount, from_drawer, branch_id, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
     `).run(
       fromDrawer && openShift ? openShift.id : null,
       // Attribution comes from the session, never the request body.
@@ -103,7 +104,8 @@ router.post('/', (req, res) => {
       String(category).trim(),
       description ? String(description).trim() : null,
       Math.round(value * 100) / 100,
-      fromDrawer
+      fromDrawer,
+      branchIdForStaff(req.user && req.user.staffId)
     );
 
     const created = db.prepare('SELECT * FROM expenses WHERE id = ?').get(info.lastInsertRowid);
