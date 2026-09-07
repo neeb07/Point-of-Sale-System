@@ -58,7 +58,7 @@ router.get('/status', (req, res) => {
  */
 router.post('/now', async (req, res) => {
   try {
-    const result = await push.syncOnce();
+    const result = await push.syncAll();
     const s = push.status();
     res.json({
       ...result,

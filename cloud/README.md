@@ -17,11 +17,17 @@ key alone — a `branch_id` in a request body is ignored.
 
 ```
 npm install
+export DATABASE_URL="postgresql://postgres:...@db.<project>.supabase.co:5432/postgres"
 npm start                 # http://127.0.0.1:4000
 ```
 
-The database is created on first run at `data/blaze_cloud.db`
-(override with `BLAZE_CLOUD_DATA`).
+`DATABASE_URL` comes from Supabase: *Project Settings -> Database -> Connection
+string -> URI*. The schema is created on first run and is idempotent, so a
+deploy is just a restart.
+
+The server refuses to start if it cannot reach the database. That is
+deliberate: one that answered requests against an unreachable database would
+report an empty shop, which reads exactly like a shop that sold nothing.
 
 ## Provisioning
 
@@ -102,17 +108,33 @@ Two environment variables are load-bearing:
   the day before — silently, and only for the early morning, which is exactly
   the kind of discrepancy nobody notices until the month does not add up.
 
-## Why SQLite
+## Supabase, and what it costs
 
-The same engine the tills run. `backend/routes/reports.js` is ~600 lines of
-SQLite-specific SQL (`strftime`, `DATE()`, `datetime('now','localtime')`); on
-another engine it would have to be rewritten and then kept correct in two
-dialects forever, with every rewrite checked against the original — a silently
-different `GROUP BY` produces plausible wrong numbers rather than an error.
-Same engine, same schema, so that file is copied rather than ported.
+Supabase is Postgres, and the tills are SQLite. That difference is the single
+largest source of risk in this codebase.
 
-At two branches with a single writer, SQLite in WAL mode is comfortably
-over-specified.
+`routes/reports.js` is ~600 lines translated from `backend/routes/reports.js`.
+Every `strftime`, `DATE()` and `GROUP_CONCAT` had to change, and the danger is
+not a crash: it is a query that still runs and quietly returns a different
+number. Four traps, all of which bit during the port:
+
+1. **`pg` returns `bigint` and `numeric` as strings**, to avoid silent precision
+   loss. An uncast `COUNT(*)` arrives as `"32"` and reaches the dashboard as a
+   string. Every aggregate is therefore cast in SQL.
+2. **`x::date` returns a JS `Date`**, which JSON-encodes as a full ISO
+   timestamp — so an evening sale on the 7th comes back as the 6th. Dates in
+   SELECT lists are formatted with `to_char`, not cast.
+3. **Postgres requires SELECT and GROUP BY to agree**; SQLite did not.
+4. **Timestamps are stored as text.** The tills write local wall-clock time with
+   no zone; `timestamptz` would make Postgres attach the *server's* zone, so the
+   same sale would read differently depending on where the server ran.
+
+The guard against all of this is the comparison test, which syncs a till's
+history up and checks all ten report endpoints against the till's own output
+field by field. Run it after any change to either file.
+
+What Supabase buys in return: managed backups, no disk to run out of, no
+question about network storage, and a console for looking at the data.
 
 ## The dashboard
 
@@ -137,7 +159,8 @@ separately. If no build is present the API still runs.
 ## Layout
 
 ```
-db/database.js          schema; WAL; opens data/blaze_cloud.db
+db/pg.js                connection pool; `?` -> `$n` conversion; transactions
+db/schema.js            the Postgres schema, applied idempotently on boot
 db/keys.js              branch key generation, hashing, constant-time compare
 middleware/branch-auth.js   Bearer branch key -> req.branch
 middleware/session.js       httpOnly cookie -> req.user; sessions on disk

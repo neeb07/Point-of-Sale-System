@@ -18,7 +18,8 @@
  */
 
 const bcrypt = require('bcryptjs');
-const db = require('../db/database');
+const db = require('../db/pg');
+const { createSchema } = require('../db/schema');
 const { generateKey, hashKey } = require('../db/keys');
 
 const [, , command, ...args] = process.argv;
@@ -28,30 +29,30 @@ function fail(message) {
   process.exit(1);
 }
 
-function createBranch(idArg, name) {
+async function createBranch(idArg, name) {
   const id = Number(idArg);
   if (!Number.isInteger(id) || id <= 0) fail('Branch id must be a positive whole number.');
   if (!name) fail('Branch name required.');
 
-  if (db.prepare('SELECT 1 FROM branches WHERE id = ?').get(id)) {
+  if (await db.one('SELECT 1 FROM branches WHERE id = ?', [id])) {
     fail(`Branch ${id} already exists. Use "rekey ${id}" to issue a new key.`);
   }
 
   const key = generateKey();
-  db.prepare('INSERT INTO branches (id, name, api_key_hash) VALUES (?, ?, ?)')
-    .run(id, name, hashKey(key));
+  await db.run('INSERT INTO branches (id, name, api_key_hash) VALUES (?, ?, ?)',
+    [id, name, hashKey(key)]);
 
   console.log(`\n  Branch ${id} created: ${name}`);
   printKey(id, name, key);
 }
 
-function rekeyBranch(idArg) {
+async function rekeyBranch(idArg) {
   const id = Number(idArg);
-  const branch = db.prepare('SELECT id, name FROM branches WHERE id = ?').get(id);
+  const branch = await db.one('SELECT id, name FROM branches WHERE id = ?', [id]);
   if (!branch) fail(`No branch ${idArg}.`);
 
   const key = generateKey();
-  db.prepare('UPDATE branches SET api_key_hash = ? WHERE id = ?').run(hashKey(key), id);
+  await db.run('UPDATE branches SET api_key_hash = ? WHERE id = ?', [hashKey(key), id]);
 
   console.log(`\n  New key issued for branch ${id}. The previous key stopped working just now.`);
   printKey(branch.id, branch.name, key);
@@ -82,20 +83,20 @@ async function createOwner(email, password, name) {
   }
 
   const normalised = String(email).trim().toLowerCase();
-  if (db.prepare('SELECT 1 FROM users WHERE email = ?').get(normalised)) {
+  if (await db.one('SELECT 1 FROM users WHERE email = ?', [normalised])) {
     fail(`${normalised} already exists.`);
   }
 
   const hash = await bcrypt.hash(String(password), 10);
-  db.prepare('INSERT INTO users (email, password_hash, name, role) VALUES (?, ?, ?, ?)')
-    .run(normalised, hash, name || null, 'owner');
+  await db.run('INSERT INTO users (email, password_hash, name, role) VALUES (?, ?, ?, ?)',
+    [normalised, hash, name || null, 'owner']);
 
   console.log(`\n  Owner account created: ${normalised}\n`);
 }
 
-function list() {
-  const branches = db.prepare('SELECT id, name, active, created_at FROM branches ORDER BY id').all();
-  const users = db.prepare('SELECT id, email, name, role, branch_id, active FROM users ORDER BY id').all();
+async function list() {
+  const branches = await db.q('SELECT id, name, active, created_at FROM branches ORDER BY id');
+  const users = await db.q('SELECT id, email, name, role, branch_id, active FROM users ORDER BY id');
 
   console.log('\n  Branches');
   if (!branches.length) console.log('    (none — run "provision.js branch 1 \\"E-18 Branch\\"")');
@@ -110,11 +111,15 @@ function list() {
 }
 
 (async () => {
+  // The schema is idempotent, so provisioning a fresh Supabase project needs no
+  // separate migration step: the first command creates the tables it needs.
+  await createSchema(db);
+
   switch (command) {
-    case 'branch': createBranch(args[0], args[1]); break;
-    case 'rekey':  rekeyBranch(args[0]); break;
+    case 'branch': await createBranch(args[0], args[1]); break;
+    case 'rekey':  await rekeyBranch(args[0]); break;
     case 'owner':  await createOwner(args[0], args[1], args[2]); break;
-    case 'list':   list(); break;
+    case 'list':   await list(); break;
     default:
       console.log(`
   Usage:
@@ -124,5 +129,11 @@ function list() {
     node scripts/provision.js list                     show what exists
 `);
   }
-  db.close();
-})();
+  await db.close();
+})().catch((err) => {
+  // Almost always a bad or missing DATABASE_URL, so say so rather than
+  // printing a bare connection stack trace.
+  console.error(`\n  ${err.message}\n`);
+  console.error('  Check DATABASE_URL points at the Supabase connection string.\n');
+  process.exit(1);
+});

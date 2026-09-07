@@ -9,12 +9,8 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const router = express.Router();
 
-const db = require('../db/database');
+const db = require('../db/pg');
 const { createSession, destroySession, requireUser } = require('../middleware/session');
-
-const findUserStmt = db.prepare(
-  'SELECT id, email, password_hash, name, role, branch_id, active FROM users WHERE email = ?'
-);
 
 /*
  * Rate limiting.
@@ -65,7 +61,10 @@ router.post('/login', async (req, res) => {
   }
 
   try {
-    const user = findUserStmt.get(String(email).trim().toLowerCase());
+    const user = await db.one(
+      'SELECT id, email, password_hash, name, role, branch_id, active FROM users WHERE email = $1',
+      [String(email).trim().toLowerCase()]
+    );
 
     /*
      * Always run a bcrypt comparison, even when the account does not exist.
@@ -83,7 +82,7 @@ router.post('/login', async (req, res) => {
     }
 
     attempts.delete(key);
-    createSession(res, user);
+    await createSession(res, user);
 
     res.json({
       id: user.id,
@@ -98,8 +97,8 @@ router.post('/login', async (req, res) => {
   }
 });
 
-router.post('/logout', (req, res) => {
-  destroySession(req, res);
+router.post('/logout', async (req, res) => {
+  await destroySession(req, res);
   res.json({ success: true });
 });
 

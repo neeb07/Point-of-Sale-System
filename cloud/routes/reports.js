@@ -1,31 +1,40 @@
 /**
  * Reporting — the cloud's copy.
  *
- * Ported from backend/routes/reports.js, and deliberately kept as close to it
- * as possible. Because the cloud runs SQLite too, the queries carry over
- * unchanged: `strftime`, `DATE()` and the rest all behave identically, so there
- * is no dialect rewrite to get subtly wrong. A silently different `GROUP BY`
- * produces plausible wrong numbers rather than an error, which is exactly the
- * bug you never find.
+ * Ported from `backend/routes/reports.js`. It is kept as textually close to the
+ * till's copy as the dialect allows, because when the till's reporting changes
+ * this has to change with it, and a readable diff is what makes that possible.
  *
- * Only three things differ from the till's copy, each marked CLOUD: below.
+ * **This is a Postgres translation, not a copy.** The earlier SQLite cloud let
+ * the file across untouched; Supabase does not. Every difference below is a
+ * place where a mistake would produce a query that still runs and quietly
+ * returns a different number — which is why the port is guarded by a test that
+ * compares all ten endpoints against the till's output field by field, rather
+ * than by reading.
  *
- *   1. Scoping. The till scopes a manager to their own sales; here the owner
- *      sees everything and may narrow with `?branch=`. A future per-branch
- *      login is pinned to its branch and cannot widen.
- *   2. Category comes from the stored `order_items.category` rather than a join
- *      to `menu_items` — menu item ids are per-machine, so that join is not
- *      resolvable here. See cloud/db/sales-schema.js.
- *   3. `shift_id` is `local_shift_id`, since the till's ids are only unique
- *      within their own branch.
+ * What had to change, beyond `?` placeholders (handled mechanically by `toPg`
+ * in db/pg.js):
  *
- * When the till's reporting changes, this file must change with it. Keeping
- * them textually similar is what makes that diff readable.
+ *   - `DATE(x)` -> `x::date`. Timestamps are stored as the till's own local
+ *     wall-clock text, so casting compares exactly what the shop recorded.
+ *   - `strftime(...)` -> `to_char(...)` / `EXTRACT(...)`. No equivalent exists.
+ *   - `GROUP_CONCAT` -> `STRING_AGG`.
+ *   - **Every aggregate is cast.** `pg` returns `bigint` and `numeric` as
+ *     strings to avoid precision loss, so an uncast `COUNT(*)` arrives as "32"
+ *     and reaches the dashboard as a string.
+ *   - **Dates are formatted, not cast, in SELECT lists.** `x::date` returns a
+ *     JS Date that JSON-encodes as a full ISO timestamp, so an evening sale on
+ *     the 7th would come back as the 6th.
+ *   - Postgres requires SELECT and GROUP BY to agree; SQLite did not.
+ *
+ * And three differences from the till that are about role rather than dialect,
+ * each marked CLOUD: below — scoping, the stored `order_items.category`, and
+ * reporting the till's own `local_id` as the order number.
  */
 
 const express = require('express');
 const router = express.Router();
-const db = require('../db/database');
+const db = require('../db/pg');
 
 const { localToday } = require('../db/local-date');
 const { requireUser } = require('../middleware/session');
@@ -65,33 +74,33 @@ function getDateRange(req) {
 }
 
 // KPI summary
-router.get('/kpi', requireUser, (req, res) => {
+router.get('/kpi', requireUser, async (req, res) => {
   const { from, to } = getDateRange(req);
   const scope = scopeOrders(req);
   const expScope = scopeExpenses(req);
   try {
-    const summary = db.prepare(`
+    const summary = await db.one(`
       SELECT
-        COUNT(*) as total_orders,
-        COALESCE(SUM(total), 0) as total_revenue,
-        COALESCE(AVG(total), 0) as avg_order_value,
-        COALESCE(SUM(discount), 0) as total_discounts
+        COUNT(*)::int as total_orders,
+        COALESCE(SUM(total)::float8, 0) as total_revenue,
+        COALESCE(AVG(total)::float8, 0) as avg_order_value,
+        COALESCE(SUM(discount)::float8, 0) as total_discounts
       FROM orders
-      WHERE DATE(created_at) BETWEEN DATE(?) AND DATE(?)
+      WHERE created_at::date BETWEEN ?::date AND ?::date
       AND status != 'voided'${scope.sql}
-    `).get(from, to, ...scope.params);
+    `, [from, to, ...scope.params]);
 
     const prevFrom = new Date(from);
     prevFrom.setDate(prevFrom.getDate() - (new Date(to) - new Date(from)) / 86400000 - 1);
     const prevTo = new Date(from);
     prevTo.setDate(prevTo.getDate() - 1);
 
-    const prev = db.prepare(`
-      SELECT COALESCE(SUM(total), 0) as total_revenue, COUNT(*) as total_orders
+    const prev = await db.one(`
+      SELECT COALESCE(SUM(total)::float8, 0) as total_revenue, COUNT(*)::int as total_orders
       FROM orders
-      WHERE DATE(created_at) BETWEEN DATE(?) AND DATE(?)
+      WHERE created_at::date BETWEEN ?::date AND ?::date
       AND status != 'voided'${scope.sql}
-    `).get(prevFrom.toISOString().split('T')[0], prevTo.toISOString().split('T')[0], ...scope.params);
+    `, [prevFrom.toISOString().split('T')[0], prevTo.toISOString().split('T')[0], ...scope.params]);
 
     /*
      * Expenses belong on the headline, not in a corner.
@@ -105,14 +114,14 @@ router.get('/kpi', requireUser, (req, res) => {
      * what the day cost. That distinction is preserved in the split below so
      * the two questions never get confused.
      */
-    const expenses = db.prepare(`
+    const expenses = await db.one(`
       SELECT
-        COALESCE(SUM(amount), 0) AS total_expenses,
-        COALESCE(SUM(CASE WHEN from_drawer = 1 THEN amount ELSE 0 END), 0) AS drawer_expenses,
-        COUNT(*) AS expense_count
+        COALESCE(SUM(amount)::float8, 0) AS total_expenses,
+        COALESCE(SUM(CASE WHEN from_drawer = 1 THEN amount ELSE 0 END)::float8, 0) AS drawer_expenses,
+        COUNT(*)::int AS expense_count
       FROM expenses
-      WHERE DATE(created_at) BETWEEN DATE(?) AND DATE(?)${expScope.sql}
-    `).get(from, to, ...expScope.params);
+      WHERE created_at::date BETWEEN ?::date AND ?::date${expScope.sql}
+    `, [from, to, ...expScope.params]);
 
     const revenueTrend = prev.total_revenue > 0
       ? (((summary.total_revenue - prev.total_revenue) / prev.total_revenue) * 100).toFixed(1)
@@ -134,7 +143,7 @@ router.get('/kpi', requireUser, (req, res) => {
 });
 
 // Revenue over time
-router.get('/revenue-over-time', requireUser, (req, res) => {
+router.get('/revenue-over-time', requireUser, async (req, res) => {
   const { from, to } = getDateRange(req);
   const groupBy = req.query.groupBy || 'day';
   const scope = scopeOrders(req);
@@ -142,39 +151,39 @@ router.get('/revenue-over-time', requireUser, (req, res) => {
     let query;
     if (groupBy === 'hour') {
       query = `
-        SELECT strftime('%H:00', created_at) as period,
-               COALESCE(SUM(total), 0) as revenue,
-               COUNT(*) as orders
+        SELECT to_char(created_at::timestamp, 'HH24:00') as period,
+               COALESCE(SUM(total)::float8, 0) as revenue,
+               COUNT(*)::int as orders
         FROM orders
-        WHERE DATE(created_at) BETWEEN DATE(?) AND DATE(?)
+        WHERE created_at::date BETWEEN ?::date AND ?::date
         AND status != 'voided'${scope.sql}
-        GROUP BY strftime('%H', created_at)
-        ORDER BY strftime('%H', created_at)
+        GROUP BY to_char(created_at::timestamp, 'HH24:00')
+        ORDER BY to_char(created_at::timestamp, 'HH24:00')
       `;
     } else if (groupBy === 'month') {
       query = `
-        SELECT strftime('%Y-%m', created_at) as period,
-               COALESCE(SUM(total), 0) as revenue,
-               COUNT(*) as orders
+        SELECT to_char(created_at::timestamp, 'YYYY-MM') as period,
+               COALESCE(SUM(total)::float8, 0) as revenue,
+               COUNT(*)::int as orders
         FROM orders
-        WHERE DATE(created_at) BETWEEN DATE(?) AND DATE(?)
+        WHERE created_at::date BETWEEN ?::date AND ?::date
         AND status != 'voided'${scope.sql}
-        GROUP BY strftime('%Y-%m', created_at)
+        GROUP BY to_char(created_at::timestamp, 'YYYY-MM')
         ORDER BY period
       `;
     } else {
       query = `
-        SELECT DATE(created_at) as period,
-               COALESCE(SUM(total), 0) as revenue,
-               COUNT(*) as orders
+        SELECT to_char(created_at::timestamp, 'YYYY-MM-DD') as period,
+               COALESCE(SUM(total)::float8, 0) as revenue,
+               COUNT(*)::int as orders
         FROM orders
-        WHERE DATE(created_at) BETWEEN DATE(?) AND DATE(?)
+        WHERE created_at::date BETWEEN ?::date AND ?::date
         AND status != 'voided'${scope.sql}
-        GROUP BY DATE(created_at)
-        ORDER BY DATE(created_at)
+        GROUP BY to_char(created_at::timestamp, 'YYYY-MM-DD')
+        ORDER BY to_char(created_at::timestamp, 'YYYY-MM-DD')
       `;
     }
-    const data = db.prepare(query).all(from, to, ...scope.params);
+    const data = await db.q(query, [from, to, ...scope.params]);
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -182,24 +191,24 @@ router.get('/revenue-over-time', requireUser, (req, res) => {
 });
 
 // Top selling items
-router.get('/top-items', requireUser, (req, res) => {
+router.get('/top-items', requireUser, async (req, res) => {
   const { from, to } = getDateRange(req);
   const scope = scopeOrders(req, 'o');
   try {
-    const items = db.prepare(`
+    const items = await db.q(`
       SELECT
         oi.name,
-        SUM(oi.quantity) as total_qty,
-        SUM(oi.price * oi.quantity) as total_revenue,
-        COUNT(DISTINCT oi.order_id) as order_count
+        SUM(oi.quantity)::int as total_qty,
+        SUM(oi.price * oi.quantity)::float8 as total_revenue,
+        COUNT(DISTINCT oi.order_id)::int as order_count
       FROM order_items oi
       JOIN orders o ON oi.order_id = o.id
-      WHERE DATE(o.created_at) BETWEEN DATE(?) AND DATE(?)
+      WHERE o.created_at::date BETWEEN ?::date AND ?::date
       AND o.status != 'voided'${scope.sql}
       GROUP BY oi.name
       ORDER BY total_qty DESC
       LIMIT 10
-    `).all(from, to, ...scope.params);
+    `, [from, to, ...scope.params]);
 
     const totalRevenue = items.reduce((s, i) => s + i.total_revenue, 0);
     const result = items.map(i => ({
@@ -214,7 +223,7 @@ router.get('/top-items', requireUser, (req, res) => {
 });
 
 // Sales by category
-router.get('/by-category', requireUser, (req, res) => {
+router.get('/by-category', requireUser, async (req, res) => {
   const { from, to } = getDateRange(req);
   const scope = scopeOrders(req, 'o');
   try {
@@ -223,19 +232,19 @@ router.get('/by-category', requireUser, (req, res) => {
     // till's own version of this query carries the reasoning behind the CASE it
     // uses — deals share an id space with menu items, so they get their own
     // bucket rather than being filed under an unrelated item's category.
-    const data = db.prepare(`
+    const data = await db.q(`
       SELECT
         COALESCE(oi.category, 'Uncategorized') AS category,
-        SUM(oi.quantity) as total_qty,
-        SUM(oi.price * oi.quantity) as total_revenue
+        SUM(oi.quantity)::int as total_qty,
+        SUM(oi.price * oi.quantity)::float8 as total_revenue
       FROM order_items oi
       JOIN orders o ON oi.order_id = o.id
       LEFT JOIN branches br ON br.id = o.branch_id
-      WHERE DATE(o.created_at) BETWEEN DATE(?) AND DATE(?)
+      WHERE o.created_at::date BETWEEN ?::date AND ?::date
       AND o.status != 'voided'${scope.sql}
       GROUP BY category
       ORDER BY total_revenue DESC
-    `).all(from, to, ...scope.params);
+    `, [from, to, ...scope.params]);
 
     const totalRevenue = data.reduce((s, i) => s + i.total_revenue, 0);
     const result = data.map(i => ({
@@ -250,12 +259,12 @@ router.get('/by-category', requireUser, (req, res) => {
 });
 
 // Hourly heatmap — last 7 days by default
-router.get('/hourly-heatmap', requireUser, (req, res) => {
+router.get('/hourly-heatmap', requireUser, async (req, res) => {
   const scope = scopeOrders(req);
   try {
-    const data = db.prepare(`
+    const data = await db.q(`
       SELECT
-        CASE strftime('%w', created_at)
+        CASE EXTRACT(DOW FROM created_at::timestamp)::int
           WHEN '0' THEN 'Sun'
           WHEN '1' THEN 'Mon'
           WHEN '2' THEN 'Tue'
@@ -264,16 +273,16 @@ router.get('/hourly-heatmap', requireUser, (req, res) => {
           WHEN '5' THEN 'Fri'
           WHEN '6' THEN 'Sat'
         END as day,
-        strftime('%w', created_at) as day_num,
-        CAST(strftime('%H', created_at) AS INTEGER) as hour,
-        COUNT(*) as orders,
-        COALESCE(SUM(total), 0) as revenue
+        EXTRACT(DOW FROM created_at::timestamp)::int as day_num,
+        EXTRACT(HOUR FROM created_at::timestamp)::int as hour,
+        COUNT(*)::int as orders,
+        COALESCE(SUM(total)::float8, 0) as revenue
       FROM orders
-      WHERE DATE(created_at) >= DATE('now', '-30 days')
+      WHERE created_at::date >= (CURRENT_DATE - INTERVAL '30 days')
       AND status != 'voided'${scope.sql}
       GROUP BY day_num, hour
       ORDER BY day_num, hour
-    `).all(...scope.params);
+    `, [...scope.params]);
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -281,24 +290,24 @@ router.get('/hourly-heatmap', requireUser, (req, res) => {
 });
 
 // Cashier performance
-router.get('/cashier-performance', requireUser, (req, res) => {
+router.get('/cashier-performance', requireUser, async (req, res) => {
   const { from, to } = getDateRange(req);
   const scope = scopeOrders(req, 'o');
   try {
-    const data = db.prepare(`
+    const data = await db.q(`
       SELECT
         o.cashier_id,
         o.cashier_name,
-        COUNT(*) as total_orders,
-        COALESCE(SUM(o.total), 0) as total_revenue,
-        COALESCE(AVG(o.total), 0) as avg_order_value,
-        COALESCE(SUM(o.discount), 0) as total_discounts
+        COUNT(*)::int as total_orders,
+        COALESCE(SUM(o.total)::float8, 0) as total_revenue,
+        COALESCE(AVG(o.total)::float8, 0) as avg_order_value,
+        COALESCE(SUM(o.discount)::float8, 0) as total_discounts
       FROM orders o
-      WHERE DATE(o.created_at) BETWEEN DATE(?) AND DATE(?)
+      WHERE o.created_at::date BETWEEN ?::date AND ?::date
       AND o.status != 'voided'${scope.sql}
       GROUP BY o.cashier_id, o.cashier_name
       ORDER BY total_revenue DESC
-    `).all(from, to, ...scope.params);
+    `, [from, to, ...scope.params]);
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -322,13 +331,13 @@ router.get('/cashier-performance', requireUser, (req, res) => {
  * Voided orders are excluded by default so these rows reconcile with the KPI
  * cards and every other report; pass include_voided=1 to audit them.
  */
-router.get('/detailed', requireUser, (req, res) => {
+router.get('/detailed', requireUser, async (req, res) => {
   const { from, to } = getDateRange(req);
   const includeVoided = req.query.include_voided === '1' || req.query.include_voided === 'true';
   const scope = scopeOrders(req, 'o');
 
   try {
-    const orders = db.prepare(`
+    const orders = await db.q(`
       SELECT
         -- CLOUD: the till's own number, not the cloud's row id. This is the
         -- number printed on the customer's receipt and written in the shop's
@@ -355,18 +364,18 @@ router.get('/detailed', requireUser, (req, res) => {
         o.delivery_charge,
         o.total,
         br.name AS branch_name,
-        COALESCE(SUM(oi.price * oi.quantity), 0) AS subtotal,
-        COALESCE(SUM(oi.quantity), 0)            AS total_qty,
-        COUNT(oi.id)                             AS line_count,
-        GROUP_CONCAT(oi.name || ' x' || oi.quantity, ', ') AS items
+        COALESCE(SUM(oi.price * oi.quantity)::float8, 0) AS subtotal,
+        COALESCE(SUM(oi.quantity)::int, 0)            AS total_qty,
+        COUNT(oi.id)::int                             AS line_count,
+        STRING_AGG(oi.name || ' x' || oi.quantity, ', ') AS items
       FROM orders o
       LEFT JOIN order_items oi ON oi.order_id = o.id
       LEFT JOIN branches br ON br.id = o.branch_id
-      WHERE DATE(o.created_at) BETWEEN DATE(?) AND DATE(?)
+      WHERE o.created_at::date BETWEEN ?::date AND ?::date
         ${includeVoided ? '' : "AND o.status != 'voided'"}${scope.sql}
       GROUP BY o.id
       ORDER BY o.created_at ASC
-    `).all(from, to, ...scope.params);
+    `, [from, to, ...scope.params]);
 
     // GROUP_CONCAT returns NULL for an order with no line items.
     res.json(orders.map(o => ({ ...o, items: o.items || '' })));
@@ -384,13 +393,13 @@ router.get('/detailed', requireUser, (req, res) => {
  * the case for deals (they record the deal's id, not a menu item's) and for
  * items deleted from the menu after the sale.
  */
-router.get('/line-items', requireUser, (req, res) => {
+router.get('/line-items', requireUser, async (req, res) => {
   const { from, to } = getDateRange(req);
   const includeVoided = req.query.include_voided === '1' || req.query.include_voided === 'true';
   const scope = scopeOrders(req, 'o');
 
   try {
-    const rows = db.prepare(`
+    const rows = await db.q(`
       SELECT
         -- CLOUD: the till's own order number — see /detailed above.
         o.local_id      AS order_id,
@@ -410,10 +419,10 @@ router.get('/line-items', requireUser, (req, res) => {
       FROM order_items oi
       JOIN orders o ON oi.order_id = o.id
       LEFT JOIN branches br ON br.id = o.branch_id
-      WHERE DATE(o.created_at) BETWEEN DATE(?) AND DATE(?)
+      WHERE o.created_at::date BETWEEN ?::date AND ?::date
         ${includeVoided ? '' : "AND o.status != 'voided'"}${scope.sql}
       ORDER BY o.created_at ASC, oi.id ASC
-    `).all(from, to, ...scope.params);
+    `, [from, to, ...scope.params]);
 
     res.json(rows);
   } catch (err) {
@@ -422,7 +431,7 @@ router.get('/line-items', requireUser, (req, res) => {
 });
 
 // Daily summary
-router.get('/daily', requireUser, (req, res) => {
+router.get('/daily', requireUser, async (req, res) => {
   const { from, to } = getDateRange(req);
   const scope = scopeOrders(req);
   const expScope = scopeExpenses(req);
@@ -435,14 +444,14 @@ router.get('/daily', requireUser, (req, res) => {
      * and no orders; driving the report off orders alone would drop that day
      * entirely and quietly overstate the period's net.
      */
-    const data = db.prepare(`
+    const data = await db.q(`
       WITH days AS (
-        SELECT DISTINCT DATE(created_at) AS date FROM orders
-         WHERE DATE(created_at) BETWEEN DATE(?) AND DATE(?)
+        SELECT DISTINCT to_char(created_at::timestamp, 'YYYY-MM-DD') AS date FROM orders
+         WHERE created_at::date BETWEEN ?::date AND ?::date
            AND status != 'voided'${scope.sql}
         UNION
-        SELECT DISTINCT DATE(created_at) AS date FROM expenses
-         WHERE DATE(created_at) BETWEEN DATE(?) AND DATE(?)${expScope.sql}
+        SELECT DISTINCT to_char(created_at::timestamp, 'YYYY-MM-DD') AS date FROM expenses
+         WHERE created_at::date BETWEEN ?::date AND ?::date${expScope.sql}
       )
       SELECT
         d.date,
@@ -455,30 +464,28 @@ router.get('/daily', requireUser, (req, res) => {
         COALESCE(o.total_revenue, 0) - COALESCE(x.total_expenses, 0) AS net_revenue
       FROM days d
       LEFT JOIN (
-        SELECT DATE(created_at) AS date,
-               COUNT(*) AS total_orders,
-               SUM(total) AS total_revenue,
-               SUM(discount) AS total_discounts,
-               AVG(total) AS avg_order_value
+        SELECT to_char(created_at::timestamp, 'YYYY-MM-DD') AS date,
+               COUNT(*)::int AS total_orders,
+               SUM(total)::float8 AS total_revenue,
+               SUM(discount)::float8 AS total_discounts,
+               AVG(total)::float8 AS avg_order_value
           FROM orders
          WHERE status != 'voided'${scope.sql}
-         GROUP BY DATE(created_at)
+         GROUP BY to_char(created_at::timestamp, 'YYYY-MM-DD')
       ) o ON o.date = d.date
       LEFT JOIN (
-        SELECT DATE(created_at) AS date,
-               SUM(amount) AS total_expenses,
-               SUM(CASE WHEN from_drawer = 1 THEN amount ELSE 0 END) AS drawer_expenses
+        SELECT to_char(created_at::timestamp, 'YYYY-MM-DD') AS date,
+               SUM(amount)::float8 AS total_expenses,
+               SUM(CASE WHEN from_drawer = 1 THEN amount ELSE 0 END)::float8 AS drawer_expenses
           FROM expenses
          WHERE 1 = 1${expScope.sql}
-         GROUP BY DATE(created_at)
+         GROUP BY to_char(created_at::timestamp, 'YYYY-MM-DD')
       ) x ON x.date = d.date
       ORDER BY d.date DESC
-    `).all(
-      from, to, ...scope.params,
+    `, [from, to, ...scope.params,
       from, to, ...expScope.params,
       ...scope.params,
-      ...expScope.params
-    );
+      ...expScope.params]);
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -491,21 +498,21 @@ router.get('/daily', requireUser, (req, res) => {
  * The mirror image of Sales by Category: that answers where the money came
  * from, this answers where it went. Together they are the whole day.
  */
-router.get('/expenses-by-category', requireUser, (req, res) => {
+router.get('/expenses-by-category', requireUser, async (req, res) => {
   const { from, to } = getDateRange(req);
   const scope = scopeExpenses(req);
   try {
-    res.json(db.prepare(`
+    res.json(await db.q(`
       SELECT
         category,
-        COUNT(*) AS entries,
-        COALESCE(SUM(amount), 0) AS total,
-        COALESCE(SUM(CASE WHEN from_drawer = 1 THEN amount ELSE 0 END), 0) AS from_drawer_total
+        COUNT(*)::int AS entries,
+        COALESCE(SUM(amount)::float8, 0) AS total,
+        COALESCE(SUM(CASE WHEN from_drawer = 1 THEN amount ELSE 0 END)::float8, 0) AS from_drawer_total
       FROM expenses
-      WHERE DATE(created_at) BETWEEN DATE(?) AND DATE(?)${scope.sql}
+      WHERE created_at::date BETWEEN ?::date AND ?::date${scope.sql}
       GROUP BY category
       ORDER BY total DESC
-    `).all(from, to, ...scope.params));
+    `, [from, to, ...scope.params]));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -518,11 +525,11 @@ router.get('/expenses-by-category', requireUser, (req, res) => {
  * account for each payout individually — who recorded it, what for, whether it
  * came out of the till, and which branch it belongs to.
  */
-router.get('/expenses-detail', requireUser, (req, res) => {
+router.get('/expenses-detail', requireUser, async (req, res) => {
   const { from, to } = getDateRange(req);
   const scope = scopeExpenses(req, 'e');
   try {
-    res.json(db.prepare(`
+    res.json(await db.q(`
       SELECT
         -- CLOUD: the till's own number — see /detailed above.
         e.local_id AS id,
@@ -538,9 +545,9 @@ router.get('/expenses-detail', requireUser, (req, res) => {
         b.name AS branch_name
       FROM expenses e
       LEFT JOIN branches b ON b.id = e.branch_id
-      WHERE DATE(e.created_at) BETWEEN DATE(?) AND DATE(?)${scope.sql}
+      WHERE e.created_at::date BETWEEN ?::date AND ?::date${scope.sql}
       ORDER BY e.created_at DESC, e.id DESC
-    `).all(from, to, ...scope.params));
+    `, [from, to, ...scope.params]));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

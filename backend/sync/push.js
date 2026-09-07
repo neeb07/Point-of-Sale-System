@@ -211,6 +211,52 @@ async function syncOnce() {
   }
 }
 
+/*
+ * Staff and stock, pushed whole rather than incrementally.
+ *
+ * Neither carries a `sync_state`, deliberately. They are small — a handful of
+ * accounts, a few dozen ingredients — and they change rarely, so tracking
+ * per-row dirtiness would mean touching every write path in staff.js and
+ * inventory.js to earn nothing. Sending the lot is a few kilobytes, and the
+ * cloud's upsert makes a resend free.
+ *
+ * The PIN is not selected. It is of no use to the dashboard, and every copy of
+ * a credential is another place it can leak from.
+ */
+const allStaffStmt = db.prepare(
+  'SELECT id, name, role, color, active FROM staff'
+);
+const allIngredientsStmt = db.prepare(
+  'SELECT id, name, unit, stock, low_stock_threshold, cost_per_unit FROM ingredients'
+);
+
+/** Longer than the sales cadence: these barely change, and a stale stock figure costs nothing. */
+const REFERENCE_INTERVAL_MS = 5 * 60 * 1000;
+
+async function pushReference() {
+  const config = syncConfig();
+  if (!config) return { skipped: 'not paired' };
+
+  for (const [table, stmt] of [
+    ['staff', allStaffStmt],
+    ['ingredients', allIngredientsStmt],
+  ]) {
+    const rows = stmt.all();
+    if (!rows.length) continue;
+
+    // Chunked to the same cap as everything else, so a long ingredient list
+    // cannot produce a request the cloud refuses.
+    for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+      const result = await postBatch(config, table, rows.slice(i, i + BATCH_SIZE));
+      if (!result.ok) {
+        state.lastError = result.error;
+        return { ok: false, error: result.error };
+      }
+    }
+  }
+  return { ok: true };
+}
+
 function start() {
   if (!isSyncEnabled()) return null;
 
@@ -218,10 +264,21 @@ function start() {
   // offline. Deliberately not awaited — the backend must finish booting.
   syncOnce().catch(err => { state.lastError = err.message; });
 
+  pushReference().catch(err => { state.lastError = err.message; });
+
   const timer = setInterval(() => {
     syncOnce().catch(err => { state.lastError = err.message; });
   }, INTERVAL_MS);
   if (typeof timer.unref === 'function') timer.unref();
+
+  // Separate timer, and deliberately not gated on the idle short-circuit:
+  // staff and stock change without any sale happening, so they would otherwise
+  // never reach a quiet shop's dashboard.
+  const refTimer = setInterval(() => {
+    pushReference().catch(err => { state.lastError = err.message; });
+  }, REFERENCE_INTERVAL_MS);
+  if (typeof refTimer.unref === 'function') refTimer.unref();
+
   return timer;
 }
 
@@ -236,4 +293,20 @@ function status() {
   };
 }
 
-module.exports = { start, syncOnce, status, BATCH_SIZE };
+/**
+ * Everything, now — sales and reference data.
+ *
+ * What the "Sync now" button calls. The background timers keep the two on
+ * different cadences because their costs differ, but somebody pressing a button
+ * means "make the dashboard match this till", and half of that would be a
+ * puzzling thing to deliver.
+ */
+async function syncAll() {
+  const sales = await syncOnce();
+  if (sales.skipped) return sales;
+  const reference = await pushReference();
+  if (!reference.ok && sales.ok) return { ...sales, ok: false, error: reference.error };
+  return sales;
+}
+
+module.exports = { start, syncOnce, syncAll, pushReference, status, BATCH_SIZE };

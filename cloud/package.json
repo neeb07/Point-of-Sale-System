@@ -2,7 +2,7 @@
   "name": "blaze-cloud",
   "version": "1.0.0",
   "private": true,
-  "description": "Cloud API behind the Blaze admin dashboard: ingests each branch's live status and sales, and serves both-branch reporting.",
+  "description": "Cloud API behind the Blaze admin dashboard: ingests each branch's live status and sales into Supabase, and serves both-branch reporting.",
   "main": "server.js",
   "type": "commonjs",
   "scripts": {
@@ -12,8 +12,8 @@
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
-    "better-sqlite3": "^12.11.1",
     "cookie-parser": "^1.4.7",
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "pg": "^8.23.0"
   }
 }

@@ -19,8 +19,9 @@ const path = require('path');
 const fs = require('fs');
 const cookieParser = require('cookie-parser');
 
-const db = require('./db/database');
+const db = require('./db/pg');
 const { attachUser, startSessionCleanup } = require('./middleware/session');
+const { createSchema } = require('./db/schema');
 const { requireBranch } = require('./middleware/branch-auth');
 
 const app = express();
@@ -97,27 +98,46 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Server error' });
 });
 
-startSessionCleanup();
+/*
+ * Schema first, then listen.
+ *
+ * The schema is idempotent, so a deploy is just a restart. Refusing to listen
+ * when it cannot be applied is deliberate: a server that answers requests
+ * against a database it could not reach would report an empty shop, which reads
+ * exactly like a shop that sold nothing.
+ */
+createSchema(db)
+  .then(() => {
+    startSessionCleanup();
+    server = app.listen(PORT, HOST, () => {
+      console.log(`Blaze cloud API on http://${HOST}:${PORT}`);
+      console.log('Database: Supabase (Postgres)');
+    });
+    server.on('error', onListenError);
+  })
+  .catch((err) => {
+    console.error('Could not prepare the database:', err.message);
+    console.error('Check DATABASE_URL points at the Supabase connection string.');
+    process.exit(1);
+  });
 
-const server = app.listen(PORT, HOST, () => {
-  console.log(`Blaze cloud API on http://${HOST}:${PORT}`);
-  console.log(`Database: ${db.DB_PATH}`);
-});
-
-server.on('error', (err) => {
+function onListenError(err) {
   if (err.code === 'EADDRINUSE') {
     console.error(`Port ${PORT} is already in use.`);
     process.exit(1);
   }
   throw err;
-});
+}
 
 // systemd sends SIGTERM on restart and on deploy. Closing the database on the
 // way out means WAL is checkpointed rather than left for the next start to
 // recover.
+let server = null;
+
 function shutdown() {
-  server.close(() => {
-    try { db.close(); } catch (e) { /* already closed */ }
+  if (!server) process.exit(0);
+  server.close(async () => {
+    try { await db.close(); } catch (e) { /* pool already ended */ }
     process.exit(0);
   });
   // Do not hang forever on a connection that will not close.
