@@ -275,6 +275,12 @@ export const branchesAPI = {
   getAll: () => request<Branch[]>('GET', '/branches'),
 };
 
+/** Cloud sync. `now` is open to both roles; `status` is administrator-only. */
+export const syncAPI = {
+  now: () => request<Record<string, any>>('POST', '/sync/now'),
+  status: () => request<Record<string, any>>('GET', '/sync/status'),
+};
+
 export const dealsAPI = {
   getAll: () => request('GET', '/deals'),
   getOne: (id: number) => request('GET', `/deals/${id}`),

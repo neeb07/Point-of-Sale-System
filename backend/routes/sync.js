@@ -15,6 +15,7 @@ const express = require('express');
 const router = express.Router();
 const { publicStatus } = require('../db/till-identity');
 const heartbeat = require('../sync/heartbeat');
+const { isAdminRole } = require('../middleware/auth');
 const push = require('../sync/push');
 
 /**
@@ -25,6 +26,11 @@ const push = require('../sync/push');
  * rather than till work.
  */
 router.get('/status', (req, res) => {
+  // The full picture — cloud URL, branch identity, pairing — is configuration,
+  // so it stays with the administrator.
+  if (!isAdminRole(req.user && req.user.role)) {
+    return res.status(403).json({ error: 'Administrator access required' });
+  }
   try {
     res.json({
       ...publicStatus(),
@@ -39,13 +45,30 @@ router.get('/status', (req, res) => {
 /**
  * Push everything pending, now.
  *
- * The "Sync now" button. Admin-only like the rest of this router, and awaited
- * so the caller learns what actually happened rather than being told "started".
+ * The "Sync now" button, and open to both roles on purpose: when the internet
+ * comes back it is the manager standing at the till, not the owner, and making
+ * them wait up to thirty seconds for the timer — or telephone the owner — is
+ * the kind of friction that gets a feature quietly abandoned.
+ *
+ * Safe to expose: it sends this branch's own already-recorded data to the
+ * cloud, reads nothing back, and is idempotent, so the worst a manager can do
+ * by pressing it repeatedly is nothing at all.
+ *
+ * Awaited, so the caller learns what actually happened rather than "started".
  */
 router.post('/now', async (req, res) => {
   try {
     const result = await push.syncOnce();
-    res.json({ ...result, ...push.status() });
+    const s = push.status();
+    res.json({
+      ...result,
+      queue_depth: s.queue_depth,
+      pending: s.pending,
+      last_error: s.push_last_error,
+      // Enough for the button to say something true, without handing a manager
+      // the branch key or the cloud address.
+      synced_at: s.push_last_success_at,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

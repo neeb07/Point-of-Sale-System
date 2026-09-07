@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Search, RefreshCw, LayoutGrid, AlertTriangle, X } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { inventoryAPI } from '@/api/index';
+import SyncNowButton from './SyncNowButton';
 
 interface TopBarProps {
   search: string;
@@ -123,6 +124,9 @@ export default function TopBar({
 
       {/* Right */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        {/* Both roles: when the connection returns it is whoever is on the till
+            who wants to see the day's takings go up. */}
+        <SyncNowButton />
         {/* The old Wifi icon was decorative and reported nothing real, so it
             has been dropped. Refresh actually reloads the app now. */}
         <button

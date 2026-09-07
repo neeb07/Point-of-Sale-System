@@ -82,9 +82,11 @@ app.use('/api/staff', require('./routes/staff'));
 // The daily WhatsApp report sends the shop's figures out of the building.
 app.use('/api/whatsapp', requireAdmin, require('./routes/whatsapp'));
 
-// Which branch this machine reports as, and whether cloud sync is paired.
-// Admin-only: it is configuration, not till work.
-app.use('/api/sync', requireAdmin, require('./routes/sync'));
+// Cloud sync. Mounted with requireAuth rather than requireAdmin: a manager
+// needs the "Sync now" button on the sale screen, because they are the one
+// standing there when the internet comes back. The routes inside guard
+// themselves — pushing is till work, reading the pairing configuration is not.
+app.use('/api/sync', requireAuth, require('./routes/sync'));
 
 // Taking money and running the till: both roles.
 app.use('/api/orders', requireAuth, require('./routes/orders'));

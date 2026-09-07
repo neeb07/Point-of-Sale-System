@@ -30,8 +30,18 @@ const BATCH_SIZE = 100;
 /** Longer than a heartbeat's: a batch is bigger and worth waiting for. */
 const TIMEOUT_MS = 30 * 1000;
 
-/** Routine catch-up. The real triggers are app start and shift close; this is the safety net. */
-const INTERVAL_MS = 5 * 60 * 1000;
+/**
+ * How often to push, in the background.
+ *
+ * Matched to the heartbeat's 30s so the dashboard's reports move roughly in
+ * step with its live cards, rather than the owner watching revenue tick up on
+ * one tab while Reports insists nothing has happened for five minutes.
+ *
+ * Affordable because a pass with nothing pending is a single indexed query
+ * against a partial index and no network call at all — see the early return in
+ * syncOnce. Only a shop that is actually selling pays for the frequency.
+ */
+const INTERVAL_MS = 30 * 1000;
 
 const state = {
   lastAttemptMs: null,
@@ -142,6 +152,18 @@ async function syncOnce() {
   const config = syncConfig();
   if (!config) return { skipped: 'not paired' };
   if (state.running) return { skipped: 'already running' };
+
+  /*
+   * Nothing pending: return before touching the network.
+   *
+   * At a 30s cadence a closed shop would otherwise open a connection twice a
+   * minute all night to say nothing. This makes an idle pass three indexed
+   * counts against the partial sync indexes.
+   */
+  const pending = countPending.get();
+  if (pending.orders + pending.shifts + pending.expenses === 0) {
+    return { ok: true, sent: { orders: 0, shifts: 0, expenses: 0 }, idle: true };
+  }
 
   state.running = true;
   state.lastAttemptMs = Date.now();

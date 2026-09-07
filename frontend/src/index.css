@@ -331,3 +331,9 @@ body {
   75% { transform: translateX(-3px); }
   90% { transform: translateX(3px); }
 }
+
+/* Used by the Sync now button while a push is in flight. */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
