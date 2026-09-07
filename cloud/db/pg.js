@@ -65,6 +65,34 @@ pool.on('error', (err) => {
   console.error('Idle Postgres client error (recovering):', err.message);
 });
 
+/*
+ * Never leave a transaction open on a pooled connection.
+ *
+ * Supabase's pooler keeps the server-side connection alive after this process
+ * goes away, so a crash or a `kill` partway through a transaction leaves it
+ * `idle in transaction` — still holding its locks, indefinitely. The next
+ * deploy then blocks on writes to the same tables for no visible reason. It
+ * happened during development and took a while to recognise, because nothing
+ * reports it: queries simply hang until the statement timeout.
+ *
+ * Thirty seconds is far longer than any transaction here, so a live one is
+ * never at risk; an abandoned one is reaped instead of outliving the process
+ * that opened it.
+ */
+pool.on('connect', (client) => {
+  /*
+   * `extra_float_digits = 3` asks Postgres for shortest-round-trip float text
+   * rather than 15 significant digits. Without it an average came back as
+   * 2819.94117647059 where the till had 2819.9411764705883 — the value is
+   * being truncated on the way out, not computed differently. It rounds away
+   * in any currency display, but a report is not the only consumer and a
+   * figure that silently loses precision in transit is worth not shipping.
+   */
+  client
+    .query("SET idle_in_transaction_session_timeout = '30s'; SET extra_float_digits = 3")
+    .catch(err => console.error('Could not configure the connection:', err.message));
+});
+
 /**
  * Convert SQLite's `?` placeholders to Postgres's `$1, $2, …`.
  *
@@ -83,18 +111,54 @@ pool.on('error', (err) => {
 function toPg(sql) {
   let index = 0;
   let out = '';
-  let quote = null;
+  let i = 0;
 
-  for (let i = 0; i < sql.length; i++) {
+  while (i < sql.length) {
     const ch = sql[i];
+    const next = sql[i + 1];
 
-    if (quote) {
-      out += ch;
-      if (ch === quote) quote = null;
+    // A line comment runs to the end of the line. Skipping it is not cosmetic:
+    // these queries are heavily commented, and an apostrophe in ordinary
+    // English ("the till's own number") would otherwise be read as the start of
+    // a string literal, swallowing every placeholder after it. The `?` then
+    // reached Postgres unconverted, which reports a syntax error pointing at
+    // the *next* token rather than the comment that caused it.
+    if (ch === '-' && next === '-') {
+      const end = sql.indexOf('\n', i);
+      const stop = end === -1 ? sql.length : end;
+      out += sql.slice(i, stop);
+      i = stop;
       continue;
     }
-    if (ch === "'" || ch === '"') { quote = ch; out += ch; continue; }
+
+    // Block comment.
+    if (ch === '/' && next === '*') {
+      const end = sql.indexOf('*/', i + 2);
+      const stop = end === -1 ? sql.length : end + 2;
+      out += sql.slice(i, stop);
+      i = stop;
+      continue;
+    }
+
+    // String or quoted identifier. A doubled quote inside is an escaped one.
+    if (ch === "'" || ch === '"') {
+      const quote = ch;
+      let j = i + 1;
+      while (j < sql.length) {
+        if (sql[j] === quote) {
+          if (sql[j + 1] === quote) { j += 2; continue; }  // '' escape
+          j += 1;
+          break;
+        }
+        j += 1;
+      }
+      out += sql.slice(i, j);
+      i = j;
+      continue;
+    }
+
     out += ch === '?' ? `$${++index}` : ch;
+    i += 1;
   }
   return out;
 }

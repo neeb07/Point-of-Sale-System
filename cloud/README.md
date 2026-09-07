@@ -128,10 +128,32 @@ number. Four traps, all of which bit during the port:
 4. **Timestamps are stored as text.** The tills write local wall-clock time with
    no zone; `timestamptz` would make Postgres attach the *server's* zone, so the
    same sale would read differently depending on where the server ran.
+5. **Postgres requires SELECT and GROUP BY to agree**, and matches expressions
+   textually — so adding a cast to an aliased column silently invalidates every
+   other column derived from it.
+6. **Floats are truncated to 15 digits on the wire** unless `extra_float_digits`
+   is raised. Set on every connection.
 
-The guard against all of this is the comparison test, which syncs a till's
-history up and checks all ten report endpoints against the till's own output
-field by field. Run it after any change to either file.
+Also worth knowing operationally: Supabase's pooler keeps a server connection
+alive after this process dies, so a crash mid-transaction leaves it *idle in
+transaction*, holding locks indefinitely, and the next deploy blocks on writes
+for no visible reason. `db/pg.js` sets `idle_in_transaction_session_timeout` on
+every connection so those are reaped.
+
+The guard against all of this is `test/verify-against-till.js`, which syncs a
+till's history up and checks all eleven report endpoints against the till's own
+output field by field:
+
+```
+cd backend
+DATABASE_URL="postgresql://..." node scripts/run-script.js ../cloud/test/verify-against-till.js
+```
+
+Run it after **any** change to either reporting file. It TRUNCATEs the cloud
+database, so point it at a scratch project rather than production. It runs
+through `backend/scripts/run-script.js` because the till half needs Electron's
+Node, whose ABI matches better-sqlite3; the cloud half runs as a child process
+on plain Node, exactly as the two run in production.
 
 What Supabase buys in return: managed backups, no disk to run out of, no
 question about network storage, and a console for looking at the data.

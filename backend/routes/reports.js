@@ -195,7 +195,12 @@ router.get('/top-items', (req, res) => {
       WHERE DATE(o.created_at) BETWEEN DATE(?) AND DATE(?)
       AND o.status != 'voided'${scope.sql}
       GROUP BY oi.name
-      ORDER BY total_qty DESC
+      -- Tie-broken deliberately. Ordering by total_qty alone means items that sold
+      -- the same number of units come back in whatever order the engine
+      -- happens to produce, so the tenth row — and therefore every
+      -- percentage, which is computed against the ten — could change between
+      -- runs for no reason at all.
+      ORDER BY total_qty DESC, total_revenue DESC, oi.name ASC
       LIMIT 10
     `).all(from, to, ...scope.params);
 

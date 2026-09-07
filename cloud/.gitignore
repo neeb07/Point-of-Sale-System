@@ -13,3 +13,6 @@ data/
 # minor versions happen to be current that day — which for better-sqlite3
 # means a different native build than the one that was tested.
 !package-lock.json
+
+# Never commit the database credential.
+.env

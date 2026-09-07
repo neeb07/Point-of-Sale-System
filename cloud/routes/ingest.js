@@ -28,28 +28,61 @@ const num = (v) => (v == null || v === '' || Number.isNaN(Number(v)) ? null : Nu
 const str = (v) => (v == null ? null : String(v));
 
 /**
- * Build an idempotent upsert.
+ * Build one multi-row upsert for a whole batch.
  *
- * Every synced table has the same shape — `(branch_id, local_id)` unique, the
- * rest refreshed on conflict — so the statement is generated rather than
- * written out five times and kept in step by hand.
+ * The first version issued a statement per row, which was correct and far too
+ * slow: a hundred orders with three hundred line items meant four hundred
+ * sequential round trips to a database in another country. At a couple of
+ * hundred milliseconds each that is well over a minute, and the till's push
+ * timed out before it finished — so a shop with a real backlog could never
+ * catch up at all.
+ *
+ * One statement per table per batch turns that into three round trips.
+ *
+ * Postgres caps a statement at 65535 parameters. The widest table here is
+ * orders at 25 columns, so the till's batch of 100 uses 2,500 — comfortably
+ * inside it, but the cap is why BATCH_SIZE and MAX_ROWS exist rather than
+ * sending everything at once.
+ *
+ * `RETURNING` is what makes the order_items remap possible in the same trip:
+ * it hands back each row's cloud id alongside the till's local_id.
  */
-function upsertSql(table, columns) {
+function buildUpsert(table, columns, rows, valuesFor, receivedAt, branchId) {
   const cols = ['branch_id', 'local_id', ...columns, 'received_at'];
-  const placeholders = cols.map((_, i) => `$${i + 1}`).join(', ');
+  const params = [];
+  const tuples = [];
+
+  rows.forEach((row) => {
+    const values = [branchId, num(row.id), ...valuesFor(row), receivedAt];
+    const placeholders = values.map((v) => {
+      params.push(v);
+      return `$${params.length}`;
+    });
+    tuples.push(`(${placeholders.join(', ')})`);
+  });
+
+  // received_at is refreshed too, so "when did the cloud last hear about this
+  // row" stays honest after an update.
   const updates = [...columns, 'received_at'].map(c => `${c} = EXCLUDED.${c}`).join(', ');
-  return `
-    INSERT INTO ${table} (${cols.join(', ')})
-    VALUES (${placeholders})
-    ON CONFLICT (branch_id, local_id) DO UPDATE SET ${updates}
-  `;
+
+  return {
+    sql: `
+      INSERT INTO ${table} (${cols.join(', ')})
+      VALUES ${tuples.join(', ')}
+      ON CONFLICT (branch_id, local_id) DO UPDATE SET ${updates}
+      RETURNING id, local_id
+    `,
+    params,
+  };
 }
 
 /*
- * Orders are mutable: one already sent can later be voided, and that has to
- * reach the cloud or the dashboard reports revenue the shop never took. Every
- * column is refreshed rather than only the void fields, so a correction of any
- * kind lands.
+ * The columns each table carries, beyond the (branch_id, local_id) key and
+ * received_at. Order matters: it has to match the values function beneath it.
+ *
+ * Orders are mutable — one already sent can later be voided — so every column
+ * is refreshed on conflict rather than only the void fields, and a correction
+ * of any kind lands.
  */
 const ORDER_COLS = [
   'total', 'discount', 'payment_method', 'status', 'cashier_name', 'cashier_id',
@@ -58,6 +91,7 @@ const ORDER_COLS = [
   'employee_discount_rate', 'voided_by', 'voided_by_id',
   'customer_name', 'customer_phone', 'customer_address',
 ];
+// A shift is sent while open and again once counted, so it must update too.
 const SHIFT_COLS = [
   'staff_id', 'staff_name', 'opening_cash', 'closing_cash', 'expected_cash',
   'variance', 'opened_at', 'closed_at', 'status',
@@ -66,68 +100,72 @@ const EXPENSE_COLS = [
   'local_shift_id', 'staff_id', 'staff_name', 'category', 'description',
   'amount', 'from_drawer', 'created_at',
 ];
+// Note what is absent: the PIN, hashed or otherwise. It is of no use to the
+// dashboard, and every copy of a credential is another place it can leak from.
 const STAFF_COLS = ['name', 'role', 'color', 'active'];
 const INGREDIENT_COLS = ['name', 'unit', 'stock', 'low_stock_threshold', 'cost_per_unit'];
 
+const ORDER_VALUES = (r) => [
+  num(r.total), num(r.discount), str(r.payment_method), str(r.status),
+  str(r.cashier_name), num(r.cashier_id), str(r.created_at),
+  str(r.order_type), num(r.delivery_charge), num(r.shift_id),
+  str(r.table_number), str(r.voided_at), num(r.tax_rate), num(r.tax_amount),
+  num(r.is_employee), num(r.employee_discount), num(r.employee_discount_rate),
+  str(r.voided_by), num(r.voided_by_id),
+  str(r.customer_name), str(r.customer_phone), str(r.customer_address),
+];
+
 async function ingestOrders(client, branchId, rows, receivedAt) {
-  const orderSql = upsertSql('orders', ORDER_COLS);
-  const itemSql = `
+  const orderUpsert = buildUpsert('orders', ORDER_COLS, rows, ORDER_VALUES, receivedAt, branchId);
+  const result = await client.query(orderUpsert.sql, orderUpsert.params);
+
+  /*
+   * Remap the line items onto the CLOUD's order id.
+   *
+   * The till sends its own order id, which is only unique within that branch.
+   * Storing it unchanged would make E-18's items join onto CBR Town's order of
+   * the same number — quietly attributing one shop's food to the other's sale.
+   */
+  const cloudIdFor = new Map(result.rows.map(r => [Number(r.local_id), r.id]));
+
+  const items = [];
+  for (const row of rows) {
+    const orderId = cloudIdFor.get(num(row.id));
+    for (const item of row.items || []) {
+      items.push({ item, orderId });
+    }
+  }
+  if (!items.length) return;
+
+  const params = [];
+  const tuples = items.map(({ item, orderId }) => {
+    const values = [
+      branchId, num(item.id), orderId, num(item.menu_item_id), str(item.name),
+      num(item.price), num(item.quantity), num(item.is_deal), num(item.variant_id),
+      // Resolved by the till, because menu item ids are per-machine and cannot
+      // be resolved here.
+      str(item.category),
+    ];
+    return `(${values.map(v => { params.push(v); return `$${params.length}`; }).join(', ')})`;
+  });
+
+  await client.query(`
     INSERT INTO order_items (
       branch_id, local_id, order_id, menu_item_id, name, price, quantity,
       is_deal, variant_id, category
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+    ) VALUES ${tuples.join(', ')}
     ON CONFLICT (branch_id, local_id) DO UPDATE SET
       order_id = EXCLUDED.order_id, name = EXCLUDED.name, price = EXCLUDED.price,
       quantity = EXCLUDED.quantity, is_deal = EXCLUDED.is_deal,
       variant_id = EXCLUDED.variant_id, category = EXCLUDED.category
-  `;
-
-  for (const row of rows) {
-    await client.query(orderSql, [
-      branchId, num(row.id),
-      num(row.total), num(row.discount), str(row.payment_method), str(row.status),
-      str(row.cashier_name), num(row.cashier_id), str(row.created_at),
-      str(row.order_type), num(row.delivery_charge), num(row.shift_id),
-      str(row.table_number), str(row.voided_at), num(row.tax_rate), num(row.tax_amount),
-      num(row.is_employee), num(row.employee_discount), num(row.employee_discount_rate),
-      str(row.voided_by), num(row.voided_by_id),
-      str(row.customer_name), str(row.customer_phone), str(row.customer_address),
-      receivedAt,
-    ]);
-
-    /*
-     * Remap the line items onto the CLOUD's order id.
-     *
-     * The till sends its own order id, which is only unique within that branch.
-     * Storing it unchanged would make E-18's items join onto CBR Town's order of
-     * the same number — quietly attributing one shop's food to the other's sale.
-     */
-    const found = await client.query(
-      'SELECT id FROM orders WHERE branch_id = $1 AND local_id = $2',
-      [branchId, num(row.id)]
-    );
-    const cloudOrderId = found.rows[0].id;
-
-    for (const item of row.items || []) {
-      await client.query(itemSql, [
-        branchId, num(item.id), cloudOrderId, num(item.menu_item_id),
-        str(item.name), num(item.price), num(item.quantity),
-        num(item.is_deal), num(item.variant_id),
-        // Resolved by the till, because menu item ids are per-machine and
-        // cannot be resolved here.
-        str(item.category),
-      ]);
-    }
-  }
+  `, params);
 }
 
-/** The simple tables: one upsert per row, no children to remap. */
-function simpleIngest(table, columns, mapRow) {
+/** The simple tables: one multi-row upsert, no children to remap. */
+function simpleIngest(table, columns, valuesFor) {
   return async (client, branchId, rows, receivedAt) => {
-    const sql = upsertSql(table, columns);
-    for (const row of rows) {
-      await client.query(sql, [branchId, num(row.id), ...mapRow(row), receivedAt]);
-    }
+    const { sql, params } = buildUpsert(table, columns, rows, valuesFor, receivedAt, branchId);
+    await client.query(sql, params);
   };
 }
 

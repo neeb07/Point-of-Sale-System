@@ -206,7 +206,12 @@ router.get('/top-items', requireUser, async (req, res) => {
       WHERE o.created_at::date BETWEEN ?::date AND ?::date
       AND o.status != 'voided'${scope.sql}
       GROUP BY oi.name
-      ORDER BY total_qty DESC
+      -- Tie-broken deliberately. Ordering by total_qty alone means items that sold
+      -- the same number of units come back in whatever order the engine
+      -- happens to produce, so the tenth row — and therefore every
+      -- percentage, which is computed against the ten — could change between
+      -- runs for no reason at all.
+      ORDER BY total_qty DESC, total_revenue DESC, oi.name ASC
       LIMIT 10
     `, [from, to, ...scope.params]);
 
@@ -273,15 +278,25 @@ router.get('/hourly-heatmap', requireUser, async (req, res) => {
           WHEN '5' THEN 'Fri'
           WHEN '6' THEN 'Sat'
         END as day,
-        EXTRACT(DOW FROM created_at::timestamp)::int as day_num,
+        -- ::text because SQLite's strftime('%w') returns text, and the
+        -- dashboard reuses the till's own screens — a number where they
+        -- expect a string would compare unequal and quietly render nothing.
+        EXTRACT(DOW FROM created_at::timestamp)::int::text as day_num,
         EXTRACT(HOUR FROM created_at::timestamp)::int as hour,
         COUNT(*)::int as orders,
         COALESCE(SUM(total)::float8, 0) as revenue
       FROM orders
       WHERE created_at::date >= (CURRENT_DATE - INTERVAL '30 days')
       AND status != 'voided'${scope.sql}
-      GROUP BY day_num, hour
-      ORDER BY day_num, hour
+      -- Grouped by the raw expressions rather than the output aliases.
+      -- Postgres matches a selected expression against the grouping ones
+      -- textually, so once day_num gained its ::text cast the CASE above no
+      -- longer looked like the thing being grouped. Naming the underlying
+      -- EXTRACTs keeps every derived column valid.
+      GROUP BY EXTRACT(DOW FROM created_at::timestamp),
+               EXTRACT(HOUR FROM created_at::timestamp)
+      ORDER BY EXTRACT(DOW FROM created_at::timestamp),
+               EXTRACT(HOUR FROM created_at::timestamp)
     `, [...scope.params]);
     res.json(data);
   } catch (err) {
@@ -373,7 +388,10 @@ router.get('/detailed', requireUser, async (req, res) => {
       LEFT JOIN branches br ON br.id = o.branch_id
       WHERE o.created_at::date BETWEEN ?::date AND ?::date
         ${includeVoided ? '' : "AND o.status != 'voided'"}${scope.sql}
-      GROUP BY o.id
+      -- Postgres, unlike SQLite, requires every selected column to be grouped
+      -- or aggregated. Grouping by orders' primary key covers o.*, but br.name
+      -- comes from a joined table and has to be named explicitly.
+      GROUP BY o.id, br.name
       ORDER BY o.created_at ASC
     `, [from, to, ...scope.params]);
 
