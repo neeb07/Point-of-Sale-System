@@ -324,6 +324,61 @@ CREATE TABLE IF NOT EXISTS menu_version (
   CONSTRAINT menu_version_single_row CHECK (id = 1)
 );
 INSERT INTO menu_version (id, version) VALUES (1, 0) ON CONFLICT (id) DO NOTHING;
+
+-- ------------------------------------------------------------ migrations --
+--
+-- Added after the tables above were already live, so they are ALTERs rather
+-- than edits to the CREATE statements: a running database has to arrive at the
+-- same shape a fresh one does. All idempotent, so this file stays safe to
+-- re-run on every boot.
+
+-- A branch's short code, printed in front of the order number: E-18-041.
+-- Display only; the key is still (branch_id, local_id). See
+-- backend/db/order-no.js for the reasoning and the format.
+ALTER TABLE branches ADD COLUMN IF NOT EXISTS code TEXT;
+
+-- Staff, once the dashboard became the place they are created.
+--
+-- The PIN hash now lives here, which the first version of this file
+-- deliberately refused. The reason it refused still stands: every copy of a
+-- credential is another place it can leak from, and a four-digit PIN behind
+-- bcrypt is brute-forceable by anyone who takes the database.
+--
+-- It is stored anyway because the alternative is worse. The owner asked to
+-- create staff from the dashboard, and a till authenticates PINs offline
+-- against its own SQLite — so a PIN set here that never reaches the till is a
+-- staff account that cannot sign in at the only place it is used. There is no
+-- version of "create staff from the dashboard" that does not move the
+-- credential down the wire.
+--
+-- What limits the damage: the hash is never returned by any read route (see
+-- routes/staff.js), a PIN is useful only to somebody standing at a physical
+-- till in one of the two shops, and it grants no access to this database or
+-- the dashboard, which authenticate entirely separately.
+ALTER TABLE staff ADD COLUMN IF NOT EXISTS pin_hash TEXT;
+-- 'cloud' rows were created here and own their fields; 'branch' rows came up
+-- from a till and are only mirrored. The distinction decides who wins when
+-- both have a row for the same person.
+ALTER TABLE staff ADD COLUMN IF NOT EXISTS origin TEXT NOT NULL DEFAULT 'branch';
+ALTER TABLE staff ADD COLUMN IF NOT EXISTS updated_ms BIGINT;
+
+-- Bumped on any staff change, so a till can ask for one integer and download a
+-- roster only when it has actually moved — exactly as the menu works.
+CREATE TABLE IF NOT EXISTS staff_version (
+  id         INTEGER PRIMARY KEY DEFAULT 1,
+  version    INTEGER NOT NULL DEFAULT 0,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT staff_version_single_row CHECK (id = 1)
+);
+INSERT INTO staff_version (id, version) VALUES (1, 0) ON CONFLICT (id) DO NOTHING;
+
+-- Same derivation the till uses, for branches that predate the column.
+UPDATE branches
+   SET code = NULLIF(regexp_replace(
+                       regexp_replace(regexp_replace(name, '\\mbranch\\M', ' ', 'gi'),
+                                      '[^A-Za-z0-9]+', '-', 'g'),
+                       '^-+|-+$', '', 'g'), '')
+ WHERE code IS NULL OR code = '';
 `;
 
 /**

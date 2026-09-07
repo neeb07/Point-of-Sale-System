@@ -158,6 +158,23 @@ export default function Cashier() {
   const [performance, setPerformance] = useState([]);
   const [form, setForm] = useState({ name: '', role: 'Manager', color: '#DC2626', pin: '', confirmPin: '', branch_id: '' });
   const [branches, setBranches] = useState([]);
+
+  /*
+   * Manager is the only role that can be handed out.
+   *
+   * Administrator used to be offered here, and its powers were the menu,
+   * settings, staff and backups. All four now live on the head-office
+   * dashboard, so an admin account's only remaining distinction would be the
+   * ability to undo, at a till, the things that dashboard exists to control.
+   * Running the till is a manager's job.
+   *
+   * An account that is *already* an administrator still shows its own role, so
+   * editing that person's name does not quietly demote them.
+   */
+  const ASSIGNABLE_ROLES = ['Manager'];
+  const roleOptions = editingStaff && editingStaff.role && !ASSIGNABLE_ROLES.includes(editingStaff.role)
+    ? [...ASSIGNABLE_ROLES, editingStaff.role]
+    : ASSIGNABLE_ROLES;
   const [errors, setErrors] = useState({});
 
   useEffect(() => {
@@ -248,6 +265,15 @@ export default function Cashier() {
     if (!editingStaff) {
       if (form.pin.length !== 4) e.pin = 'PIN must be 4 digits';
       if (form.pin !== form.confirmPin) e.confirmPin = 'PINs do not match';
+      // A manager runs one shop. Without a branch their sales and expenses are
+      // filed under none, and neither branch's figures include them.
+      if (!form.branch_id) e.branch_id = 'Choose which branch this person works at';
+    }
+    // A PIN left blank on an edit means "leave it alone"; one that is typed
+    // must still be four digits and must still match.
+    if (editingStaff && form.pin) {
+      if (form.pin.length !== 4) e.pin = 'PIN must be 4 digits';
+      if (form.pin !== form.confirmPin) e.confirmPin = 'PINs do not match';
     }
     setErrors(e);
     return Object.keys(e).length === 0;
@@ -257,7 +283,16 @@ export default function Cashier() {
     if (!validate()) return;
     try {
       if (editingStaff) {
-        await staffAPI.update(editingStaff.id, { name: form.name, role: form.role, color: form.color, pin: form.pin || undefined, branch_id: form.branch_id ? Number(form.branch_id) : null });
+        // The role is sent only when it changed. An existing administrator
+        // edited from the dashboard would otherwise re-submit 'Admin', which
+        // the cloud refuses to assign — turning a name change into an error.
+        await staffAPI.update(editingStaff.id, {
+          name: form.name,
+          ...(form.role !== editingStaff.role ? { role: form.role } : {}),
+          color: form.color,
+          pin: form.pin || undefined,
+          branch_id: form.branch_id ? Number(form.branch_id) : null,
+        });
       } else {
         await staffAPI.create({ name: form.name, role: form.role, pin: form.pin, color: form.color, branch_id: form.branch_id ? Number(form.branch_id) : null });
       }
@@ -271,8 +306,16 @@ export default function Cashier() {
 
   const handleToggleActive = async (s) => {
     const isActive = s.status === 'Active' || s.active === 1;
-    await staffAPI.update(s.id, { active: !isActive });
-    loadStaff();
+    try {
+      await staffAPI.update(s.id, { active: !isActive });
+      loadStaff();
+      setToast({ message: `${s.name} ${isActive ? 'deactivated' : 'reactivated'}`, type: 'success' });
+    } catch (err) {
+      // Previously unhandled, which is exactly what "nothing happens when I
+      // deactivate staff" looked like: the call was refused, the rejection went
+      // nowhere, and the row simply stayed as it was with no explanation.
+      setToast({ message: err.message || 'Could not change that account', type: 'error' });
+    }
   };
 
   const maxRevenue = Math.max(...performance.map((p) => p.revenue || 0), 1);
@@ -414,7 +457,7 @@ export default function Cashier() {
           <div>
             <label style={{ fontSize: 14, fontWeight: 600, color: '#111827' }}>Role</label>
             <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-              {['Manager', 'Admin'].map((r) => (
+              {roleOptions.map((r) => (
                 <button
                   key={r}
                   onClick={() => setForm({ ...form, role: r })}
@@ -460,6 +503,9 @@ export default function Cashier() {
                   );
                 })}
               </div>
+              {errors.branch_id && (
+                <div style={{ fontSize: 12, color: '#EF4444', marginTop: 4 }}>{errors.branch_id}</div>
+              )}
               <div style={{ fontSize: 12, color: '#6B7280', marginTop: 6 }}>
                 Every sale and expense they record is filed under this branch.
                 {editingStaff ? ' Changing it does not move sales they have already rung up.' : ''}

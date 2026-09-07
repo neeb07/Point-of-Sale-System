@@ -41,7 +41,7 @@ const TABS = [
 ];
 
 /** Edited here, and pulled by every till on its next heartbeat. */
-const CLOUD_OWNED = new Set(['menu', 'deals', 'settings']);
+const CLOUD_OWNED = new Set(['menu', 'deals', 'settings', 'staff']);
 
 /**
  * Which tabs show only what the branches have sent, and cannot change it.
@@ -50,7 +50,7 @@ const CLOUD_OWNED = new Set(['menu', 'deals', 'settings']);
  * button and getting an error. These things are recorded at the till and there
  * is no downlink for them — only the menu travels the other way.
  */
-const READ_ONLY = new Set(['expenses', 'shifts', 'staff', 'inventory']);
+const READ_ONLY = new Set(['expenses', 'shifts', 'inventory']);
 
 export default function Shell({ user, onSignOut }) {
   const [tab, setTab] = useState('live');
@@ -102,8 +102,14 @@ export default function Shell({ user, onSignOut }) {
                 background: '#F0FDF4', borderBottom: '1px solid #BBF7D0',
                 color: '#166534', padding: '9px 20px', fontSize: 13,
               }}>
-                This is where the menu is edited. Changes reach every branch on
-                its next sync, and the tills cannot change it themselves.
+                {tab === 'staff'
+                  ? `This is where staff are added and their PINs are set. A new
+                     manager can sign in once their branch's till has synced —
+                     usually within a minute — and the tills cannot change the
+                     roster themselves.`
+                  : `This is where the ${active.label.toLowerCase()} is edited.
+                     Changes reach every branch on its next sync, and the tills
+                     cannot change it themselves.`}
               </div>
             )}
 

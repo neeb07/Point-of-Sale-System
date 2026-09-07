@@ -63,8 +63,19 @@ app.use('/api/live', require('./routes/live'));
 app.use('/api/reports', require('./routes/reports'));
 app.use('/api/branches', require('./routes/branches'));
 
-// Expenses, shifts, staff and stock — read-only, in the till's own response
-// shapes so the POS screens can be reused on the dashboard unaltered.
+/*
+ * Staff, which the cloud now owns the way it owns the menu.
+ *
+ * Mounted ahead of branch-data because both answer under /api/staff. This
+ * router holds the writes and the two till-facing endpoints; the reads it does
+ * not define — the list and the performance figures — fall through to
+ * branch-data below. Guards are inside, as with the menu: editing needs a
+ * signed-in owner, /version and /snapshot answer a branch key.
+ */
+app.use('/api/staff', require('./routes/staff'));
+
+// Expenses, shifts, staff figures and stock — read-only, in the till's own
+// response shapes so the POS screens can be reused on the dashboard unaltered.
 app.use('/api', require('./routes/branch-data'));
 
 /*

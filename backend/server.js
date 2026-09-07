@@ -141,8 +141,34 @@ app.use('/api/settings', (req, res, next) => {
 // Stock counts are day-to-day till work, so both roles keep and adjust them.
 app.use('/api/inventory', requireAuth, require('./routes/inventory'));
 
+/*
+ * Staff, once a cloud owns them.
+ *
+ * The same rule as the menu above, and for the same reason: a paired till pulls
+ * its roster from the dashboard, so an account created or a PIN changed here
+ * would work until the next snapshot and then silently revert. Refusing, and
+ * saying where staff are actually managed, is the honest form of that
+ * constraint.
+ *
+ * Signing in and out are emphatically not administration — they are how anybody
+ * uses this till at all, they must work with the internet down, and they change
+ * no roster — so they are exempt. An unpaired till is a single-shop install and
+ * keeps managing its own staff, exactly as before.
+ */
+const STAFF_SESSION_PATHS = new Set(['/login', '/logout']);
+
+function staffOwnedByCloud(req, res, next) {
+  if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return next();
+  if (STAFF_SESSION_PATHS.has(req.path)) return next();
+  if (!isSyncEnabled()) return next();
+  return res.status(409).json({
+    error: 'Staff are managed from the head-office dashboard. Changes made here would be replaced at the next sync.',
+    code: 'STAFF_OWNED_BY_CLOUD',
+  });
+}
+
 // Staff administration. The login route inside is exempt — see routes/staff.js.
-app.use('/api/staff', require('./routes/staff'));
+app.use('/api/staff', staffOwnedByCloud, require('./routes/staff'));
 
 // The daily WhatsApp report sends the shop's figures out of the building.
 app.use('/api/whatsapp', requireAdmin, require('./routes/whatsapp'));

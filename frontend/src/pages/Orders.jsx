@@ -154,7 +154,7 @@ export default function Orders() {
           onClick={() => openDrawer(row)}
           style={{ background: 'none', border: 'none', color: '#DC2626', fontWeight: 700, fontSize: 14, cursor: 'pointer' }}
         >
-          #{String(row.id).padStart(4, '0')}
+          {row.order_no || `#${String(row.id).padStart(4, '0')}`}
         </button>
       ),
     },
@@ -244,7 +244,7 @@ export default function Orders() {
       orderInfo: {
         date: moment(order.created_at).format('DD/MM/YYYY'),
         time: moment(order.created_at).format('hh:mm A'),
-        orderNumber: `#${order.id}`,
+        orderNumber: order.order_no || `#${order.id}`,
         // FIX (Bug 6): reprints now show the table the order was placed on.
         table: order.table_number || '—',
         paymentMethod: order.payment_method || 'Cash',

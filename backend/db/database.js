@@ -283,6 +283,35 @@ if (branchCount === 0) {
   ['E-18 Branch', 'CBR Town Branch'].forEach(n => insertBranch.run(n));
 }
 
+/*
+ * A short code per branch, for the order numbers customers and staff say aloud.
+ *
+ * "Order 41" is ambiguous the moment there are two shops: each till numbers its
+ * own orders from 1, so both branches have an order 41 every day. E-18-041 and
+ * CBR-Town-041 are unambiguous over the phone and on a receipt.
+ *
+ * Display only. The underlying integer id is untouched and remains the sync
+ * key, paired with the branch as (branch_id, local_id) — see cloud/db/schema.js.
+ * Changing a branch's code renumbers nothing; it only changes how the same
+ * orders are written down.
+ */
+try { db.exec("ALTER TABLE branches ADD COLUMN code TEXT DEFAULT NULL;"); } catch(e) {}
+{
+  // Derived from the name, once, for branches that predate this column. The
+  // owner can overwrite it; the derivation is a starting point, not a rule.
+  const slug = (name) => String(name || '')
+    .replace(/\bbranch\b/gi, ' ')       // "E-18 Branch" is just E-18 to the people saying it
+    .trim()
+    .replace(/[^A-Za-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    // Case is left as the owner typed the branch name: they asked for
+    // "CBR-Town-001", not "CBR-TOWN-001".
+    .slice(0, 12);
+  const setCode = db.prepare('UPDATE branches SET code = ? WHERE id = ?');
+  db.prepare('SELECT id, name FROM branches WHERE code IS NULL OR code = ?').all('')
+    .forEach(b => setCode.run(slug(b.name) || `B${b.id}`, b.id));
+}
+
 try { db.exec("ALTER TABLE staff ADD COLUMN branch_id INTEGER DEFAULT NULL;"); } catch(e) {}
 try { db.exec("ALTER TABLE orders ADD COLUMN branch_id INTEGER DEFAULT NULL;"); } catch(e) {}
 try { db.exec("ALTER TABLE expenses ADD COLUMN branch_id INTEGER DEFAULT NULL;"); } catch(e) {}

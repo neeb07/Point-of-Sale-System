@@ -20,6 +20,20 @@ function branchIdForStaff(staffId) {
   return (row && row.branch_id) || null;
 }
 
+/**
+ * A branch's short code, for the order numbers on receipts.
+ *
+ * Prepared once here rather than looked up per order: the list endpoint would
+ * otherwise run this for every row on the screen. There are two branches, so
+ * the statement is effectively a two-row lookup table.
+ */
+const branchCodeRow = db.prepare('SELECT code FROM branches WHERE id = ?');
+function branchCode(branchId) {
+  if (!branchId) return null;
+  const row = branchCodeRow.get(branchId);
+  return (row && row.code) || null;
+}
+
 const normalisePhone = (v) => {
   const digits = String(v || '').replace(/\D/g, '');
   return digits.length ? digits : null;
@@ -118,4 +132,4 @@ function openShiftIdFor(staffId) {
   return row ? row.id : null;
 }
 
-module.exports = { branchIdForStaff, resolveBranchId, recordCustomer, normalisePhone, openShiftIdFor };
+module.exports = { branchIdForStaff, branchCode, resolveBranchId, recordCustomer, normalisePhone, openShiftIdFor };

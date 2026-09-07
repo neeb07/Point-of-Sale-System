@@ -1,7 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db/database');
-const { resolveBranchId, recordCustomer, openShiftIdFor } = require('../db/branch');
+const { resolveBranchId, branchCode, recordCustomer, openShiftIdFor } = require('../db/branch');
+const { formatOrderNo } = require('../db/order-no');
 
 // Create a new completed order
 router.post('/', (req, res) => {
@@ -65,6 +66,10 @@ router.post('/', (req, res) => {
   if (Number(total) !== computedTotal) {
     console.warn(`Order total mismatch — client sent ${total}, server computed ${computedTotal}. Using server value.`);
   }
+
+  // Resolved once, ahead of the transaction: the row's branch and the branch
+  // code printed on the receipt must be the same answer, not two lookups.
+  const branchId = resolveBranchId(req);
 
   // Insert order in a transaction so it is atomic
   const createOrder = db.transaction(() => {
@@ -131,7 +136,7 @@ router.post('/', (req, res) => {
       // The sale belongs to the branch the till is standing in. Stamped at
       // write time rather than derived later, so moving a manager between
       // branches never rewrites the history of sales they already rang up.
-      resolveBranchId(req)
+      branchId
     );
 
     const orderId = orderResult.lastInsertRowid;
@@ -194,6 +199,9 @@ router.post('/', (req, res) => {
     res.status(201).json({
       success: true,
       id: orderId,
+      // What the receipt prints and the customer quotes back. Computed here so
+      // the till, the receipt and the dashboard cannot disagree about it.
+      order_no: formatOrderNo(branchCode(branchId), orderId),
       total: computedTotal,
       discount: cappedDiscount,
       // Returned so the receipt prints the figures the server actually stored
@@ -268,6 +276,7 @@ router.get('/', (req, res) => {
 
     const formatted = orders.map(o => ({
       ...o,
+      order_no: formatOrderNo(branchCode(o.branch_id), o.id),
       items: allItems.filter(i => i.order_id === o.id)
     }));
 
@@ -283,7 +292,7 @@ router.get('/:id', (req, res) => {
   const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(req.params.id);
   if (!order) return res.status(404).json({ error: 'Order not found' });
   const items = db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(req.params.id);
-  res.json({ ...order, items });
+  res.json({ ...order, order_no: formatOrderNo(branchCode(order.branch_id), order.id), items });
 });
 
 /**

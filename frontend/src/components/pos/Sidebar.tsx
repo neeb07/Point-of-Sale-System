@@ -57,6 +57,9 @@ const MANAGER_NAV: NavItem[] = [
   { id: 'shifts',   icon: Clock,         label: 'Shifts' },
   { id: 'expenses', icon: Wallet,        label: 'Expenses' },
   { id: 'reports',  icon: BarChart2,     label: 'Reports' },
+  // The printer and receipt options are the manager's own; everything else on
+  // that screen is shown to them greyed. See the allow-list in backend/server.js.
+  { id: 'settings', icon: Settings,      label: 'Settings' },
 ];
 
 export default function Sidebar({ activePage, onNavigate }: SidebarProps) {

@@ -10,11 +10,15 @@
  *   - **A session cookie** rather than a Bearer token. It is httpOnly, so this
  *     code cannot read it; `credentials: 'include'` is what carries it.
  *
- * **Writes are refused, deliberately.** Expenses, shifts, staff and stock
- * belong to the branch that records them, and there is no downlink for any of
- * them — sales travel up, and only the menu comes down. A write here could not
- * reach a till that was offline, which is exactly when someone would try. An
- * explicit refusal is better than a button that appears to work.
+ * **Most writes are refused, deliberately.** Expenses, shifts and stock belong
+ * to the branch that records them, and there is no downlink for any of them —
+ * they travel up, and only the menu, the shop-wide settings and the staff
+ * roster come down. A write with no downlink could not reach a till that was
+ * offline, which is exactly when someone would try, so an explicit refusal
+ * beats a button that appears to work.
+ *
+ * Staff are the exception, and the reason is that a downlink now exists for
+ * them: see cloud/routes/staff.js and backend/sync/staff-pull.js.
  */
 
 const BASE = '/api';
@@ -101,12 +105,56 @@ export const shiftsAPI = {
   summary: (id) => request('GET', `/shifts/${id}/summary`),
 };
 
+/**
+ * Which branch each staff row belongs to.
+ *
+ * The till's Staff screen calls `update(id, patch)` with the till's own staff
+ * number and nothing else, because on a till that number is unique. Here it is
+ * not: branch 1 and branch 2 both have a staff 3, and they are different
+ * people, so the cloud addresses them as /staff/:branchId/:localId.
+ *
+ * Rather than change the shared screen's call signature, the branch is
+ * remembered from the list it just rendered. The screen always lists before it
+ * edits — there is no way to reach the edit form otherwise — so the entry is
+ * always present by the time it is needed.
+ */
+const branchOfStaff = new Map();
+
 export const staffAPI = {
-  getAll: () => request('GET', '/staff'),
+  getAll: async () => {
+    const rows = await request('GET', '/staff');
+    if (Array.isArray(rows)) {
+      rows.forEach(r => { if (r && r.id != null) branchOfStaff.set(Number(r.id), r.branch_id); });
+    }
+    return rows;
+  },
   performance: (params = {}) => request('GET', `/staff/performance${qs(params)}`),
-  create: readOnly('A staff account'),
-  update: readOnly('A staff account'),
-  delete: readOnly('A staff account'),
+
+  create: (body) => request('POST', '/staff', body),
+
+  update: (id, patch = {}) => {
+    const branchId = patch.branch_id != null && patch.branch_id !== ''
+      ? Number(patch.branch_id)
+      : branchOfStaff.get(Number(id));
+    if (!branchId) {
+      throw new ApiError(
+        'That account has no branch on file, so it cannot be changed from here. Open it at the till.',
+        400);
+    }
+    // Dropped when it is not actually a move. The screen sends the form's
+    // branch on every save, and the cloud refuses a genuine branch change —
+    // passing an unchanged value through would turn every edit into that
+    // refusal.
+    const body = { ...patch };
+    if (Number(body.branch_id) === branchId) delete body.branch_id;
+    return request('PUT', `/staff/${branchId}/${id}`, body);
+  },
+
+  delete: (id) => {
+    const branchId = branchOfStaff.get(Number(id));
+    return request('DELETE', `/staff/${branchId}/${id}`);
+  },
+
   // Not the dashboard's login — that is email and password, in auth.js.
   login: readOnly('Signing in'),
   logout: () => request('POST', '/auth/logout'),

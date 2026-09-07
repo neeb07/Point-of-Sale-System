@@ -98,6 +98,7 @@ export default function OrdersScreen() {
   const visible = term
     ? orders.filter(o =>
         String(o.id).includes(term) ||
+        String(o.order_no || '').toLowerCase().includes(term) ||
         String(o.cashier_name || '').toLowerCase().includes(term) ||
         String(o.customer_name || '').toLowerCase().includes(term) ||
         String(o.customer_phone || '').includes(term) ||
@@ -189,7 +190,9 @@ export default function OrdersScreen() {
                       // for the cancelled one as often as the others.
                       opacity: voided ? 0.55 : 1,
                     }}>
-                      <td style={{ padding: '8px 10px', fontWeight: 600 }}>{o.id}</td>
+                      <td style={{ padding: '8px 10px', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                        {o.order_no || o.id}
+                      </td>
                       <td style={{ padding: '8px 10px', color: '#6B7280', whiteSpace: 'nowrap' }}>
                         {String(o.created_at || '').slice(5, 16)}
                       </td>

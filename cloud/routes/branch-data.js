@@ -173,7 +173,7 @@ router.get('/staff', requireUser, async (req, res) => {
     res.json(await db.q(`
       SELECT
         st.local_id AS id, st.name, st.role, st.color, st.active,
-        st.branch_id, b.name AS branch_name,
+        st.branch_id, st.origin, b.name AS branch_name,
         COALESCE((
           SELECT COUNT(*)::int FROM orders o
            WHERE o.branch_id = st.branch_id AND o.cashier_id = st.local_id
@@ -194,32 +194,82 @@ router.get('/staff', requireUser, async (req, res) => {
   }
 });
 
-/** Per-person takings over a range, as the till's Staff screen expects. */
+/**
+ * Per-person takings over a range.
+ *
+ * The column names here are not a free choice. The dashboard renders the till's
+ * own Staff screen, which reads `total_orders`, `total_revenue`,
+ * `total_discounts` and `busiest_hour` — the names backend/routes/staff.js
+ * returns. An earlier version of this route answered `orders` and `revenue`
+ * instead, which is why every row on that tab read zero: the data was correct
+ * and arriving, under names nothing was looking for.
+ *
+ * So this mirrors the till's shape deliberately. If one of them changes, both
+ * must.
+ */
 router.get('/staff/performance', requireUser, async (req, res) => {
   const { from, to } = range(req);
   const s = scope(req, 'st');
   try {
-    res.json(await db.q(`
-      SELECT
-        st.local_id AS id, st.name, st.role, st.color, st.active,
-        b.name AS branch_name,
-        COALESCE(agg.orders, 0)  AS orders,
-        COALESCE(agg.revenue, 0) AS revenue,
-        COALESCE(agg.avg_order_value, 0) AS avg_order_value
-      FROM staff st
-      LEFT JOIN branches b ON b.id = st.branch_id
-      LEFT JOIN (
+    const rows = await db.q(`
+      WITH agg AS (
         SELECT branch_id, cashier_id,
-               COUNT(*)::int AS orders,
-               COALESCE(SUM(total), 0)::float8 AS revenue,
-               COALESCE(AVG(total), 0)::float8 AS avg_order_value
+               COUNT(*)::int                        AS total_orders,
+               COALESCE(SUM(total), 0)::float8      AS total_revenue,
+               COALESCE(AVG(total), 0)::float8      AS avg_order_value,
+               COALESCE(SUM(discount), 0)::float8   AS total_discounts
           FROM orders
          WHERE status <> 'voided' AND created_at::date BETWEEN ?::date AND ?::date
          GROUP BY branch_id, cashier_id
-      ) agg ON agg.branch_id = st.branch_id AND agg.cashier_id = st.local_id
+      ),
+      -- The hour each person takes the most orders in. Ranked per cashier and
+      -- tie-broken on the hour itself, so two equally busy hours resolve to the
+      -- earlier one every time rather than to whichever the planner happened to
+      -- emit first.
+      busiest AS (
+        SELECT branch_id, cashier_id, hour FROM (
+          SELECT branch_id, cashier_id,
+                 -- created_at is TEXT: it arrives as the till's own local
+                 -- wall-clock string. A cast to date works on it
+                 -- elsewhere because that cast is defined; EXTRACT
+                 -- needs a real timestamp, and fails outright without
+                 -- this one.
+                 EXTRACT(HOUR FROM created_at::timestamp)::int AS hour,
+                 ROW_NUMBER() OVER (
+                   PARTITION BY branch_id, cashier_id
+                   ORDER BY COUNT(*) DESC, EXTRACT(HOUR FROM created_at::timestamp) ASC
+                 ) AS rn
+            FROM orders
+           WHERE status <> 'voided' AND created_at::date BETWEEN ?::date AND ?::date
+           GROUP BY branch_id, cashier_id, EXTRACT(HOUR FROM created_at::timestamp)
+        ) ranked WHERE rn = 1
+      )
+      SELECT
+        st.local_id AS id, st.name, st.role, st.color, st.active,
+        st.branch_id, b.name AS branch_name,
+        COALESCE(agg.total_orders, 0)    AS total_orders,
+        COALESCE(agg.total_revenue, 0)   AS total_revenue,
+        COALESCE(agg.avg_order_value, 0) AS avg_order_value,
+        COALESCE(agg.total_discounts, 0) AS total_discounts,
+        busiest.hour                     AS busiest_hour_num
+      FROM staff st
+      LEFT JOIN branches b ON b.id = st.branch_id
+      LEFT JOIN agg     ON agg.branch_id = st.branch_id AND agg.cashier_id = st.local_id
+      LEFT JOIN busiest ON busiest.branch_id = st.branch_id AND busiest.cashier_id = st.local_id
       WHERE 1 = 1${s.sql}
-      ORDER BY revenue DESC
-    `, [from, to, ...s.params]));
+      ORDER BY total_revenue DESC, st.name ASC
+    `, [from, to, from, to, ...s.params]);
+
+    // Formatted here rather than in SQL, character for character as the till
+    // formats it, so the same person reads the same way on both screens.
+    res.json(rows.map(r => {
+      const h = r.busiest_hour_num;
+      const { busiest_hour_num, ...rest } = r;
+      return {
+        ...rest,
+        busiest_hour: h == null ? 'N/A' : `${h % 12 || 12}${h < 12 ? 'AM' : 'PM'}`,
+      };
+    }));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

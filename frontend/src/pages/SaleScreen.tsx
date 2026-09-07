@@ -214,7 +214,9 @@ export default function SaleScreen({ onNavigate }: SaleScreenProps = {}) {
         orderInfo: {
           date: moment().format('DD/MM/YYYY'),
           time: moment().format('hh:mm A'),
-          orderNumber: order.id ? `#${order.id}` : `#${Math.floor(1000 + Math.random() * 9000)}`,
+          // The server formats this, branch code and all (E-18-041). Falling back to
+          // the bare id keeps an unbranched till printing what it always did.
+          orderNumber: order.order_no || (order.id ? `#${order.id}` : `#${Math.floor(1000 + Math.random() * 9000)}`),
           table: tableNumber || '—',
           paymentMethod,
           cashier: currentUser?.name || 'Unknown',

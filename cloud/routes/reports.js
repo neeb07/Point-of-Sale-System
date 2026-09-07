@@ -379,6 +379,12 @@ router.get('/detailed', requireUser, async (req, res) => {
         o.delivery_charge,
         o.total,
         br.name AS branch_name,
+        -- The label the shop actually uses for this sale. Built here rather
+        -- than in the browser so the dashboard, the till's Orders screen and
+        -- the printed receipt cannot drift apart: one format, one place.
+        -- Falls back to the bare number for a branch with no code set.
+        CASE WHEN COALESCE(br.code, '') = '' THEN o.local_id::text
+             ELSE br.code || '-' || LPAD(o.local_id::text, 3, '0') END AS order_no,
         COALESCE(SUM(oi.price * oi.quantity)::float8, 0) AS subtotal,
         COALESCE(SUM(oi.quantity)::int, 0)            AS total_qty,
         COUNT(oi.id)::int                             AS line_count,
@@ -391,7 +397,7 @@ router.get('/detailed', requireUser, async (req, res) => {
       -- Postgres, unlike SQLite, requires every selected column to be grouped
       -- or aggregated. Grouping by orders' primary key covers o.*, but br.name
       -- comes from a joined table and has to be named explicitly.
-      GROUP BY o.id, br.name
+      GROUP BY o.id, br.name, br.code
       ORDER BY o.created_at ASC
     `, [from, to, ...scope.params]);
 

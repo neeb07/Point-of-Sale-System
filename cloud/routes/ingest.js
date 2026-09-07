@@ -47,7 +47,7 @@ const str = (v) => (v == null ? null : String(v));
  * `RETURNING` is what makes the order_items remap possible in the same trip:
  * it hands back each row's cloud id alongside the till's local_id.
  */
-function buildUpsert(table, columns, rows, valuesFor, receivedAt, branchId) {
+function buildUpsert(table, columns, rows, valuesFor, receivedAt, branchId, conflictWhere) {
   const cols = ['branch_id', 'local_id', ...columns, 'received_at'];
   const params = [];
   const tuples = [];
@@ -70,6 +70,7 @@ function buildUpsert(table, columns, rows, valuesFor, receivedAt, branchId) {
       INSERT INTO ${table} (${cols.join(', ')})
       VALUES ${tuples.join(', ')}
       ON CONFLICT (branch_id, local_id) DO UPDATE SET ${updates}
+      ${conflictWhere ? `WHERE ${conflictWhere}` : ''}
       RETURNING id, local_id
     `,
     params,
@@ -166,9 +167,10 @@ async function ingestOrders(client, branchId, rows, receivedAt) {
 }
 
 /** The simple tables: one multi-row upsert, no children to remap. */
-function simpleIngest(table, columns, valuesFor) {
+function simpleIngest(table, columns, valuesFor, conflictWhere) {
   return async (client, branchId, rows, receivedAt) => {
-    const { sql, params } = buildUpsert(table, columns, rows, valuesFor, receivedAt, branchId);
+    const { sql, params } = buildUpsert(
+      table, columns, rows, valuesFor, receivedAt, branchId, conflictWhere);
     await client.query(sql, params);
   };
 }
@@ -186,13 +188,23 @@ const HANDLERS = {
     str(r.description), num(r.amount), num(r.from_drawer), str(r.created_at),
   ]),
 
-  // Staff and stock are pushed so the owner can see them on the dashboard.
-  // Note what is absent from STAFF_COLS: the PIN, hashed or otherwise. It is
-  // of no use here, and every copy of a credential is another place it can
-  // leak from.
+  /*
+   * Staff and stock are pushed so the owner can see them on the dashboard.
+   *
+   * STAFF_COLS still carries no PIN. The till has no reason to send one up: the
+   * hash travels the other way now, from routes/staff.js down to the till, and
+   * a push that carried it back would achieve nothing but a second copy in
+   * flight.
+   *
+   * The WHERE clause is what makes the two directions coexist. A row the owner
+   * has touched is marked origin = 'cloud', and this push must not overwrite
+   * it — otherwise deactivating somebody on the dashboard would be undone by
+   * that same till's next push thirty seconds later, which looks exactly like
+   * the button not working.
+   */
   staff: simpleIngest('staff', STAFF_COLS, r => [
     str(r.name), str(r.role), str(r.color), num(r.active),
-  ]),
+  ], "staff.origin <> 'cloud'"),
 
   ingredients: simpleIngest('ingredients', INGREDIENT_COLS, r => [
     str(r.name), str(r.unit), num(r.stock), num(r.low_stock_threshold), num(r.cost_per_unit),
