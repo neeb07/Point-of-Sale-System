@@ -33,9 +33,15 @@ const screens: Record<string, React.ComponentType<{ onNavigate?: (page: string) 
  *
  * Menu, Deals and Inventory are not here: a manager opens them, but Menu and
  * Deals render read-only and every write is refused by the backend anyway.
- * Staff administration and Settings stay closed outright.
+ *
+ * Settings is no longer here either. A manager needs the printer and receipt
+ * options — they are the one standing in front of the printer when it jams —
+ * so the screen opens for them, shows everything, and lets them change only
+ * what is theirs. The server enforces that; see the allow-list in server.js.
+ *
+ * Staff administration stays closed outright.
  */
-const ADMIN_ONLY_SCREENS = new Set(['cashier', 'settings']);
+const ADMIN_ONLY_SCREENS = new Set(['cashier']);
 
 /**
  * Where each role lands.

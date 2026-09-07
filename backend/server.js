@@ -42,7 +42,7 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 const {
-  attachUser, requireAuth, requireAdmin, adminOnlyWrites,
+  attachUser, requireAuth, requireAdmin, adminOnlyWrites, isAdminRole,
 } = require('./middleware/auth');
 
 // Resolve the caller's session for every request; individual routes decide
@@ -90,9 +90,52 @@ app.use('/api/deals', adminOnlyWrites, menuOwnedByCloud, require('./routes/deals
  * Nothing in here is secret: it is the tax rate, currency and receipt wording
  * that get printed on every customer's receipt anyway.
  */
+/**
+ * Settings a manager may change on their own till.
+ *
+ * How this machine behaves — which printer paper it uses, whether it prints
+ * automatically, what appears on the slip. A manager is the person standing in
+ * front of the printer when it jams; making them telephone the owner to change
+ * the paper size is the kind of friction that gets worked around rather than
+ * followed.
+ *
+ * Everything absent from this list stays with the owner: prices, tax, the
+ * shop's identity, backups, and sending the day's figures out of the building.
+ * The Settings screen still shows a manager those values, greyed, so they can
+ * read what the till is configured with without being able to change it.
+ */
+const MANAGER_EDITABLE = new Set([
+  'paper_size',
+  'auto_print',
+  'show_tax',
+  'show_cashier',
+  'show_order_number',
+  'show_payment',
+]);
+
 app.use('/api/settings', (req, res, next) => {
   if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return next();
-  return requireAdmin(req, res, next);
+
+  // Administrators keep the whole surface, including restore.
+  if (req.user && isAdminRole(req.user.role)) return next();
+  if (!req.user) return requireAdmin(req, res, next);
+
+  // A manager may write, but only these keys, and only via the plain update.
+  if (req.method !== 'PUT' || req.path !== '/') {
+    return res.status(403).json({ error: 'Administrator access required' });
+  }
+  const attempted = Object.keys(req.body || {});
+  const refused = attempted.filter(k => !MANAGER_EDITABLE.has(k));
+  if (refused.length) {
+    return res.status(403).json({
+      error: `Only the owner can change: ${refused.join(', ')}.`,
+      code: 'NOT_YOURS_TO_CHANGE',
+    });
+  }
+  if (!attempted.length) {
+    return res.status(400).json({ error: 'Nothing to change' });
+  }
+  return next();
 }, require('./routes/settings'));
 
 // Stock counts are day-to-day till work, so both roles keep and adjust them.

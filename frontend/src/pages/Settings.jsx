@@ -79,7 +79,25 @@ export default function Settings() {
   // renders money the same way the rest of the app does. `refreshSettings` is
   // called after a save so the change reaches the sale screen immediately.
   const { formatMoney, currencySymbol, refresh: refreshSettings } = useSettings();
-  const { currentUser } = useAuth();
+  const { currentUser, isAdmin } = useAuth();
+
+  /*
+   * What a manager may change on their own till.
+   *
+   * They are the person standing in front of the printer when it jams, so the
+   * printer and receipt options are theirs. Prices, tax, the shop's identity,
+   * backups and sending the day's figures out of the building stay with the
+   * owner — enforced by the server, not just hidden here; see the allow-list in
+   * backend/server.js.
+   *
+   * The rest is shown to them rather than hidden. Knowing what the till is
+   * configured with is useful even when changing it is not yours to do, and a
+   * screen that silently omits half its sections is more confusing than one
+   * that greys them.
+   */
+  const MANAGER_EDITABLE = new Set(['receipt', 'printer']);
+  const OWNER_ONLY = new Set(['backup', 'reports']);
+  const canEditSection = (id) => isAdmin || MANAGER_EDITABLE.has(id);
   const [activeSection, setActiveSection] = useState('restaurant');
   const [toast, setToast] = useState(null);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
@@ -948,8 +966,9 @@ export default function Settings() {
         <PageHeader title="Settings" />
         <div style={{ display: 'flex', gap: 20 }}>
           <nav style={{ ...CARD_STYLE, width: 200, flexShrink: 0, padding: 8 }}>
-            {NAV_ITEMS.map(({ id, label, icon: Icon }) => {
+            {NAV_ITEMS.filter(({ id }) => isAdmin || !OWNER_ONLY.has(id)).map(({ id, label, icon: Icon }) => {
               const active = activeSection === id;
+              const readOnly = !canEditSection(id);
               return (
                 <button
                   key={id}
@@ -963,13 +982,43 @@ export default function Settings() {
                   }}
                 >
                   <Icon size={18} style={{ color: active ? '#DC2626' : '#6B7280' }} />
-                  {label}
+                  <span style={{ flex: 1, textAlign: 'left' }}>{label}</span>
+                  {/* A small marker, so the greying below is expected rather
+                      than looking like something failed to load. */}
+                  {readOnly && (
+                    <span style={{ fontSize: 10, color: '#9CA3AF', fontWeight: 600 }}>view</span>
+                  )}
                 </button>
               );
             })}
           </nav>
           <div style={{ ...CARD_STYLE, flex: 1, padding: 28, minHeight: 500 }}>
-            {sectionRenderers[activeSection]?.()}
+            {/*
+              A section a manager may read but not change is shown, greyed and
+              inert, rather than hidden. Knowing what the till is configured
+              with is useful even when changing it is not yours to do — and a
+              screen that silently omits half its sections is more confusing
+              than one that explains why.
+
+              pointerEvents rather than disabling each field: this section has
+              dozens of inputs across several renderers, and one missed
+              `disabled` would be a control that appears to work and then fails
+              at the server.
+            */}
+            {!canEditSection(activeSection) && (
+              <div style={{
+                background: '#F3F4F6', border: '1px solid #E5E7EB', borderRadius: 8,
+                padding: '10px 14px', marginBottom: 20, fontSize: 13, color: '#4B5563',
+              }}>
+                These are set by the owner and are the same across the shop. You
+                can see what this till is using, but not change it here.
+              </div>
+            )}
+            <div style={canEditSection(activeSection) ? undefined : {
+              pointerEvents: 'none', opacity: 0.6, userSelect: 'text',
+            }}>
+              {sectionRenderers[activeSection]?.()}
+            </div>
           </div>
         </div>
       </div>

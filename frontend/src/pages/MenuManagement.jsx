@@ -263,6 +263,33 @@ function ItemModal({ item, categories = MENU_CATEGORIES, onClose, onSave }) {
   const [addingCategory, setAddingCategory] = useState(false);
   const [newCategory, setNewCategory] = useState('');
 
+  /*
+   * Sizes.
+   *
+   * An item either has one price or a set of named sizes, never both — a pizza
+   * priced at "Small 800, Large 1400" has no meaningful single price, and
+   * carrying one anyway is how an item ends up selling for 0. So the toggle
+   * swaps which field is asked for rather than showing both.
+   */
+  const [hasVariants, setHasVariants] = useState(item?.has_variants === 1);
+  const [variants, setVariants] = useState(
+    (item?.variants || []).map(v => ({ label: v.label || '', price: String(v.price ?? '') })
+  ));
+
+  const addVariant = (label = '') =>
+    setVariants(v => [...v, { label, price: '' }]);
+  const setVariant = (i, field, value) =>
+    setVariants(v => v.map((row, n) => (n === i ? { ...row, [field]: value } : row)));
+  const removeVariant = (i) =>
+    setVariants(v => v.filter((_, n) => n !== i));
+
+  /** The size sets this shop actually uses, so the common case is two clicks. */
+  const PRESETS = [
+    { label: 'Pizza sizes', sizes: ['Small', 'Medium', 'Large', 'X-Large'] },
+    { label: 'Drink sizes', sizes: ['Regular', 'Large'] },
+    { label: 'Scoops', sizes: ['1 Scoop', '2 Scoops', '3 Scoops'] },
+  ];
+
   const handleImageUpload = (e) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -274,18 +301,31 @@ function ItemModal({ item, categories = MENU_CATEGORIES, onClose, onSave }) {
     }
   };
 
+  // A size with no name, or no price, would appear on the sale screen as a
+  // blank button that sells for nothing.
+  const usableVariants = variants
+    .map(v => ({ label: v.label.trim(), price: Number(v.price) }))
+    .filter(v => v.label && Number.isFinite(v.price) && v.price > 0);
+
+  const canSave = name.trim() && (hasVariants ? usableVariants.length > 0 : Boolean(price));
+
   const handleSave = () => {
-    if (!name.trim() || (item?.has_variants !== 1 && !price)) return;
+    if (!canSave) return;
     const finalCategory = addingCategory && newCategory.trim()
       ? newCategory.trim()
       : category;
     if (!finalCategory) return;
     onSave({
       name: name.trim(),
-      price: Number(price) || 0,
+      // An item with sizes carries no base price of its own; each size has one.
+      price: hasVariants ? 0 : (Number(price) || 0),
       category: finalCategory,
       image_url: imageUrl,
       description: description.trim() || null,
+      has_variants: hasVariants,
+      variants: hasVariants
+        ? usableVariants.map((v, i) => ({ ...v, sort_order: i }))
+        : [],
     });
   };
 
@@ -338,22 +378,114 @@ function ItemModal({ item, categories = MENU_CATEGORIES, onClose, onSave }) {
           onBlur={e => { e.currentTarget.style.border = '1px solid #E5E7EB'; }}
         />
 
-        {/* Price */}
-        <label style={{ color: '#FFFFFF', fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 6 }}>Price ({currencySymbol})</label>
-        {item?.has_variants === 1 ? (
-          <div style={{ ...inputStyle, marginBottom: 16, background: 'rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.8)', border: 'none', display: 'flex', alignItems: 'center' }}>
-            Managed via variants
+        {/* Sizes, or a single price — never both. */}
+        <label style={{
+          display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer',
+          color: '#FFFFFF', fontSize: 13, fontWeight: 600, marginBottom: 14,
+        }}>
+          <input
+            type="checkbox"
+            checked={hasVariants}
+            onChange={e => {
+              setHasVariants(e.target.checked);
+              // Offer a first row immediately: an empty list with a checkbox
+              // above it reads as broken rather than as waiting for input.
+              if (e.target.checked && variants.length === 0) addVariant();
+            }}
+            style={{ width: 16, height: 16, accentColor: '#DC2626', cursor: 'pointer' }}
+          />
+          This item comes in different sizes
+        </label>
+
+        {hasVariants ? (
+          <div style={{ marginBottom: 16 }}>
+            {variants.length === 0 && (
+              <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12, marginBottom: 10 }}>
+                Add at least one size, each with its own price.
+              </div>
+            )}
+
+            {variants.map((v, i) => (
+              <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                <input
+                  value={v.label}
+                  onChange={e => setVariant(i, 'label', e.target.value)}
+                  placeholder="Size (e.g. Large)"
+                  style={{ ...inputStyle, flex: 2, marginBottom: 0 }}
+                  onFocus={e => { e.currentTarget.style.border = '1px solid #FFFFFF'; }}
+                  onBlur={e => { e.currentTarget.style.border = '1px solid #E5E7EB'; }}
+                />
+                <input
+                  type="number"
+                  value={v.price}
+                  onChange={e => setVariant(i, 'price', e.target.value)}
+                  placeholder={currencySymbol}
+                  style={{ ...inputStyle, flex: 1, marginBottom: 0 }}
+                  onFocus={e => { e.currentTarget.style.border = '1px solid #FFFFFF'; }}
+                  onBlur={e => { e.currentTarget.style.border = '1px solid #E5E7EB'; }}
+                />
+                <button
+                  onClick={() => removeVariant(i)}
+                  title="Remove this size"
+                  style={{
+                    width: 42, borderRadius: 8, background: 'transparent',
+                    border: '1px solid rgba(255,255,255,0.25)', color: '#FCA5A5',
+                    cursor: 'pointer', fontSize: 18, lineHeight: 1,
+                  }}
+                >
+                  &times;
+                </button>
+              </div>
+            ))}
+
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
+              <button
+                onClick={() => addVariant()}
+                style={{
+                  padding: '6px 12px', borderRadius: 999, fontSize: 12, fontWeight: 600,
+                  background: 'transparent', border: '1px solid rgba(255,255,255,0.3)',
+                  color: '#FFFFFF', cursor: 'pointer',
+                }}
+              >
+                + Add size
+              </button>
+
+              {/*
+                The size sets this shop actually uses. Typing "Small, Medium,
+                Large, X-Large" by hand for every pizza is where inconsistent
+                spellings come from, and a deal that looks for "Large" does not
+                match an item saved as "large".
+              */}
+              {variants.length === 0 && PRESETS.map(p => (
+                <button
+                  key={p.label}
+                  onClick={() => setVariants(p.sizes.map(sz => ({ label: sz, price: '' })))}
+                  style={{
+                    padding: '6px 12px', borderRadius: 999, fontSize: 12, fontWeight: 600,
+                    background: 'rgba(220,38,38,0.15)', border: '1px solid #DC2626',
+                    color: '#FCA5A5', cursor: 'pointer',
+                  }}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
           </div>
         ) : (
-          <input
-            type="number"
-            value={price}
-            onChange={e => setPrice(e.target.value)}
-            placeholder="0"
-            style={{ ...inputStyle, marginBottom: 16 }}
-            onFocus={e => { e.currentTarget.style.border = '1px solid #FFFFFF'; }}
-            onBlur={e => { e.currentTarget.style.border = '1px solid #E5E7EB'; }}
-          />
+          <>
+            <label style={{ color: '#FFFFFF', fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 6 }}>
+              Price ({currencySymbol})
+            </label>
+            <input
+              type="number"
+              value={price}
+              onChange={e => setPrice(e.target.value)}
+              placeholder="0"
+              style={{ ...inputStyle, marginBottom: 16 }}
+              onFocus={e => { e.currentTarget.style.border = '1px solid #FFFFFF'; }}
+              onBlur={e => { e.currentTarget.style.border = '1px solid #E5E7EB'; }}
+            />
+          </>
         )}
 
         {/* Category */}
@@ -443,16 +575,19 @@ function ItemModal({ item, categories = MENU_CATEGORIES, onClose, onSave }) {
           </button>
           <button
             onClick={handleSave}
+            disabled={!canSave}
             className="flex-1 flex items-center justify-center transition-all duration-150"
             style={{
               height: 42, borderRadius: 10,
-              background: '#FFFFFF',
+              // Disabled rather than silently doing nothing, which is what it
+              // used to do when a required field was empty.
+              background: canSave ? '#FFFFFF' : 'rgba(255,255,255,0.35)',
               boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
               border: 'none', color: '#B91C1C', fontSize: 14, fontWeight: 700,
-              cursor: 'pointer', fontFamily: 'Inter, sans-serif',
+              cursor: canSave ? 'pointer' : 'not-allowed', fontFamily: 'Inter, sans-serif',
             }}
           >
-            Save Item
+            {canSave ? 'Save Item' : (hasVariants ? 'Add a size first' : 'Name and price needed')}
           </button>
         </div>
       </div>
