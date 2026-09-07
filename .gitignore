@@ -85,3 +85,7 @@ coverage/
 frontend/release/
 # Cloud pairing: holds this branch's API key. Never commit.
 cloud-sync.json
+
+# Branch pairing keys, written by provisioning. Never commit.
+cloud-sync.json
+*cloud-sync.json

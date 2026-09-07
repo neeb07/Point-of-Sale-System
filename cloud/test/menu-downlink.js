@@ -33,13 +33,25 @@ const CLOUD = `http://127.0.0.1:${PORT}/api`;
 const TILL = 'http://127.0.0.1:3388/api';
 
 const KEY = crypto.randomBytes(32).toString('hex');
+/** High enough that it cannot collide with a real shop's branch ids. */
+const TEST_BRANCH_ID = 9001;
 const sha = (k) => crypto.createHash('sha256').update(k).digest('hex');
 
 const tillDir = fs.mkdtempSync(path.join(os.tmpdir(), 'blaze-menu-'));
 fs.copyFileSync(path.join(TILL_ROOT, 'pos_database.db'), path.join(tillDir, 'pos_database.db'));
 fs.writeFileSync(path.join(tillDir, 'cloud-sync.json'), JSON.stringify({
   enabled: true, cloud_url: `http://127.0.0.1:${PORT}`,
-  branch_id: 1, branch_name: 'E-18 Branch', api_key: KEY,
+  /*
+   * A branch of this test's own, not one of the shop's.
+   *
+   * An earlier version re-keyed branch 1 so it could drive a till, and never
+   * put the real key back — which unpaired the actual shop and left it
+   * reporting "cloud rejected this branch key" against a cloud-sync.json that
+   * was plainly correct. Save-and-restore would have worked until the test
+   * crashed halfway. Not touching the shop's branches at all is simpler and
+   * cannot fail that way.
+   */
+  branch_id: TEST_BRANCH_ID, branch_name: 'Menu Test Branch', api_key: KEY,
 }, null, 2));
 
 process.env.POS_USER_DATA_PATH = tillDir;
@@ -97,7 +109,10 @@ const stopCloud = () => { if (proc) { try { proc.kill(); } catch (e) {} proc = n
     (async () => {
       await createSchema(db);
       await db.run('TRUNCATE deal_items, deals, item_variants, menu_items RESTART IDENTITY CASCADE');
-      await db.run('UPDATE branches SET api_key_hash = ? WHERE id = 1', ['${sha(KEY)}']);
+      await db.run(
+        'INSERT INTO branches (id, name, api_key_hash) VALUES (?, ?, ?) ' +
+        'ON CONFLICT (id) DO UPDATE SET api_key_hash = EXCLUDED.api_key_hash, active = 1',
+        [${TEST_BRANCH_ID}, 'Menu Test Branch', '${sha(KEY)}']);
       await db.close();
     })().catch(e => { console.error(e.message); process.exit(1); });
   `);
@@ -226,9 +241,38 @@ const stopCloud = () => { if (proc) { try { proc.kill(); } catch (e) {} proc = n
  } catch (e) {
   console.error('THREW:', e);
  } finally {
+  /*
+   * Put the menu back before leaving.
+   *
+   * The last section retires every item to prove an empty menu is refused, and
+   * leaving it that way blanks the dashboard's Menu tab — while import-menu.js
+   * refuses to help, because a menu does technically exist. Also drops this
+   * test's own branch so it does not appear in the dashboard's branch list.
+   */
+  try {
+    cloudExec([
+      "const db = require('./db/pg');",
+      '(async () => {',
+      "  await db.run('UPDATE menu_items SET active = 1');",
+      "  await db.run('UPDATE menu_version SET version = version + 1 WHERE id = 1');",
+      // In dependency order. The test's own heartbeat leaves a live_status row,
+      // whose foreign key blocks deleting the branch — which failed silently
+      // the first time and left a phantom branch in the dashboard's list.
+      "  for (const t of ['live_status','order_items','orders','shifts','expenses','staff','ingredients','sync_cursor']) {",
+      `    try { await db.run('DELETE FROM ' + t + ' WHERE branch_id = ?', [${TEST_BRANCH_ID}]); } catch (e) {}`,
+      '  }',
+      `  await db.run('DELETE FROM branches WHERE id = ?', [${TEST_BRANCH_ID}]);`,
+      '  await db.close();',
+      "})().catch(e => { console.error(e.message); process.exit(1); });",
+    ].join('\n'));
+    console.log('\n(menu restored, test branch removed)');
+  } catch (e) {
+    console.error('\nCOULD NOT RESTORE THE MENU:', e.message);
+    console.error('Fix with: UPDATE menu_items SET active = 1;');
+  }
   stopCloud();
   try { fs.rmSync(tillDir, { recursive: true, force: true }); } catch (e) {}
-  console.log('\n(till copy removed)');
+  console.log('(till copy removed)');
   process.exit(0);
  }
 })();
