@@ -103,7 +103,18 @@ export default function Shell({ user, onSignOut }) {
 
             {tab === 'live'
               ? <LiveScreen user={user} onSignOut={onSignOut} embedded />
-              : <active.Screen />}
+              : (
+                /*
+                 * `pos-screen` unclamps the till's full-viewport shell. Several
+                 * of these screens set `height: 100vh; overflow: hidden` inline,
+                 * which is right beside a sidebar in Electron and wrong below a
+                 * header in a browser — it puts the bottom of every report off
+                 * the screen with no way to scroll to it. See styles.css.
+                 */
+                <div className="pos-screen">
+                  <active.Screen />
+                </div>
+              )}
           </div>
         </POSProvider>
       </SettingsProvider>

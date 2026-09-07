@@ -337,3 +337,15 @@ body {
   from { transform: rotate(0deg); }
   to   { transform: rotate(360deg); }
 }
+
+/*
+ * Used by the Reports filter row, which has always asked for this class
+ * without anything defining it — so a stray scrollbar sat under the date chips.
+ */
+.hide-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
