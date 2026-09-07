@@ -63,6 +63,10 @@ app.use('/api/live', require('./routes/live'));
 app.use('/api/reports', require('./routes/reports'));
 app.use('/api/branches', require('./routes/branches'));
 
+// Expenses, shifts, staff and stock — read-only, in the till's own response
+// shapes so the POS screens can be reused on the dashboard unaltered.
+app.use('/api', require('./routes/branch-data'));
+
 /*
  * Serve the dashboard build from this same process, and therefore the same
  * origin as the API.
