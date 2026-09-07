@@ -223,13 +223,61 @@ CREATE TABLE IF NOT EXISTS sync_cursor (
 -- The cloud is the single writer for the menu (see routes/menu.js). Tills pull
 -- a whole snapshot and never push one back, which removes conflict resolution
 -- by design rather than solving it.
+CREATE TABLE IF NOT EXISTS menu_items (
+  id           SERIAL PRIMARY KEY,
+  name         TEXT NOT NULL,
+  category     TEXT,
+  price        DOUBLE PRECISION DEFAULT 0,
+  image_url    TEXT,
+  has_variants INTEGER DEFAULT 0,
+  active       INTEGER DEFAULT 1,
+  description  TEXT,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS item_variants (
+  id           SERIAL PRIMARY KEY,
+  menu_item_id INTEGER NOT NULL REFERENCES menu_items(id) ON DELETE CASCADE,
+  label        TEXT,
+  price        DOUBLE PRECISION DEFAULT 0,
+  sort_order   INTEGER DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS deals (
+  id          SERIAL PRIMARY KEY,
+  name        TEXT NOT NULL,
+  description TEXT,
+  price       DOUBLE PRECISION DEFAULT 0,
+  image_url   TEXT,
+  active      INTEGER DEFAULT 1,
+  deal_group  TEXT,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS deal_items (
+  id           SERIAL PRIMARY KEY,
+  deal_id      INTEGER NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
+  menu_item_id INTEGER REFERENCES menu_items(id) ON DELETE SET NULL,
+  quantity     INTEGER DEFAULT 1,
+  variant_id   INTEGER REFERENCES item_variants(id) ON DELETE SET NULL,
+  description  TEXT
+);
+
+/*
+ * One integer the tills can check cheaply.
+ *
+ * A till asks "what version is the menu?" on every heartbeat -- a few bytes,
+ * which succeeds on a link far too weak to download a menu. Only when the
+ * number differs does it fetch the whole snapshot. That is what makes the
+ * downlink survivable on a bad connection: the common case costs nothing.
+ */
 CREATE TABLE IF NOT EXISTS menu_version (
-  id      INTEGER PRIMARY KEY DEFAULT 1,
-  version INTEGER NOT NULL DEFAULT 0,
-  document JSONB,
+  id         INTEGER PRIMARY KEY DEFAULT 1,
+  version    INTEGER NOT NULL DEFAULT 0,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   CONSTRAINT menu_version_single_row CHECK (id = 1)
 );
+INSERT INTO menu_version (id, version) VALUES (1, 0) ON CONFLICT (id) DO NOTHING;
 `;
 
 async function createSchema(db) {

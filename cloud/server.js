@@ -68,6 +68,14 @@ app.use('/api/branches', require('./routes/branches'));
 app.use('/api', require('./routes/branch-data'));
 
 /*
+ * The menu, which the cloud owns outright. Guards are inside the router: the
+ * dashboard's editing needs a session, while /version and /snapshot answer a
+ * branch key, because those two are a till asking.
+ */
+app.use('/api/menu', require('./routes/menu'));
+app.use('/api/deals', require('./routes/deals'));
+
+/*
  * Serve the dashboard build from this same process, and therefore the same
  * origin as the API.
  *

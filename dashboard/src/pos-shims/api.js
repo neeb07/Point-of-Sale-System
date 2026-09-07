@@ -126,23 +126,28 @@ export const inventoryAPI = {
 /* ------------------------------------------------------------------ menu -- */
 
 /*
- * The menu is the one thing the cloud will own outright, and the one thing that
- * travels down to the tills. Until that is built these read from the cloud's
- * copy and refuse writes, so the screens render rather than erroring on load.
+ * The menu is the one thing the cloud owns outright, and the only thing that
+ * travels down to the tills — so unlike everything above, these are real
+ * writes. Every one moves the cloud's menu version, and the branches pull the
+ * new menu on their next heartbeat.
+ *
+ * Deleting retires rather than removes, exactly as the till does: sales
+ * reporting joins line items back to the menu, so a hard delete would take the
+ * category off every past order.
  */
 export const menuAPI = {
   getAll: () => request('GET', '/menu'),
-  create: readOnly('The menu'),
-  update: readOnly('The menu'),
-  delete: readOnly('The menu'),
+  create: (item) => request('POST', '/menu', item),
+  update: (id, item) => request('PUT', `/menu/${id}`, item),
+  delete: (id) => request('DELETE', `/menu/${id}`),
 };
 
 export const dealsAPI = {
   getAll: () => request('GET', '/deals'),
   getOne: (id) => request('GET', `/deals/${id}`),
-  create: readOnly('Deals'),
-  update: readOnly('Deals'),
-  delete: readOnly('Deals'),
+  create: (data) => request('POST', '/deals', data),
+  update: (id, data) => request('PUT', `/deals/${id}`, data),
+  delete: (id) => request('DELETE', `/deals/${id}`),
 };
 
 export const ordersAPI = {

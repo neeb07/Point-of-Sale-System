@@ -158,6 +158,31 @@ on plain Node, exactly as the two run in production.
 What Supabase buys in return: managed backups, no disk to run out of, no
 question about network storage, and a console for looking at the data.
 
+## The menu
+
+The cloud owns the menu outright, and it is the only thing that travels *down*
+to the tills. That works because there is exactly one writer: the owner edits on
+the dashboard, and a paired till refuses local menu edits rather than accepting
+one that would silently vanish at the next snapshot.
+
+Import the shop's current menu once, so both sides start identical:
+
+```
+DATABASE_URL=... node scripts/import-menu.js
+```
+
+Thereafter every edit moves `menu_version`. Tills read that integer from their
+heartbeat response — a few bytes they were already receiving — and download the
+whole snapshot only when it moves. Whole snapshots, never diffs: a snapshot
+either applies or it does not, and missing three is the same as missing one.
+
+Verify the whole path with:
+
+```
+cd backend
+DATABASE_URL=... DASH_EMAIL=... DASH_PASSWORD=...   node scripts/run-script.js ../cloud/test/menu-downlink.js
+```
+
 ## The dashboard
 
 The React app lives in `dashboard/`. In production this process serves its

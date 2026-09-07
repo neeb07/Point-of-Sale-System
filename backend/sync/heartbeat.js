@@ -27,6 +27,7 @@ const db = require('../db/database');
 const { allOpenShifts } = require('../db/shift-totals');
 const { syncConfig, isSyncEnabled } = require('../db/till-identity');
 const { localToday } = require('../db/local-date');
+const menuPull = require('./menu-pull');
 
 /** Matches the cloud's freshness bands, which assume three beats of slack. */
 const INTERVAL_MS = 30 * 1000;
@@ -79,6 +80,9 @@ function buildSnapshot() {
       .toISOString().replace('T', ' ').slice(0, 19),
     sent_at_ms: nowMs,
     agent_started_ms: state.startedMs,
+    // Tells the cloud which menu this till is selling from, so a branch running
+    // an old one is visible on the dashboard rather than a silent surprise.
+    menu_version: menuPull.localVersion(),
     expenses_today: {
       total: Number(expenses.total) || 0,
       count: Number(expenses.count) || 0,
@@ -157,6 +161,22 @@ async function pushOnce() {
       state.clockSkewMs = body.server_time_ms - snapshot.sent_at_ms;
     }
 
+    /*
+     * The heartbeat response doubles as the menu downlink.
+     *
+     * The cloud returns its menu version on every beat, so the ordinary
+     * "nothing has changed" case costs no request at all — the answer is
+     * already in a reply the till was making anyway. Only a difference triggers
+     * a download.
+     *
+     * Not awaited: a menu download must never delay the next heartbeat, and it
+     * has its own error handling. Failing here simply leaves the till on the
+     * menu it has.
+     */
+    if (typeof body.menu_version === 'number') {
+      menuPull.pullIfNewer(body.menu_version).catch(() => { /* reported in its own status */ });
+    }
+
     return { ok: true, superseded: Boolean(body.superseded) };
   } catch (err) {
     state.consecutiveFailures += 1;
@@ -208,6 +228,7 @@ function status() {
     consecutive_failures: state.consecutiveFailures,
     clock_skew_ms: state.clockSkewMs,
     interval_ms: INTERVAL_MS,
+    ...menuPull.status(),
   };
 }
 

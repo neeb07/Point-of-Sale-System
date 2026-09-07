@@ -11,6 +11,8 @@ import ExpensesScreen from '@/pages/ExpensesScreen';
 import ShiftsScreen from '@/pages/ShiftsScreen';
 import Cashier from '@/pages/Cashier';
 import InventoryScreen from '@/pages/InventoryScreen';
+import MenuManagement from '@/pages/MenuManagement';
+import Deals from '@/pages/Deals';
 
 /**
  * The signed-in frame.
@@ -26,16 +28,14 @@ const TABS = [
   { key: 'shifts', label: 'Shifts', Screen: ShiftsScreen },
   { key: 'staff', label: 'Staff', Screen: Cashier },
   { key: 'inventory', label: 'Inventory', Screen: InventoryScreen },
+  // The only two the dashboard can change. Everything above is recorded at a
+  // till and travels upward; the menu is the one thing that travels down.
+  { key: 'menu', label: 'Menu', Screen: MenuManagement },
+  { key: 'deals', label: 'Deals', Screen: Deals },
 ];
 
-/*
- * Menu and Deals are deliberately absent for now.
- *
- * The cloud does not own a menu yet, so those screens would render empty — and
- * an empty Menu tab reads as "this shop has no menu", not as "not built yet".
- * They arrive together with menu editing, which is the point at which the cloud
- * becomes the menu's single writer and the tills start pulling from it.
- */
+/** Edited here, and pulled by every till on its next heartbeat. */
+const CLOUD_OWNED = new Set(['menu', 'deals']);
 
 /**
  * Which tabs show only what the branches have sent, and cannot change it.
@@ -90,6 +90,16 @@ export default function Shell({ user, onSignOut }) {
                 </button>
               </div>
             </header>
+
+            {CLOUD_OWNED.has(tab) && (
+              <div style={{
+                background: '#F0FDF4', borderBottom: '1px solid #BBF7D0',
+                color: '#166534', padding: '9px 20px', fontSize: 13,
+              }}>
+                This is where the menu is edited. Changes reach every branch on
+                its next sync, and the tills cannot change it themselves.
+              </div>
+            )}
 
             {READ_ONLY.has(tab) && (
               <div style={{

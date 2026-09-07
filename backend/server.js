@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
+const { isSyncEnabled } = require('./db/till-identity');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
@@ -57,8 +58,28 @@ app.use(attachUser);
  * These are the real boundary. The React app hides the same things, but that
  * is a convenience: this is what actually stops a manager repricing the menu.
  */
-app.use('/api/menu', adminOnlyWrites, require('./routes/menu'));
-app.use('/api/deals', adminOnlyWrites, require('./routes/deals'));
+/*
+ * The menu, once a cloud owns it.
+ *
+ * A paired till pulls its menu from the dashboard, so editing it here would be
+ * worse than pointless: the change would work, then vanish without explanation
+ * at the next snapshot. Refusing outright, with a message saying where the menu
+ * actually lives, is the honest version of the same constraint.
+ *
+ * Only when paired. An unpaired till is a single-shop install with no cloud
+ * above it, and its menu is still its own.
+ */
+function menuOwnedByCloud(req, res, next) {
+  if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return next();
+  if (!isSyncEnabled()) return next();
+  return res.status(409).json({
+    error: 'The menu is managed from the head-office dashboard. Changes made here would be replaced at the next sync.',
+    code: 'MENU_OWNED_BY_CLOUD',
+  });
+}
+
+app.use('/api/menu', adminOnlyWrites, menuOwnedByCloud, require('./routes/menu'));
+app.use('/api/deals', adminOnlyWrites, menuOwnedByCloud, require('./routes/deals'));
 /**
  * Settings: readable without a token, writable only by an administrator.
  *
