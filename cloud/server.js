@@ -75,6 +75,10 @@ app.use('/api', require('./routes/branch-data'));
 app.use('/api/menu', require('./routes/menu'));
 app.use('/api/deals', require('./routes/deals'));
 
+// Shop-wide settings — tax, staff discount, currency, shop name. Branch-owned
+// settings (printer, receipt wording, delivery price) stay on each till.
+app.use('/api/settings', require('./routes/settings'));
+
 /*
  * Serve the dashboard build from this same process, and therefore the same
  * origin as the API.

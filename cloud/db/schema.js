@@ -271,6 +271,27 @@ CREATE TABLE IF NOT EXISTS deal_items (
  * number differs does it fetch the whole snapshot. That is what makes the
  * downlink survivable on a bad connection: the common case costs nothing.
  */
+/*
+ * Shop-wide settings, and their own version counter.
+ *
+ * Separate from menu_version on purpose: changing the tax rate should not make
+ * every till re-download and re-apply the whole menu, which retires and
+ * reinserts every item.
+ */
+CREATE TABLE IF NOT EXISTS cloud_settings (
+  key        TEXT PRIMARY KEY,
+  value      TEXT NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS settings_version (
+  id         INTEGER PRIMARY KEY DEFAULT 1,
+  version    INTEGER NOT NULL DEFAULT 0,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT settings_version_single_row CHECK (id = 1)
+);
+INSERT INTO settings_version (id, version) VALUES (1, 0) ON CONFLICT (id) DO NOTHING;
+
 CREATE TABLE IF NOT EXISTS menu_version (
   id         INTEGER PRIMARY KEY DEFAULT 1,
   version    INTEGER NOT NULL DEFAULT 0,

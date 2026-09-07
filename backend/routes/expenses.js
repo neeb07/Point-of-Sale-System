@@ -50,7 +50,17 @@ router.get('/categories', (req, res) => res.json(CATEGORIES));
  * drawer are their own by construction.
  */
 function scope(req, alias = 'e') {
-  if (!req.user || isAdminRole(req.user.role)) return { sql: '', params: [] };
+  if (!req.user || isAdminRole(req.user.role)) {
+    /*
+     * An administrator may narrow to one branch, the same way the reports
+     * screen does. A manager cannot: they already see only their own entries,
+     * so a branch parameter could return their own figures or nothing, and
+     * never anybody else's.
+     */
+    const branch = Number(req.query.branch);
+    if (!branch) return { sql: '', params: [] };
+    return { sql: ` AND ${alias}.branch_id = ?`, params: [branch] };
+  }
   return { sql: ` AND ${alias}.staff_id = ?`, params: [req.user.staffId] };
 }
 
@@ -65,9 +75,10 @@ router.get('/', (req, res) => {
 
   try {
     const rows = db.prepare(`
-      SELECT e.*, s.status AS shift_status
+      SELECT e.*, s.status AS shift_status, b.name AS branch_name
       FROM expenses e
       LEFT JOIN shifts s ON s.id = e.shift_id
+      LEFT JOIN branches b ON b.id = e.branch_id
       WHERE DATE(e.created_at) BETWEEN DATE(?) AND DATE(?)${mine.sql}
       ORDER BY e.created_at DESC, e.id DESC
     `).all(from, to, ...mine.params);

@@ -13,6 +13,7 @@ import Cashier from '@/pages/Cashier';
 import InventoryScreen from '@/pages/InventoryScreen';
 import MenuManagement from '@/pages/MenuManagement';
 import Deals from '@/pages/Deals';
+import SettingsScreen from './SettingsScreen';
 
 /**
  * The signed-in frame.
@@ -32,10 +33,11 @@ const TABS = [
   // till and travels upward; the menu is the one thing that travels down.
   { key: 'menu', label: 'Menu', Screen: MenuManagement },
   { key: 'deals', label: 'Deals', Screen: Deals },
+  { key: 'settings', label: 'Settings', Screen: SettingsScreen },
 ];
 
 /** Edited here, and pulled by every till on its next heartbeat. */
-const CLOUD_OWNED = new Set(['menu', 'deals']);
+const CLOUD_OWNED = new Set(['menu', 'deals', 'settings']);
 
 /**
  * Which tabs show only what the branches have sent, and cannot change it.
@@ -91,7 +93,7 @@ export default function Shell({ user, onSignOut }) {
               </div>
             </header>
 
-            {CLOUD_OWNED.has(tab) && (
+            {CLOUD_OWNED.has(tab) && tab !== 'settings' && (
               <div style={{
                 background: '#F0FDF4', borderBottom: '1px solid #BBF7D0',
                 color: '#166534', padding: '9px 20px', fontSize: 13,

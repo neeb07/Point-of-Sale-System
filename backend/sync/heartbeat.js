@@ -28,6 +28,7 @@ const { allOpenShifts } = require('../db/shift-totals');
 const { syncConfig, isSyncEnabled } = require('../db/till-identity');
 const { localToday } = require('../db/local-date');
 const menuPull = require('./menu-pull');
+const settingsPull = require('./settings-pull');
 
 /** Matches the cloud's freshness bands, which assume three beats of slack. */
 const INTERVAL_MS = 30 * 1000;
@@ -83,6 +84,7 @@ function buildSnapshot() {
     // Tells the cloud which menu this till is selling from, so a branch running
     // an old one is visible on the dashboard rather than a silent surprise.
     menu_version: menuPull.localVersion(),
+    settings_version: settingsPull.localVersion(),
     expenses_today: {
       total: Number(expenses.total) || 0,
       count: Number(expenses.count) || 0,
@@ -176,6 +178,9 @@ async function pushOnce() {
     if (typeof body.menu_version === 'number') {
       menuPull.pullIfNewer(body.menu_version).catch(() => { /* reported in its own status */ });
     }
+    if (typeof body.settings_version === 'number') {
+      settingsPull.pullIfNewer(body.settings_version).catch(() => { /* likewise */ });
+    }
 
     return { ok: true, superseded: Boolean(body.superseded) };
   } catch (err) {
@@ -229,6 +234,7 @@ function status() {
     clock_skew_ms: state.clockSkewMs,
     interval_ms: INTERVAL_MS,
     ...menuPull.status(),
+    ...settingsPull.status(),
   };
 }
 

@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Plus, Trash2, AlertCircle } from 'lucide-react';
 import moment from 'moment';
-import { expensesAPI, shiftsAPI } from '@/api/index';
+import { expensesAPI, shiftsAPI, branchesAPI } from '@/api/index';
 import { useAuth } from '@/context/AuthContext';
 import { useSettings } from '@/lib/SettingsContext';
 import PageHeader from '@/components/pos-ui/PageHeader';
@@ -51,6 +51,15 @@ export default function ExpensesScreen() {
   const { formatMoney, currencySymbol } = useSettings();
 
   const [range, setRange] = useState('today');
+  /*
+   * Branch filter, for an administrator only.
+   *
+   * A manager already sees just their own entries, so a branch parameter could
+   * only ever return their own figures or none — the backend ignores it for
+   * them and the control is hidden here, the same as on the reports screen.
+   */
+  const [branchId, setBranchId] = useState('');
+  const [branches, setBranches] = useState([]);
   const [expenses, setExpenses] = useState([]);
   const [totals, setTotals] = useState({ total: 0, from_drawer_total: 0, count: 0 });
   const [categories, setCategories] = useState([]);
@@ -63,12 +72,20 @@ export default function ExpensesScreen() {
   const [busy, setBusy] = useState(false);
   const [form, setForm] = useState({ category: '', description: '', amount: '', fromDrawer: true });
 
+  useEffect(() => {
+    if (!isAdmin) return;
+    branchesAPI.getAll()
+      // Without the list the picker simply does not appear; expenses still load.
+      .then(rows => setBranches(Array.isArray(rows) ? rows : []))
+      .catch(() => setBranches([]));
+  }, [isAdmin]);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const { from, to } = rangeDates(range);
       const [data, cats, cur] = await Promise.all([
-        expensesAPI.list({ from, to }),
+        expensesAPI.list(branchId ? { from, to, branch: branchId } : { from, to }),
         expensesAPI.categories(),
         shiftsAPI.current(),
       ]);
@@ -81,7 +98,7 @@ export default function ExpensesScreen() {
     } finally {
       setLoading(false);
     }
-  }, [range]);
+  }, [range, branchId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -198,7 +215,33 @@ export default function ExpensesScreen() {
           </div>
         )}
 
-        <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+          {/*
+            Which branch these payouts belong to. Ahead of the date chips, as on
+            the reports screen, because it changes what the figures are about
+            rather than merely which days they cover.
+          */}
+          {isAdmin && branches.length > 0 && (
+            <>
+              <select
+                value={branchId}
+                onChange={e => setBranchId(e.target.value)}
+                style={{
+                  padding: '8px 12px', borderRadius: 999, fontSize: 13, fontWeight: 600,
+                  cursor: 'pointer', fontFamily: 'Inter, sans-serif',
+                  background: branchId ? '#111111' : '#FFFFFF',
+                  color: branchId ? '#FFFFFF' : '#6B7280',
+                  border: branchId ? 'none' : '1px solid #E5E7EB',
+                }}
+              >
+                <option value="">All Branches</option>
+                {branches.map(b => (
+                  <option key={b.id} value={b.id}>{b.name}</option>
+                ))}
+              </select>
+              <div style={{ width: 1, height: 22, background: '#E5E7EB', margin: '0 4px' }} />
+            </>
+          )}
           {RANGES.map(r => (
             <button
               key={r.id}

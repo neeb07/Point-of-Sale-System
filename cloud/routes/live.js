@@ -132,10 +132,14 @@ router.post('/heartbeat', requireBranch, async (req, res) => {
     // The response doubles as the downlink: the till compares menu_version to
     // decide whether to pull a new menu. Kept tiny so it survives a weak link.
     const menu = await db.one('SELECT version FROM menu_version WHERE id = 1');
+    const settings = await db.one('SELECT version FROM settings_version WHERE id = 1');
     res.json({
       ok: true,
       server_time_ms: receivedMs,
       menu_version: menu ? Number(menu.version) : 0,
+      // Carried on the same reply as the menu version, for the same reason:
+      // the "nothing changed" case must not cost a request of its own.
+      settings_version: settings ? Number(settings.version) : 0,
     });
   } catch (err) {
     console.error('Heartbeat ingest failed:', err.message);
