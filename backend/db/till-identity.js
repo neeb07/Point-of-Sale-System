@@ -44,37 +44,59 @@ const path = require('path');
 const userDataDir = process.env.POS_USER_DATA_PATH || path.join(__dirname, '..');
 const IDENTITY_PATH = path.join(userDataDir, 'cloud-sync.json');
 
-/**
- * Read once at startup.
+/*
+ * Re-read when the file changes, rather than once at startup.
  *
- * A missing or malformed file is not an error: an unpaired till is the normal
- * state for a single-shop install, and it must keep selling exactly as before.
- * Everything downstream treats a null identity as "no branch, no sync".
+ * Pairing a till by dropping this file next to the database should not require
+ * restarting the POS. In a shop that means closing the app mid-service; during
+ * setup it means a confusing loop where the file is plainly correct and the
+ * till keeps insisting the key is wrong, because it is still holding the one it
+ * read at boot. Re-keying a branch has the same problem.
+ *
+ * Guarded by the file's modification time, so the common case — an unchanged
+ * file, read at most twice a minute — is a single `stat` and no parsing.
  */
+let cached = null;
+let cachedMtimeMs = -1;
+
 function load() {
+  let mtimeMs = 0;
   try {
-    if (!fs.existsSync(IDENTITY_PATH)) return null;
-    const parsed = JSON.parse(fs.readFileSync(IDENTITY_PATH, 'utf8'));
-    if (!parsed || typeof parsed !== 'object') return null;
-    return parsed;
+    mtimeMs = fs.statSync(IDENTITY_PATH).mtimeMs;
   } catch (err) {
-    // Deliberately not fatal, and deliberately does not print the file's
-    // contents — everything the backend logs is piped to a log file on disk.
-    console.error('Could not read cloud-sync.json:', err.message);
+    // Absent is not an error: an unpaired till is the normal state of a
+    // single-shop install, and it must keep selling exactly as before.
+    cached = null;
+    cachedMtimeMs = -1;
     return null;
   }
-}
 
-const identity = load();
+  if (mtimeMs === cachedMtimeMs) return cached;
+
+  try {
+    const parsed = JSON.parse(fs.readFileSync(IDENTITY_PATH, 'utf8'));
+    cached = parsed && typeof parsed === 'object' ? parsed : null;
+  } catch (err) {
+    // Deliberately not fatal, and deliberately does not print the file's
+    // contents — everything this backend logs is piped to a file on disk.
+    console.error('Could not read cloud-sync.json:', err.message);
+    cached = null;
+  }
+
+  cachedMtimeMs = mtimeMs;
+  return cached;
+}
 
 /** This machine's branch, or null when the till has not been paired. */
 function tillBranchId() {
+  const identity = load();
   const id = identity && Number(identity.branch_id);
   return Number.isInteger(id) && id > 0 ? id : null;
 }
 
 /** Whether this till should talk to the cloud at all. */
 function isSyncEnabled() {
+  const identity = load();
   return Boolean(
     identity && identity.enabled && identity.cloud_url && identity.api_key && tillBranchId()
   );
@@ -88,6 +110,7 @@ function isSyncEnabled() {
  */
 function syncConfig() {
   if (!isSyncEnabled()) return null;
+  const identity = load();
   return {
     cloudUrl: String(identity.cloud_url).replace(/\/+$/, ''),
     apiKey: String(identity.api_key),
@@ -103,6 +126,7 @@ function syncConfig() {
  * object from named fields rather than spreading the identity and deleting.
  */
 function publicStatus() {
+  const identity = load();
   return {
     paired: Boolean(identity),
     enabled: isSyncEnabled(),
