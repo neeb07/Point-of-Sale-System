@@ -123,6 +123,31 @@ router.get('/kpi', requireUser, async (req, res) => {
       WHERE created_at::date BETWEEN ?::date AND ?::date${expScope.sql}
     `, [from, to, ...expScope.params]);
 
+    /*
+     * Wages, counted separately from expenses.
+     *
+     * Kept out of `total_expenses` on purpose. That figure means petty cash out
+     * of the shop — fuel, supplies, a staff meal — and it is what the drawer is
+     * reconciled against. Wages are a different kind of cost, paid monthly and
+     * never through the till, and folding them in would both distort the daily
+     * expense figures and make the drawer look short by a month's salaries.
+     *
+     * Dated on when the money was handed over, not on the month the payslip is
+     * labelled with: August's wages paid in September are what September cost.
+     *
+     * The till has no payroll, so its own /kpi never returns this and the
+     * Reports screen simply does not draw the card. See routes/payroll.js.
+     */
+    // Scoped through the employees table, which is where a wage's branch
+    // lives — scopeExpenses defaults to the expenses table's own alias.
+    const wageScope = scopeExpenses(req, 'e');
+    const wages = await db.one(`
+      SELECT COALESCE(SUM(p.paid_amount)::float8, 0) AS wages_paid
+        FROM payslips p
+        JOIN employees e ON e.id = p.employee_id
+       WHERE p.paid_on BETWEEN ?::date AND ?::date${wageScope.sql}
+    `, [from, to, ...wageScope.params]);
+
     const revenueTrend = prev.total_revenue > 0
       ? (((summary.total_revenue - prev.total_revenue) / prev.total_revenue) * 100).toFixed(1)
       : 0;
@@ -133,7 +158,12 @@ router.get('/kpi', requireUser, async (req, res) => {
     res.json({
       ...summary,
       ...expenses,
-      net_revenue: summary.total_revenue - expenses.total_expenses,
+      wages_paid: Number(wages.wages_paid) || 0,
+      // Net is what the owner actually keeps, so it has to carry the wage bill
+      // too. Without it a month with a full payroll behind it reads as pure
+      // profit, which is the single most misleading number this API could
+      // return.
+      net_revenue: summary.total_revenue - expenses.total_expenses - (Number(wages.wages_paid) || 0),
       revenue_trend: revenueTrend,
       orders_trend: ordersTrend,
     });

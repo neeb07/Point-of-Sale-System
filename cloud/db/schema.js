@@ -372,6 +372,82 @@ CREATE TABLE IF NOT EXISTS staff_version (
 );
 INSERT INTO staff_version (id, version) VALUES (1, 0) ON CONFLICT (id) DO NOTHING;
 
+-- ----------------------------------------------------------------- payroll --
+--
+-- Wages live only here. Nothing in this section is ever sent to a till, and no
+-- till route can read it: what a person is paid is between them and the owner,
+-- and a manager standing at a drawer has no business seeing a colleague's
+-- salary. Keeping it cloud-only makes that a property of where the data sits
+-- rather than a permission somebody could get wrong later.
+
+/*
+ * Everyone who draws a wage — which is not the same set as everyone who can
+ * sign in to a till.
+ *
+ * A rider, a cook or a cleaner is paid every month and never touches the POS;
+ * a till account is a credential, not a person on the payroll. So this is its
+ * own roster, and staff_local_id links the rows that are both. It is NULL for
+ * everybody else, which is why the uniqueness below is a partial index: two
+ * riders at the same branch must both be allowed to have no till account.
+ */
+CREATE TABLE IF NOT EXISTS employees (
+  id             SERIAL PRIMARY KEY,
+  branch_id      INTEGER NOT NULL,
+  staff_local_id INTEGER,
+  name           TEXT NOT NULL,
+  job_title      TEXT,
+  phone          TEXT,
+  -- The agreed monthly figure. Copied onto each month's payslip rather than
+  -- read through it, so raising somebody's salary in March does not silently
+  -- rewrite what they were paid in January.
+  monthly_salary DOUBLE PRECISION NOT NULL DEFAULT 0,
+  joined_on      DATE,
+  active         INTEGER NOT NULL DEFAULT 1,
+  notes          TEXT,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_ms     BIGINT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS employees_one_per_till_account
+  ON employees (branch_id, staff_local_id) WHERE staff_local_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS employees_branch ON employees (branch_id);
+
+/*
+ * One row per person per month.
+ *
+ * The month is text, 'YYYY-MM', because that is exactly what it is — a label
+ * for a pay cycle, not a point in time. A date would invite arithmetic that
+ * makes no sense here.
+ *
+ * Two different dates matter and are kept apart: paid_on is the day the
+ * money actually changed hands, which is what the reports count, and paid_at
+ * is when it was recorded on the dashboard. They differ whenever somebody
+ * writes up Friday's payments on Monday.
+ */
+CREATE TABLE IF NOT EXISTS payslips (
+  id             SERIAL PRIMARY KEY,
+  employee_id    INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  period         TEXT NOT NULL,
+  base_salary    DOUBLE PRECISION NOT NULL DEFAULT 0,
+  bonus          DOUBLE PRECISION NOT NULL DEFAULT 0,
+  overtime       DOUBLE PRECISION NOT NULL DEFAULT 0,
+  -- Money already handed over during the month, subtracted at the end of it.
+  -- Extremely common here, and the single easiest thing to forget and pay twice.
+  advance        DOUBLE PRECISION NOT NULL DEFAULT 0,
+  deduction      DOUBLE PRECISION NOT NULL DEFAULT 0,
+  notes          TEXT,
+  -- What was actually handed over. Recorded separately from the net figure so
+  -- a short payment shows an outstanding balance instead of quietly redefining
+  -- what was owed.
+  paid_amount    DOUBLE PRECISION,
+  paid_on        DATE,
+  paid_at        TIMESTAMPTZ,
+  payment_method TEXT,
+  updated_ms     BIGINT,
+  UNIQUE (employee_id, period)
+);
+CREATE INDEX IF NOT EXISTS payslips_period ON payslips (period);
+CREATE INDEX IF NOT EXISTS payslips_paid_on ON payslips (paid_on);
+
 -- Same derivation the till uses, for branches that predate the column.
 UPDATE branches
    SET code = NULLIF(regexp_replace(

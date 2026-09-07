@@ -16,6 +16,7 @@ import Deals from '@/pages/Deals';
 import SettingsScreen from './SettingsScreen';
 import OrdersScreen from './OrdersScreen';
 import CustomersScreen from './CustomersScreen';
+import PayrollScreen from './PayrollScreen';
 
 /**
  * The signed-in frame.
@@ -32,6 +33,8 @@ const TABS = [
   { key: 'expenses', label: 'Expenses', Screen: ExpensesScreen },
   { key: 'shifts', label: 'Shifts', Screen: ShiftsScreen },
   { key: 'staff', label: 'Staff', Screen: Cashier },
+  // Wages live only here. Nothing on this tab is ever sent to a till.
+  { key: 'payroll', label: 'Payroll', Screen: PayrollScreen },
   { key: 'inventory', label: 'Inventory', Screen: InventoryScreen },
   // The only two the dashboard can change. Everything above is recorded at a
   // till and travels upward; the menu is the one thing that travels down.
@@ -110,6 +113,23 @@ export default function Shell({ user, onSignOut }) {
                   : `This is where the ${active.label.toLowerCase()} is edited.
                      Changes reach every branch on its next sync, and the tills
                      cannot change it themselves.`}
+              </div>
+            )}
+
+            {/*
+              Payroll is neither of the two categories above: it does not come
+              up from the branches and it never goes down to them. Saying so is
+              worth a line, because "why can't the manager see this" and "when
+              does this reach the till" are both reasonable questions with the
+              same answer.
+            */}
+            {tab === 'payroll' && (
+              <div style={{
+                background: '#FAF5FF', borderBottom: '1px solid #E9D5FF',
+                color: '#6B21A8', padding: '9px 20px', fontSize: 13,
+              }}>
+                Wages stay here. Salaries are never sent to a till, so nobody
+                signing in at a branch can see what anyone earns.
               </div>
             )}
 

@@ -1,6 +1,6 @@
 // @ts-nocheck
 import React, { useState, useEffect, useMemo } from 'react';
-import { DollarSign, ShoppingBag, TrendingUp, Tag, Printer, Download, FileSpreadsheet, Wallet } from 'lucide-react';
+import { DollarSign, ShoppingBag, TrendingUp, Tag, Printer, Download, FileSpreadsheet, Wallet, Users } from 'lucide-react';
 import { reportsAPI, branchesAPI } from '@/api/index';
 import { buildCsv, money } from '@/lib/csv';
 import { useSettings } from '@/lib/SettingsContext';
@@ -27,7 +27,7 @@ export default function Reports() {
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState('');
   
-  const [kpi, setKpi] = useState({ revenue: 0, orders: 0, avg_order_value: 0, total_discounts: 0, total_expenses: 0, drawer_expenses: 0, expense_count: 0, net_revenue: 0 });
+  const [kpi, setKpi] = useState({ revenue: 0, orders: 0, avg_order_value: 0, total_discounts: 0, total_expenses: 0, drawer_expenses: 0, expense_count: 0, wages_paid: null, net_revenue: 0 });
   const [revenueData, setRevenueData] = useState([]);
   const [topItems, setTopItems] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -163,6 +163,16 @@ export default function Reports() {
         total_expenses: kData.total_expenses || 0,
         drawer_expenses: kData.drawer_expenses || 0,
         expense_count: kData.expense_count || 0,
+        /*
+         * Wages, when the server keeps a payroll.
+         *
+         * Only the head-office dashboard does; a till has no payroll and never
+         * sends this, so it stays null there and the card below is not drawn.
+         * Deliberately `?? null` rather than `|| 0` — a real zero (a month
+         * nobody has been paid in yet) must still show the card, because
+         * "no wages paid this period" is information.
+         */
+        wages_paid: kData.wages_paid ?? null,
         net_revenue: kData.net_revenue ?? ((kData.total_revenue || 0) - (kData.total_expenses || 0)),
       });
 
@@ -647,7 +657,7 @@ export default function Reports() {
           down if 9,000 went out on fuel and supplies, so what was spent and
           what is actually left get their own row directly beneath.
         */}
-        <div className="grid grid-cols-2 gap-4 print:hidden">
+        <div className={`grid ${kpi.wages_paid == null ? 'grid-cols-2' : 'grid-cols-3'} gap-4 print:hidden`}>
           <KpiCard
             title="Expenses"
             value={formatMoney(kpi.total_expenses)}
@@ -655,12 +665,26 @@ export default function Reports() {
             color="#F59E0B"
             subtitle={`${kpi.expense_count} ${kpi.expense_count === 1 ? 'entry' : 'entries'}${kpi.drawer_expenses ? ` · ${formatMoney(kpi.drawer_expenses)} from the drawer` : ''}`}
           />
+          {/*
+            Wages sit beside the expenses rather than inside them. Petty cash
+            out of the drawer and a month's salaries are different kinds of
+            cost, and the drawer is reconciled against the first only.
+          */}
+          {kpi.wages_paid != null && (
+            <KpiCard
+              title="Wages Paid"
+              value={formatMoney(kpi.wages_paid)}
+              icon={Users}
+              color="#8B5CF6"
+              subtitle="Salaries handed over in this period"
+            />
+          )}
           <KpiCard
             title="Net Revenue"
             value={formatMoney(kpi.net_revenue)}
             icon={TrendingUp}
             color={kpi.net_revenue < 0 ? '#DC2626' : '#059669'}
-            subtitle="Revenue less expenses"
+            subtitle={kpi.wages_paid == null ? 'Revenue less expenses' : 'Revenue less expenses and wages'}
           />
         </div>
 

@@ -74,6 +74,15 @@ app.use('/api/branches', require('./routes/branches'));
  */
 app.use('/api/staff', require('./routes/staff'));
 
+/*
+ * Payroll. The dashboard and nowhere else.
+ *
+ * There is no branch-key route in here and no downlink: wages never travel to
+ * a till, so a manager on a drawer cannot see what a colleague earns even if a
+ * permission were misconfigured. See routes/payroll.js.
+ */
+app.use('/api/payroll', require('./routes/payroll'));
+
 // Expenses, shifts, staff figures and stock — read-only, in the till's own
 // response shapes so the POS screens can be reused on the dashboard unaltered.
 app.use('/api', require('./routes/branch-data'));
