@@ -14,6 +14,8 @@ import InventoryScreen from '@/pages/InventoryScreen';
 import MenuManagement from '@/pages/MenuManagement';
 import Deals from '@/pages/Deals';
 import SettingsScreen from './SettingsScreen';
+import OrdersScreen from './OrdersScreen';
+import CustomersScreen from './CustomersScreen';
 
 /**
  * The signed-in frame.
@@ -25,6 +27,8 @@ import SettingsScreen from './SettingsScreen';
 const TABS = [
   { key: 'live', label: 'Live', Screen: null },
   { key: 'reports', label: 'Reports', Screen: Reports },
+  { key: 'orders', label: 'Orders', Screen: OrdersScreen },
+  { key: 'customers', label: 'Customers', Screen: CustomersScreen },
   { key: 'expenses', label: 'Expenses', Screen: ExpensesScreen },
   { key: 'shifts', label: 'Shifts', Screen: ShiftsScreen },
   { key: 'staff', label: 'Staff', Screen: Cashier },

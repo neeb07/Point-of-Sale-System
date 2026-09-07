@@ -193,6 +193,31 @@ CREATE TABLE IF NOT EXISTS staff (
   UNIQUE (branch_id, local_id)
 );
 
+/*
+ * Delivery customers, for demographics.
+ *
+ * Keyed per branch like everything else that syncs, because each till maintains
+ * its own book. The same household ordering from both shops therefore arrives
+ * as two rows; the read route sums them by phone number, so "how many times has
+ * this customer ordered" answers across the whole business rather than one
+ * branch's view of them.
+ */
+CREATE TABLE IF NOT EXISTS customers (
+  id             SERIAL PRIMARY KEY,
+  branch_id      INTEGER NOT NULL,
+  local_id       INTEGER NOT NULL,
+  name           TEXT,
+  phone          TEXT,
+  address        TEXT,
+  order_count    INTEGER DEFAULT 0,
+  total_spent    DOUBLE PRECISION DEFAULT 0,
+  first_order_at TEXT,
+  last_order_at  TEXT,
+  received_at    BIGINT NOT NULL,
+  UNIQUE (branch_id, local_id)
+);
+CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone);
+
 CREATE TABLE IF NOT EXISTS ingredients (
   id          SERIAL PRIMARY KEY,
   branch_id   INTEGER NOT NULL,

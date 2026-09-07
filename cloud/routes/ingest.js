@@ -104,6 +104,10 @@ const EXPENSE_COLS = [
 // dashboard, and every copy of a credential is another place it can leak from.
 const STAFF_COLS = ['name', 'role', 'color', 'active'];
 const INGREDIENT_COLS = ['name', 'unit', 'stock', 'low_stock_threshold', 'cost_per_unit'];
+const CUSTOMER_COLS = [
+  'name', 'phone', 'address', 'order_count', 'total_spent',
+  'first_order_at', 'last_order_at',
+];
 
 const ORDER_VALUES = (r) => [
   num(r.total), num(r.discount), str(r.payment_method), str(r.status),
@@ -192,6 +196,14 @@ const HANDLERS = {
 
   ingredients: simpleIngest('ingredients', INGREDIENT_COLS, r => [
     str(r.name), str(r.unit), num(r.stock), num(r.low_stock_threshold), num(r.cost_per_unit),
+  ]),
+
+  // The delivery customer book. Counts and totals are maintained by the till as
+  // orders are taken, so they arrive already correct and are simply carried.
+  customers: simpleIngest('customers', CUSTOMER_COLS, r => [
+    str(r.name), str(r.phone), str(r.address),
+    num(r.order_count), num(r.total_spent),
+    str(r.first_order_at), str(r.last_order_at),
   ]),
 };
 

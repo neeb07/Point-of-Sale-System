@@ -251,4 +251,57 @@ router.get('/inventory', requireUser, async (req, res) => {
   }
 });
 
+/* ------------------------------------------------------------ customers -- */
+
+/**
+ * The delivery customer book, for demographics.
+ *
+ * Aggregated by phone number rather than listed per branch. The tills each keep
+ * their own book, so a household that has ordered from both shops arrives as
+ * two rows — and showing them separately would answer "how many times has this
+ * customer ordered" with one branch's half of the truth. The phone number is
+ * what actually identifies a household, which is why the till dedupes on it
+ * too.
+ *
+ * Rows with no phone cannot be matched across branches, so they are listed as
+ * they are rather than guessed at.
+ */
+router.get('/customers', requireUser, async (req, res) => {
+  const s = scope(req, 'c');
+  try {
+    const rows = await db.q(`
+      SELECT
+        COALESCE(NULLIF(c.phone, ''), 'no-phone-' || c.branch_id || '-' || c.local_id) AS group_key,
+        MAX(c.name)                     AS name,
+        MAX(c.phone)                    AS phone,
+        MAX(c.address)                  AS address,
+        SUM(c.order_count)::int         AS order_count,
+        SUM(c.total_spent)::float8      AS total_spent,
+        MIN(c.first_order_at)           AS first_order_at,
+        MAX(c.last_order_at)            AS last_order_at,
+        COUNT(DISTINCT c.branch_id)::int AS branch_count,
+        STRING_AGG(DISTINCT b.name, ', ') AS branches
+      FROM customers c
+      LEFT JOIN branches b ON b.id = c.branch_id
+      WHERE 1 = 1${s.sql}
+      GROUP BY group_key
+      ORDER BY SUM(c.order_count) DESC, MAX(c.last_order_at) DESC
+    `, s.params);
+
+    const totals = {
+      customers: rows.length,
+      orders: rows.reduce((n, r) => n + (r.order_count || 0), 0),
+      spent: rows.reduce((n, r) => n + (r.total_spent || 0), 0),
+      // The number worth watching: a delivery business lives on people coming
+      // back, and a list of one-off orders looks identical to a healthy one
+      // until you count them.
+      returning: rows.filter(r => (r.order_count || 0) > 1).length,
+    };
+
+    res.json({ customers: rows, totals });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

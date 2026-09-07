@@ -229,6 +229,10 @@ const allStaffStmt = db.prepare(
 const allIngredientsStmt = db.prepare(
   'SELECT id, name, unit, stock, low_stock_threshold, cost_per_unit FROM ingredients'
 );
+const allCustomersStmt = db.prepare(`
+  SELECT id, name, phone, address, order_count, total_spent, first_order_at, last_order_at
+    FROM customers
+`);
 
 /** Longer than the sales cadence: these barely change, and a stale stock figure costs nothing. */
 const REFERENCE_INTERVAL_MS = 5 * 60 * 1000;
@@ -240,6 +244,7 @@ async function pushReference() {
   for (const [table, stmt] of [
     ['staff', allStaffStmt],
     ['ingredients', allIngredientsStmt],
+    ['customers', allCustomersStmt],
   ]) {
     const rows = stmt.all();
     if (!rows.length) continue;
