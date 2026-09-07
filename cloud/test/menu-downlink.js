@@ -88,6 +88,8 @@ const stopCloud = () => { if (proc) { try { proc.kill(); } catch (e) {} proc = n
 
 (async () => {
  try {
+  await require('./guard').requireScratchDatabase('the cloud menu');
+
   cloudExec(`
     const db = require('./db/pg');
     const { createSchema } = require('./db/schema');

@@ -149,8 +149,14 @@ cd backend
 DATABASE_URL="postgresql://..." node scripts/run-script.js ../cloud/test/verify-against-till.js
 ```
 
-Run it after **any** change to either reporting file. It TRUNCATEs the cloud
-database, so point it at a scratch project rather than production. It runs
+Run it after **any** change to either reporting file.
+
+**It TRUNCATEs the cloud database.** So do `test/menu-downlink.js`. Both refuse
+to run against a database that holds orders or a menu unless you also set
+`BLAZE_ALLOW_DESTRUCTIVE=1` — a README warning was not enough, as proved by
+running the menu test against the live project and leaving every item retired.
+`test/dashboard-endpoints.js` and `test/dashboard-renders.js` are read-only and
+safe anywhere. It runs
 through `backend/scripts/run-script.js` because the till half needs Electron's
 Node, whose ABI matches better-sqlite3; the cloud half runs as a child process
 on plain Node, exactly as the two run in production.

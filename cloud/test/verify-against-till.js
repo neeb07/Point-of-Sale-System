@@ -133,6 +133,8 @@ function diff(a, b, label) {
 
 (async () => {
  try {
+  await require('./guard').requireScratchDatabase('every synced table, and the branches and accounts');
+
   console.log('=== FRESH CLOUD ===');
   cloudExec(`
     const db = require('./db/pg');

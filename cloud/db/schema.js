@@ -280,8 +280,33 @@ CREATE TABLE IF NOT EXISTS menu_version (
 INSERT INTO menu_version (id, version) VALUES (1, 0) ON CONFLICT (id) DO NOTHING;
 `;
 
-async function createSchema(db) {
-  await db.pool.query(DDL);
+/**
+ * Settings every connection needs, applied to the role rather than per session.
+ *
+ * See db/pg.js for why each matters. Doing it here means one statement at boot
+ * instead of a query on every connection that races the pool.
+ *
+ * Non-fatal: a role without ALTER privileges still gets a working server, just
+ * one whose floats are truncated on the wire — worth a loud warning, not a
+ * refusal to start.
+ */
+async function applyRoleSettings(db) {
+  try {
+    const { rows } = await db.pool.query('SELECT current_user AS role');
+    const role = rows[0].role;
+    // The role name comes from the server, not from input, but quote it anyway
+    // — ALTER ROLE takes an identifier, which cannot be parameterised.
+    const quoted = '"' + String(role).replace(/"/g, '""') + '"';
+    await db.pool.query(`ALTER ROLE ${quoted} SET extra_float_digits = 3`);
+    await db.pool.query(`ALTER ROLE ${quoted} SET idle_in_transaction_session_timeout = '30s'`);
+  } catch (err) {
+    console.warn('Could not set role defaults (floats may lose precision):', err.message);
+  }
 }
 
-module.exports = { createSchema, DDL };
+async function createSchema(db) {
+  await db.pool.query(DDL);
+  await applyRoleSettings(db);
+}
+
+module.exports = { createSchema, applyRoleSettings, DDL };

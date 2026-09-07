@@ -66,32 +66,47 @@ pool.on('error', (err) => {
 });
 
 /*
- * Never leave a transaction open on a pooled connection.
+ * Two session settings every query depends on.
  *
- * Supabase's pooler keeps the server-side connection alive after this process
- * goes away, so a crash or a `kill` partway through a transaction leaves it
- * `idle in transaction` — still holding its locks, indefinitely. The next
- * deploy then blocks on writes to the same tables for no visible reason. It
- * happened during development and took a while to recognise, because nothing
- * reports it: queries simply hang until the statement timeout.
+ *   extra_float_digits = 3
+ *     Without it Postgres truncates floats to 15 significant digits on the
+ *     wire, so an average came back as 2819.94117647059 where the till had
+ *     2819.9411764705883.
  *
- * Thirty seconds is far longer than any transaction here, so a live one is
- * never at risk; an abandoned one is reaped instead of outliving the process
- * that opened it.
+ *   idle_in_transaction_session_timeout = 30s
+ *     Supabase's pooler keeps a server connection alive after this process
+ *     dies, so a crash mid-transaction leaves it holding locks indefinitely and
+ *     the next deploy blocks on writes with nothing reporting why.
+ *
+ * Applied once per pooled client, on checkout, rather than any of the tidier
+ * alternatives — both of which were tried and rejected:
+ *
+ *   - `pool.on('connect')` works, but races the query the pool is already
+ *     dispatching on that client. pg warns, and removes the behaviour in v9.
+ *   - Startup `options` and `ALTER ROLE` are both accepted and then silently
+ *     ignored through the pooler, which reports the old value as if nothing
+ *     happened. Silent is worse than deprecated.
+ *
+ * A WeakSet keyed on the client means an established connection pays for this
+ * once, and a client dropped by the pooler is simply reconfigured next time.
+ * This relies on the *session* pooler (port 5432); in transaction mode a SET
+ * would not outlive the statement.
  */
-pool.on('connect', (client) => {
-  /*
-   * `extra_float_digits = 3` asks Postgres for shortest-round-trip float text
-   * rather than 15 significant digits. Without it an average came back as
-   * 2819.94117647059 where the till had 2819.9411764705883 — the value is
-   * being truncated on the way out, not computed differently. It rounds away
-   * in any currency display, but a report is not the only consumer and a
-   * figure that silently loses precision in transit is worth not shipping.
-   */
-  client
-    .query("SET idle_in_transaction_session_timeout = '30s'; SET extra_float_digits = 3")
-    .catch(err => console.error('Could not configure the connection:', err.message));
-});
+const configured = new WeakSet();
+
+async function withClient(fn) {
+  const client = await pool.connect();
+  try {
+    if (!configured.has(client)) {
+      await client.query('SET extra_float_digits = 3');
+      await client.query("SET idle_in_transaction_session_timeout = '30s'");
+      configured.add(client);
+    }
+    return await fn(client);
+  } finally {
+    client.release();
+  }
+}
 
 /**
  * Convert SQLite's `?` placeholders to Postgres's `$1, $2, …`.
@@ -165,8 +180,7 @@ function toPg(sql) {
 
 /** Run a query, return its rows. Accepts `?` placeholders. */
 async function q(sql, params = []) {
-  const res = await pool.query(toPg(sql), params);
-  return res.rows;
+  return withClient(async (client) => (await client.query(toPg(sql), params)).rows);
 }
 
 /** Run a query, return its first row or null. */
@@ -177,8 +191,7 @@ async function one(sql, params = []) {
 
 /** Run a statement, return how many rows it touched. */
 async function run(sql, params = []) {
-  const res = await pool.query(toPg(sql), params);
-  return res.rowCount;
+  return withClient(async (client) => (await client.query(toPg(sql), params)).rowCount);
 }
 
 /**
@@ -190,18 +203,17 @@ async function run(sql, params = []) {
  * undo half the writes.
  */
 async function tx(fn) {
-  const client = await pool.connect();
-  try {
+  return withClient(async (client) => {
     await client.query('BEGIN');
-    const result = await fn(client);
-    await client.query('COMMIT');
-    return result;
-  } catch (err) {
-    try { await client.query('ROLLBACK'); } catch (e) { /* connection is gone */ }
-    throw err;
-  } finally {
-    client.release();
-  }
+    try {
+      const result = await fn(client);
+      await client.query('COMMIT');
+      return result;
+    } catch (err) {
+      try { await client.query('ROLLBACK'); } catch (e) { /* connection is gone */ }
+      throw err;
+    }
+  });
 }
 
 async function close() {
