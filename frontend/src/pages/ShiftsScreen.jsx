@@ -36,7 +36,7 @@ const parseStamp = (value) => (value ? new Date(String(value).replace(' ', 'T'))
 const fmtTime = (d) => (d ? d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : '—');
 
 export default function ShiftsScreen() {
-  const { currentUser } = useAuth();
+  const { currentUser, canOperateTill } = useAuth();
   const { formatMoney, currencySymbol } = useSettings();
 
   const [currentShift, setCurrentShift] = useState(null);
@@ -151,6 +151,12 @@ export default function ShiftsScreen() {
           }}>
             <Clock size={40} color="#9CA3AF" style={{ margin: '0 auto 12px' }} />
             <div style={{ fontSize: 16, fontWeight: 600, color: '#374151', marginBottom: 16 }}>No active shift</div>
+            {!canOperateTill && (
+              <div style={{ fontSize: 13, color: '#9CA3AF' }}>
+                Shifts are opened and closed at the till.
+              </div>
+            )}
+            {canOperateTill && (
             <button
               onClick={() => setOpenModal(true)}
               style={{
@@ -160,6 +166,7 @@ export default function ShiftsScreen() {
             >
               Open Shift
             </button>
+            )}
           </div>
         )}
 
@@ -186,6 +193,17 @@ export default function ShiftsScreen() {
             )}
             <div style={{ borderTop: '1px solid #F3F4F6', margin: '12px 0' }} />
             <Row label="Expected in drawer" value={formatMoney(expectedCash)} />
+            {/*
+              Counting a drawer is something you do standing at it. The owner
+              cannot close somebody else's shift from the dashboard — the server
+              refuses it — so the button is not offered there.
+            */}
+            {!canOperateTill && (
+              <div style={{ fontSize: 12, color: '#9CA3AF', marginTop: 12 }}>
+                This shift is closed at the till, by whoever is counting the drawer.
+              </div>
+            )}
+            {canOperateTill && (
             <button
               onClick={() => setCloseModal(true)}
               disabled={busy}
@@ -198,6 +216,7 @@ export default function ShiftsScreen() {
             >
               {busy ? 'Closing…' : 'Close Shift'}
             </button>
+            )}
           </div>
         )}
 

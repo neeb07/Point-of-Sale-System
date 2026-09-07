@@ -75,6 +75,24 @@ router.post('/', (req, res) => {
     // other's drawer.
     const openShiftId = openShiftIdFor(req.user && req.user.staffId);
 
+    /*
+     * No shift, no sale.
+     *
+     * A sale rung up with no drawer open has nowhere to belong: it is missing
+     * from the shift totals, so the cash is in the till but not in the expected
+     * figure, and whoever counts up at the end is short by exactly that amount
+     * with nothing to explain it. Refusing at the point of sale is the only
+     * moment anyone can still do something about it.
+     *
+     * Deliberately narrow. Everything else on the till works without a shift —
+     * the menu, reports, stock, expenses — because none of those move cash.
+     */
+    if (!openShiftId) {
+      const err = new Error('Open a shift before taking orders.');
+      err.code = 'NO_OPEN_SHIFT';
+      throw err;
+    }
+
     const orderResult = db.prepare(
       // created_at is set explicitly to local wall-clock time. The column
       // default is CURRENT_TIMESTAMP, which SQLite evaluates in UTC — at
@@ -193,6 +211,13 @@ router.post('/', (req, res) => {
       customer_address: (customer_address && String(customer_address).trim()) || null,
     });
   } catch (err) {
+    if (err.code === 'NO_OPEN_SHIFT') {
+      // 409, not 500: nothing is broken, the till is simply not ready to trade.
+      return res.status(409).json({
+        error: 'Open a shift before taking orders. Go to Shifts and enter your opening cash.',
+        code: 'NO_OPEN_SHIFT',
+      });
+    }
     console.error('Error creating order:', err);
     res.status(500).json({ error: err.message });
   }

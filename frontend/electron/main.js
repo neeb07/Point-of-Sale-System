@@ -1,4 +1,4 @@
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, dialog } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
 const fs = require('fs');
@@ -192,12 +192,70 @@ if (!gotTheLock) {
     createWindow();
   });
 
+  /*
+   * Do not let the POS close on an open shift without saying so.
+   *
+   * Closing the app does not close the drawer: the shift stays open, the cash
+   * is never counted, and the variance is discovered the next morning by
+   * somebody who was not there. A prompt at the moment of closing is the last
+   * point where the person who filled the drawer is still standing at it.
+   *
+   * Advisory, not a lock. Someone may genuinely need to shut the machine down
+   * mid-shift, so the second button lets them, and the shift simply stays open.
+   */
+  let quitConfirmed = false;
+
+  async function hasOpenShift() {
+    try {
+      const res = await fetch('http://127.0.0.1:3001/api/shifts/open-count', {
+        signal: AbortSignal.timeout(2000),
+      });
+      if (!res.ok) return false;
+      const body = await res.json();
+      return Number(body.open) > 0;
+    } catch (err) {
+      // Backend already gone, or unreachable. Never block a quit on that.
+      return false;
+    }
+  }
+
+  async function confirmQuit(win) {
+    if (quitConfirmed) return true;
+    if (!(await hasOpenShift())) return true;
+
+    const { response } = await dialog.showMessageBox(win || null, {
+      type: 'warning',
+      buttons: ['Go back and close the shift', 'Close anyway'],
+      defaultId: 0,
+      cancelId: 0,
+      title: 'A shift is still open',
+      message: 'A shift is still open on this till.',
+      detail:
+        'Closing Blaze POS now leaves it open and the drawer uncounted. ' +
+        'Close the shift on the Shifts screen first, so the cash is reconciled ' +
+        'while you are still here.',
+    });
+    return response === 1;
+  }
+
   app.on('window-all-closed', () => {
     stopBackend();
     if (process.platform !== 'darwin') app.quit();
   });
 
-  app.on('before-quit', () => stopBackend());
+  app.on('before-quit', (event) => {
+    if (quitConfirmed) { stopBackend(); return; }
+
+    // Hold the quit while the question is asked; `before-quit` cannot await.
+    event.preventDefault();
+    const win = BrowserWindow.getAllWindows()[0];
+    confirmQuit(win).then((proceed) => {
+      if (!proceed) return;
+      quitConfirmed = true;
+      stopBackend();
+      app.quit();
+    });
+  });
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

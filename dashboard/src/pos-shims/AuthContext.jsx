@@ -40,6 +40,13 @@ export function AuthProvider({ user, onSignOut, children }) {
     // Deprecated alias the till still carries; kept so an older screen importing
     // it does not fail at render time.
     isCashier: false,
+    /*
+     * Not a till. The owner has no cash drawer in front of them, so the screens
+     * hide what only makes sense with one — opening and closing shifts,
+     * recording a payout, counting stock. The server refuses those anyway; this
+     * stops them being offered in the first place.
+     */
+    canOperateTill: false,
     login: () => {},
     logout: onSignOut,
   };

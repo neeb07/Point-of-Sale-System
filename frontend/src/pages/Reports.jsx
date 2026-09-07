@@ -880,8 +880,16 @@ export default function Reports() {
               </table>
               <div style={{ height: 200, marginTop: 16 }}>
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={cashierPerformance} layout="horizontal" margin={{ left: 100, right: 20, top: 10, bottom: 10 }}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
+                  {/*
+                    layout="vertical" is what Recharts calls bars that run left
+                    to right with the categories down the Y axis. This said
+                    "horizontal", which is the default and expects the opposite
+                    — a category X axis and a numeric Y — so the axes below were
+                    inverted against it and the chart drew nothing. The Top
+                    Items chart above has always been right; this one never was.
+                  */}
+                  <BarChart data={cashierPerformance} layout="vertical" margin={{ left: 20, right: 30, top: 10, bottom: 10 }}>
+                    <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#E5E7EB" />
                     <XAxis type="number" tick={{ fontSize: 11, fill: '#6B7280' }} tickFormatter={val => formatMoney(val)} />
                     <YAxis type="category" dataKey="cashier_name" tick={{ fontSize: 11, fill: '#4B5563' }} width={90} axisLine={false} tickLine={false} />
                     <RechartsTooltip cursor={{ fill: '#F9FAFB' }} contentStyle={{ borderRadius: 8, border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} formatter={(value) => [formatMoney(value), 'Revenue']} />

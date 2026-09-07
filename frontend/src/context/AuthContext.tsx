@@ -217,7 +217,18 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const isCashier = isManager;
 
   return (
-    <AuthContext.Provider value={{ currentUser, isLocked, login, logout, isAdmin, isManager, isCashier }}>
+    <AuthContext.Provider value={{
+      currentUser, isLocked, login, logout, isAdmin, isManager, isCashier,
+      /*
+       * Whether this is a till, as opposed to the head-office dashboard.
+       *
+       * The same screens run in both places. Some of what they offer only makes
+       * sense with a cash drawer in front of you — opening and closing a shift,
+       * recording a payout — and on the dashboard those actions are refused by
+       * the server anyway. Hiding them is better than a button that errors.
+       */
+      canOperateTill: true,
+    }}>
       {children}
     </AuthContext.Provider>
   );

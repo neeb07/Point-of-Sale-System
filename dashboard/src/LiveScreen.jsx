@@ -103,7 +103,7 @@ export default function LiveScreen({ user, onSignOut, embedded = false }) {
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
               <h2 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: '#111827' }}>
-                Today, across the shop
+                Across the open shifts
               </h2>
               <span style={{ fontSize: 12, color: allReporting ? '#6B7280' : '#B45309' }}>
                 {allReporting
@@ -126,8 +126,10 @@ export default function LiveScreen({ user, onSignOut, embedded = false }) {
               </div>
             </div>
             <p style={{ margin: '12px 0 0', fontSize: 12, color: '#9CA3AF' }}>
-              Live figures from open shifts, not yet reconciled — a later void or
-              correction can change them. Use Reports for the day&rsquo;s official total.
+              These are the shifts open right now, not the whole day — a branch
+              that has already cashed up is not counted. Not yet reconciled
+              either: a later void can change them. Use Reports for the day&rsquo;s
+              official total.
             </p>
           </section>
         )}

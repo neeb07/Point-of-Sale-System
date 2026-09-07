@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
+const db = require('./db/database');
 const { isSyncEnabled } = require('./db/till-identity');
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -117,6 +118,23 @@ app.use('/api/expenses', requireAuth, require('./routes/expenses'));
 // this route is read-only; the branch list is reference data every till needs.
 app.use('/api/customers', requireAuth, require('./routes/customers'));
 app.use('/api/branches', requireAuth, require('./routes/branches'));
+/*
+ * How many shifts are open, whoever opened them.
+ *
+ * Mounted ahead of the guarded router and left open on purpose: Electron's main
+ * process asks this as the app is closing, to warn before a drawer is abandoned
+ * uncounted, and it holds no session and has no way to obtain one. It answers a
+ * single number, names nobody, and the API is bound to loopback.
+ */
+app.get('/api/shifts/open-count', (req, res) => {
+  try {
+    const row = db.prepare("SELECT COUNT(*) AS n FROM shifts WHERE status = 'open'").get();
+    res.json({ open: row.n });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.use('/api/shifts', requireAuth, require('./routes/shifts'));
 app.use('/api/reports', requireAuth, require('./routes/reports'));
 
