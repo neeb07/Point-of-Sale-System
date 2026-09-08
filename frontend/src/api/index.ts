@@ -279,6 +279,11 @@ export const branchesAPI = {
 export const syncAPI = {
   now: () => request<Record<string, any>>('POST', '/sync/now'),
   status: () => request<Record<string, any>>('GET', '/sync/status'),
+  // Pairing this machine to a branch. The code comes from the dashboard and is
+  // exchanged for the real credential by the backend — it never touches this
+  // code, and the key is never returned here.
+  pair: (cloud_url: string, code: string) =>
+    request<Record<string, any>>('POST', '/sync/pair', { cloud_url, code }),
 };
 
 export const dealsAPI = {

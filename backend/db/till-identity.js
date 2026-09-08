@@ -138,4 +138,45 @@ function publicStatus() {
   };
 }
 
-module.exports = { tillBranchId, isSyncEnabled, syncConfig, publicStatus, IDENTITY_PATH };
+/**
+ * Write the identity file — the last step of pairing.
+ *
+ * Written to a temporary name and renamed into place, because a machine that
+ * loses power halfway through must not be left holding half a credential: the
+ * old file would be gone and the new one unreadable, and the shop would be
+ * unpaired with nothing on screen to say why. A rename within a directory is
+ * atomic.
+ *
+ * The cache is invalidated by mtime, so the next read picks this up on its own
+ * — but starting the sync timers is a separate job, because they were never
+ * started on a till that booted unpaired. See routes/sync.js.
+ */
+function writeIdentity(config) {
+  const payload = {
+    enabled: config.enabled !== false,
+    cloud_url: String(config.cloud_url).replace(/\/+$/, ''),
+    branch_id: Number(config.branch_id),
+    branch_name: config.branch_name || null,
+    api_key: String(config.api_key),
+  };
+
+  if (!payload.cloud_url || !Number.isFinite(payload.branch_id) || !payload.api_key) {
+    throw new Error('Refusing to write an incomplete pairing file');
+  }
+
+  const staging = `${IDENTITY_PATH}.writing`;
+  fs.writeFileSync(staging, JSON.stringify(payload, null, 2), { mode: 0o600 });
+  fs.renameSync(staging, IDENTITY_PATH);
+
+  // Force the next read to go to disk rather than trust a cache that predates
+  // this write by microseconds — mtime resolution is coarse enough on some
+  // filesystems that an immediate re-read could otherwise miss it.
+  cachedMtimeMs = -1;
+  cached = null;
+
+  return publicStatus();
+}
+
+module.exports = {
+  tillBranchId, isSyncEnabled, syncConfig, publicStatus, writeIdentity, IDENTITY_PATH,
+};

@@ -262,7 +262,20 @@ async function pushReference() {
   return { ok: true };
 }
 
+/*
+ * Started at most once, and startable later.
+ *
+ * A till that boots unpaired skips this entirely, so when a pairing code is
+ * claimed there are no timers running — the identity file is correct and
+ * nothing is using it. That was a real hole: dropping the file in place was
+ * documented as needing no restart, and re-reading it does happen, but nothing
+ * was reading it because nothing had been scheduled. routes/sync.js calls
+ * start() again after pairing, and this guard is what makes that safe.
+ */
+let started = null;
+
 function start() {
+  if (started) return started;
   if (!isSyncEnabled()) return null;
 
   // On app start: catch up whatever accumulated while the shop was closed or
@@ -284,6 +297,7 @@ function start() {
   }, REFERENCE_INTERVAL_MS);
   if (typeof refTimer.unref === 'function') refTimer.unref();
 
+  started = timer;
   return timer;
 }
 

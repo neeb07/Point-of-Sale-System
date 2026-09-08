@@ -1,11 +1,11 @@
 // @ts-nocheck
 import React, { useState, useEffect, useRef } from 'react';
-import { Store, Percent, Receipt, Printer, Clock, Database, Download, Send } from 'lucide-react';
+import { Store, Percent, Receipt, Printer, Clock, Database, Download, Send, Cloud } from 'lucide-react';
 import PageHeader from '@/components/pos-ui/PageHeader';
 import Toggle from '@/components/pos-ui/Toggle';
 import Toast from '@/components/pos-ui/Toast';
 import Modal from '@/components/pos-ui/Modal';
-import { settingsAPI, reportsAPI, shiftsAPI } from '@/api/index';
+import { settingsAPI, reportsAPI, shiftsAPI, syncAPI } from '@/api/index';
 import { useAuth } from '@/context/AuthContext';
 import { useSettings } from '@/lib/SettingsContext';
 
@@ -15,6 +15,7 @@ const NAV_ITEMS = [
   { id: 'receipt', label: 'Receipt', icon: Receipt },
   { id: 'printer', label: 'Printer', icon: Printer },
   { id: 'shift', label: 'Shift', icon: Clock },
+  { id: 'branch', label: 'Branch & Cloud', icon: Cloud },
   { id: 'backup', label: 'Data & Backup', icon: Database },
   { id: 'reports', label: 'Reports', icon: Send },
 ];
@@ -96,7 +97,7 @@ export default function Settings() {
    * that greys them.
    */
   const MANAGER_EDITABLE = new Set(['receipt', 'printer']);
-  const OWNER_ONLY = new Set(['backup', 'reports']);
+  const OWNER_ONLY = new Set(['backup', 'reports', 'branch']);
   const canEditSection = (id) => isAdmin || MANAGER_EDITABLE.has(id);
   const [activeSection, setActiveSection] = useState('restaurant');
   const [toast, setToast] = useState(null);
@@ -145,6 +146,12 @@ export default function Settings() {
   const shiftDiscounts = Number(currentShift?.total_discounts || 0);
 
   const [lastBackup, setLastBackup] = useState('Never');
+  // Which branch this machine reports as. Read from the backend rather than
+  // stored here: the identity lives in a file beside the database, and the API
+  // deliberately never returns the key itself.
+  const [pairing, setPairing] = useState(null);
+  const [pairForm, setPairForm] = useState({ cloud_url: '', code: '' });
+  const [pairBusy, setPairBusy] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [resetModal, setResetModal] = useState(false);
   const [resetConfirm, setResetConfirm] = useState('');
@@ -699,6 +706,145 @@ export default function Settings() {
     </div>
   );
 
+  /*
+   * Which branch this machine is.
+   *
+   * Loaded on demand rather than at mount: an unpaired till has no cloud to
+   * ask, and a manager never opens this section.
+   */
+  const loadPairing = async () => {
+    try { setPairing(await syncAPI.status()); }
+    catch (err) { setPairing({ error: err.message }); }
+  };
+
+  useEffect(() => { if (activeSection === 'branch' && isAdmin) loadPairing(); }, [activeSection, isAdmin]);
+
+  const handlePair = async () => {
+    const paired = pairing && pairing.paired;
+    if (paired && !window.confirm(
+      `This till is already set up as ${pairing.branch_name || 'a branch'}.\n\n` +
+      'Pairing again will replace that. Only do this if you are moving this ' +
+      'machine to a different branch, or reconnecting it after a problem.\n\nContinue?'
+    )) return;
+
+    setPairBusy(true);
+    try {
+      const result = await syncAPI.pair(pairForm.cloud_url.trim(), pairForm.code.trim());
+      setPairing(result);
+      setPairForm({ cloud_url: pairForm.cloud_url, code: '' });
+      setToast({ message: `This till is now ${result.branch_name}.`, type: 'success' });
+    } catch (err) {
+      setToast({ message: err.message || 'Pairing failed', type: 'error' });
+    } finally {
+      setPairBusy(false);
+    }
+  };
+
+  const renderBranch = () => {
+    const paired = pairing && pairing.paired;
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+        <div style={{ ...CARD_STYLE, padding: 20 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: '#111827' }}>This till</div>
+          <div style={{ fontSize: 13, color: '#6B7280', marginTop: 4 }}>
+            Which branch this computer reports as. Every sale, shift and expense
+            rung up here is filed under it.
+          </div>
+
+          {!pairing ? (
+            <div style={{ fontSize: 13, color: '#9CA3AF', marginTop: 14 }}>Checking…</div>
+          ) : paired ? (
+            <div style={{ marginTop: 14, display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '8px 20px', fontSize: 13.5 }}>
+              <span style={{ color: '#6B7280' }}>Status</span>
+              <span style={{ color: '#059669', fontWeight: 700 }}>Connected</span>
+              <span style={{ color: '#6B7280' }}>Branch</span>
+              <span style={{ fontWeight: 700, color: '#111827' }}>
+                {pairing.branch_name || '—'}{' '}
+                <span style={{ color: '#9CA3AF', fontWeight: 500 }}>(id {pairing.branch_id})</span>
+              </span>
+              <span style={{ color: '#6B7280' }}>Cloud</span>
+              <span style={{ color: '#374151' }}>{pairing.cloud_url}</span>
+              <span style={{ color: '#6B7280' }}>Key</span>
+              {/*
+                Never the key itself. publicStatus() on the backend returns
+                whether one is present and nothing more, so it cannot leak
+                through this screen even by mistake.
+              */}
+              <span style={{ color: '#374151' }}>{pairing.key_present ? '••••••••' : 'missing'}</span>
+              {pairing.last_success_at && (
+                <>
+                  <span style={{ color: '#6B7280' }}>Last reported</span>
+                  <span style={{ color: '#374151' }}>{new Date(pairing.last_success_at).toLocaleString()}</span>
+                </>
+              )}
+              {pairing.queue_depth > 0 && (
+                <>
+                  <span style={{ color: '#6B7280' }}>Waiting to send</span>
+                  <span style={{ color: '#B45309', fontWeight: 600 }}>{pairing.queue_depth} records</span>
+                </>
+              )}
+            </div>
+          ) : (
+            <div style={{
+              marginTop: 14, background: '#FEEFD0', border: '1px solid #F2D9A0',
+              borderRadius: 8, padding: 12, fontSize: 13, color: '#92400E',
+            }}>
+              This till is not set up for a branch yet. It works normally and
+              keeps selling, but nothing reaches head office and it has no
+              off-machine backup.
+            </div>
+          )}
+        </div>
+
+        <div style={{ ...CARD_STYLE, padding: 20 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: '#111827' }}>
+            {paired ? 'Move this till to a branch' : 'Set this till up'}
+          </div>
+          <div style={{ fontSize: 13, color: '#6B7280', marginTop: 4 }}>
+            Ask head office for a pairing code, then type it here. The code
+            works once and expires after a day.
+          </div>
+
+          <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 420 }}>
+            <div>
+              <label style={{ fontSize: 13, fontWeight: 600, color: '#374151' }}>Cloud address</label>
+              <input
+                style={{ ...INPUT_STYLE, width: '100%', marginTop: 6 }}
+                placeholder="https://blaze.virtiqo.com"
+                value={pairForm.cloud_url || pairing?.cloud_url || ''}
+                onChange={(e) => setPairForm({ ...pairForm, cloud_url: e.target.value })}
+              />
+            </div>
+            <div>
+              <label style={{ fontSize: 13, fontWeight: 600, color: '#374151' }}>Pairing code</label>
+              <input
+                style={{
+                  ...INPUT_STYLE, width: '100%', marginTop: 6, letterSpacing: 3,
+                  fontSize: 18, fontWeight: 700, textTransform: 'uppercase',
+                }}
+                placeholder="8F3K-29PQ"
+                value={pairForm.code}
+                onChange={(e) => setPairForm({ ...pairForm, code: e.target.value })}
+              />
+            </div>
+            <button
+              onClick={handlePair}
+              disabled={pairBusy || !pairForm.code.trim()}
+              style={{
+                background: '#DC2626', color: '#FFFFFF', height: 40, borderRadius: 8,
+                fontWeight: 600, fontSize: 14, padding: '0 20px', border: 'none',
+                cursor: pairBusy ? 'not-allowed' : 'pointer',
+                opacity: pairBusy || !pairForm.code.trim() ? 0.6 : 1, alignSelf: 'flex-start',
+              }}
+            >
+              {pairBusy ? 'Connecting…' : paired ? 'Pair again' : 'Pair this till'}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const renderBackup = () => (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       <div style={{ ...CARD_STYLE, padding: 20 }}>
@@ -956,6 +1102,7 @@ export default function Settings() {
     receipt: renderReceipt,
     printer: renderPrinter,
     shift: renderShift,
+    branch: renderBranch,
     backup: renderBackup,
     reports: renderReports,
   };

@@ -7,8 +7,9 @@ import React, { useCallback, useEffect, useState } from 'react';
  * in a shop at eight in the evening with a dead PC and a queue at the counter;
  * they are not going to open a terminal, and they should not have to ring
  * anybody. So the two things recovery actually needs — that branch's most
- * recent database, and a new pairing file to put beside it — are both one
- * press from this screen.
+ * recent database, and a code that makes a new machine into that branch — are
+ * both one press from this screen, and neither involves a file path or a
+ * 64-character key.
  *
  * The health banner is the other half. A backup nobody looks at is a guess,
  * and the failure mode is silent: everything keeps working right up until the
@@ -87,22 +88,27 @@ export default function BackupsScreen() {
     return () => { cancelled = true; };
   }, [load]);
 
-  const rekey = async (branch) => {
+  /*
+   * A pairing code, not a key.
+   *
+   * This used to hand back the whole cloud-sync.json for somebody to save into
+   * AppData by hand. That works, and it is exactly the kind of instruction that
+   * gets a digit wrong at eight in the evening — and it puts a 64-character
+   * credential in front of whoever is standing at the counter. A short code
+   * they type into the till does the same job: the till exchanges it for the
+   * real key itself, over HTTPS, and writes the file.
+   */
+  const pair = async (branch) => {
     const sure = window.confirm(
-      `Issue a new key for ${branch.name}?\n\n` +
-      'The key that branch is using now will stop working immediately, and ' +
-      'that till will not be able to sync until the new file is put on it.\n\n' +
-      'Do this when you are setting up a replacement machine — not while the ' +
-      'current one is working.'
+      `Generate a pairing code for ${branch.name}?\n\n` +
+      'When a till uses this code, the machine that branch is running now ' +
+      'stops being able to sync. Do this when you are replacing it — not ' +
+      'while it is working.'
     );
     if (!sure) return;
     setBusy(true);
     try {
-      const result = await call('POST', `/api/backup/rekey/${branch.id}`);
-      // The address the shop can reach is, by definition, the one this page was
-      // served from — so it is filled in here rather than guessed on the server.
-      result.config.cloud_url = window.location.origin;
-      setPairing(result);
+      setPairing(await call('POST', '/api/pairing/codes', { branch_id: branch.id }));
     } catch (e) {
       setError(e.message);
     } finally {
@@ -142,32 +148,48 @@ export default function BackupsScreen() {
       {pairing && (
         <div style={{ ...card, marginBottom: 20, borderColor: '#FDE68A', background: '#FFFBEB' }}>
           <h3 style={{ margin: '0 0 4px', fontSize: 15, fontWeight: 700, color: '#92400E' }}>
-            New pairing file for {pairing.branch_name}
+            Pairing code for {pairing.branch_name}
           </h3>
-          <p style={{ margin: '0 0 12px', fontSize: 13, color: '#92400E' }}>
-            {pairing.warning} Save this as <code>cloud-sync.json</code> in{' '}
-            <code>%APPDATA%\blaze-pos\</code> on the replacement machine, beside{' '}
-            <code>pos_database.db</code>, then start the POS.
+          <p style={{ margin: '0 0 14px', fontSize: 13, color: '#92400E' }}>
+            On the new machine, open Blaze POS and go to <strong>Settings →
+            Branch &amp; Cloud</strong>. Enter this address and code, then press
+            Pair this till.
           </p>
-          <pre style={{
-            margin: 0, padding: 14, background: '#FFFFFF', border: '1px solid #FDE68A',
-            borderRadius: 8, fontSize: 12.5, overflowX: 'auto', fontFamily: 'ui-monospace, monospace',
+          <div style={{
+            display: 'flex', gap: 24, flexWrap: 'wrap', alignItems: 'center',
+            padding: 16, background: '#FFFFFF', border: '1px solid #FDE68A', borderRadius: 8,
           }}>
-{JSON.stringify(pairing.config, null, 2)}
-          </pre>
+            <div>
+              <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.4, color: '#92400E' }}>
+                Cloud address
+              </div>
+              <div style={{ fontSize: 15, fontWeight: 600, marginTop: 2 }}>{window.location.origin}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.4, color: '#92400E' }}>
+                Pairing code
+              </div>
+              <div style={{
+                fontSize: 30, fontWeight: 800, letterSpacing: 4, marginTop: 2,
+                fontFamily: 'ui-monospace, monospace',
+              }}>
+                {pairing.code}
+              </div>
+            </div>
+          </div>
+          <p style={{ margin: '12px 0 0', fontSize: 12.5, color: '#92400E' }}>
+            Works once, and expires in {pairing.expires_in_hours} hours. Shown
+            only now — if it is lost, generate another.
+          </p>
           <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
             <button
               style={btn('primary')}
-              onClick={() => navigator.clipboard?.writeText(JSON.stringify(pairing.config, null, 2))}
+              onClick={() => navigator.clipboard?.writeText(pairing.code)}
             >
-              Copy
+              Copy code
             </button>
-            {/*
-              Shown once. The server keeps only a hash of the key, so closing
-              this without saving it means issuing another one.
-            */}
             <button style={btn()} onClick={() => { setPairing(null); load(); }}>
-              I have saved it
+              Done
             </button>
           </div>
         </div>
@@ -201,7 +223,7 @@ export default function BackupsScreen() {
                     {branch.backups_held > 0 && ` · ${branch.backups_held} kept · ${bytes(branch.stored_bytes)} stored`}
                   </div>
                 </div>
-                <button style={btn('danger')} onClick={() => rekey(branch)} disabled={busy}>
+                <button style={btn('danger')} onClick={() => pair(branch)} disabled={busy}>
                   Set up a replacement machine
                 </button>
               </div>
@@ -274,12 +296,13 @@ export default function BackupsScreen() {
         <ol style={{ margin: 0, paddingLeft: 20, fontSize: 13.5, color: '#374151', lineHeight: 1.75 }}>
           <li>Install Blaze POS on the replacement machine and start it once, then close it.</li>
           <li><strong>Download</strong> that branch's newest backup above.</li>
-          <li>Press <strong>Set up a replacement machine</strong>, and save the file it
-              shows as <code>cloud-sync.json</code> in <code>%APPDATA%\blaze-pos\</code>.</li>
-          <li>Start the POS, sign in, and go to Settings → Data &amp; Backup → Restore,
-              and choose the file you downloaded.</li>
-          <li>Restart when it asks. The menu, staff and settings catch up from here
-              within a minute.</li>
+          <li>Sign in on that machine, go to Settings &rarr; Data &amp; Backup &rarr;
+              Restore, and choose the file you downloaded. Restart when it asks.</li>
+          <li>Press <strong>Set up a replacement machine</strong> here for a pairing
+              code, then enter it on that machine under Settings &rarr; Branch &amp;
+              Cloud. No file paths, and nobody has to see a key.</li>
+          <li>That is it. The menu, staff and settings catch up from here within a
+              minute, and the till starts backing itself up again on its own.</li>
         </ol>
         <p style={{ margin: '12px 0 0', fontSize: 12.5, color: '#6B7280' }}>
           No takings are lost either way: sales reach this server within thirty

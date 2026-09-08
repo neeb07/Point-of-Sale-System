@@ -133,7 +133,20 @@ async function uploadOnce({ force = false, reason = 'scheduled' } = {}) {
   }
 }
 
+/*
+ * Started at most once, and startable later.
+ *
+ * A till that boots unpaired skips this entirely, so when a pairing code is
+ * claimed there are no timers running — the identity file is correct and
+ * nothing is using it. That was a real hole: dropping the file in place was
+ * documented as needing no restart, and re-reading it does happen, but nothing
+ * was reading it because nothing had been scheduled. routes/sync.js calls
+ * start() again after pairing, and this guard is what makes that safe.
+ */
+let started = null;
+
 function start() {
+  if (started) return started;
   const config = syncConfig();
   if (!config) return null;
 
@@ -146,6 +159,7 @@ function start() {
   // interval in.
   const timer = setInterval(tick, INTERVAL_MS);
   if (typeof timer.unref === 'function') timer.unref();
+  started = timer;
   return timer;
 }
 

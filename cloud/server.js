@@ -94,6 +94,14 @@ app.use('/api/payroll', require('./routes/payroll'));
  */
 app.use('/api/backup', require('./routes/backup'));
 
+/*
+ * Pairing a till to a branch. The claim endpoint inside is the only
+ * unauthenticated write in this API — a till that has never been paired has
+ * nothing to authenticate with — which is why it is rate limited and why every
+ * code is single use and expires. See routes/pairing.js.
+ */
+app.use('/api/pairing', require('./routes/pairing'));
+
 // Expenses, shifts, staff figures and stock — read-only, in the till's own
 // response shapes so the POS screens can be reused on the dashboard unaltered.
 app.use('/api', require('./routes/branch-data'));

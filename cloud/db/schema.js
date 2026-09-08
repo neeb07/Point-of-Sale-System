@@ -483,6 +483,42 @@ CREATE TABLE IF NOT EXISTS branch_backups (
 );
 CREATE INDEX IF NOT EXISTS branch_backups_recent ON branch_backups (branch_id, backup_day DESC);
 
+-- ------------------------------------------------------------- pairing --
+--
+-- Short codes that turn a freshly installed till into a particular branch.
+--
+-- The branch API key is 64 hex characters. Nobody is reading that down a phone
+-- line to a manager in a shop, and asking them to create a JSON file in
+-- AppData is worse. So the owner generates a code here, reads it out, and the
+-- till exchanges it for the real key over HTTPS.
+--
+-- A code is a credential, and a weak one by design: eight characters, typed by
+-- a person. Three things keep that safe, and all three are load-bearing:
+--
+--   * Single use. Claimed once and it is spent, so a code left on a WhatsApp
+--     message cannot pair a second machine.
+--   * Short lived. Hours, not forever, so a forgotten code stops mattering.
+--   * Rate limited on the claim endpoint, because eight characters from a
+--     32-letter alphabet is only strong while guessing is slow.
+--
+-- Stored as a SHA-256 hash for the same reason the branch keys are: whoever
+-- reads this table should not come away with anything they can use. The lookup
+-- is by hash, so it stays a single indexed read.
+CREATE TABLE IF NOT EXISTS pairing_codes (
+  id          SERIAL PRIMARY KEY,
+  branch_id   INTEGER NOT NULL,
+  code_hash   TEXT NOT NULL UNIQUE,
+  -- The last four characters, in clear, so the owner can tell which code a
+  -- listing row refers to without it being enough to pair with.
+  hint        TEXT,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  expires_at  TIMESTAMPTZ NOT NULL,
+  claimed_at  TIMESTAMPTZ,
+  claimed_ip  TEXT,
+  created_by  TEXT
+);
+CREATE INDEX IF NOT EXISTS pairing_codes_live ON pairing_codes (branch_id, claimed_at, expires_at);
+
 -- Same derivation the till uses, for branches that predate the column.
 UPDATE branches
    SET code = NULLIF(regexp_replace(
