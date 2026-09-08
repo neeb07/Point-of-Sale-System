@@ -55,18 +55,13 @@ router.get('/directory', (req, res) => {
 
 // GET all staff — administration, so admin only.
 /*
- * The roster, readable by anybody signed in.
+ * The roster. Administrators only.
  *
- * A manager wants to see who is set up on this till — most often to check
- * whether somebody the owner added on the dashboard has arrived yet. It names
- * people and says whether they are active, which is on the sign-in screen
- * anyway.
- *
- * The PIN hashes were stripped from this response long before that; creating,
- * editing and deactivating are all still administrator-only below, and refused
- * outright once the till is paired, because staff belong to the dashboard.
+ * Deliberately narrower than the sign-in screen, which lists names so somebody
+ * can pick their own. This returns the whole staff of the branch with roles
+ * and active flags, and that belongs to the owner.
  */
-router.get('/', requireAuth, (req, res) => {
+router.get('/', requireAdmin, (req, res) => {
   try {
     // SECURITY: `pin` used to be in this SELECT, so every caller of
     // GET /api/staff received the bcrypt hash of every staff PIN. Nothing in

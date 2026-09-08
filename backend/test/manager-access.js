@@ -96,10 +96,19 @@ async function waitFor(url, tries = 120) {
   ok("downloading the whole database is still the owner's", download.status === 403);
 
   console.log();
-  console.log('=== THE STAFF LIST IS VISIBLE, NOT EDITABLE ===');
+  console.log('=== THE STAFF ROSTER IS NOT THEIRS TO SEE ===');
+  /*
+   * Not about what a manager could change — the writes were always refused —
+   * but about what the list shows: everybody who works at this branch, their
+   * role, and whether they are still active. The sign-in screen names people so
+   * somebody can pick their own; this is the roster, and it is the owner's.
+   */
   const list = await call('GET', '/staff', M);
-  ok('a manager can see who is set up here', list.status === 200 && Array.isArray(list.body));
-  ok('with no PIN hash in it', JSON.stringify(list.body).indexOf('$2') === -1);
+  const asOwner = await call('GET', '/staff', A);
+  console.log(`   manager -> ${list.status}, admin -> ${asOwner.status}`);
+  ok('a manager cannot read the roster', list.status === 403);
+  ok('the owner still can', asOwner.status === 200 && Array.isArray(asOwner.body));
+  ok('and it still carries no PIN hash', JSON.stringify(asOwner.body).indexOf('$2') === -1);
 
   const create = await call('POST', '/staff', M, { name: 'Nope', pin: '9999', role: 'Manager' });
   const edit = await call('PUT', `/staff/${manager.id}`, M, { name: 'Renamed' });
@@ -110,6 +119,11 @@ async function waitFor(url, tries = 120) {
 
   const perf = await call('GET', '/staff/performance', M);
   ok("and cannot see every cashier's takings side by side", perf.status === 403);
+
+  // The one staff-shaped thing that stays open, because the PIN screen draws
+  // it before anybody has signed in at all.
+  const directory = await fetch(`${API}/staff/directory`);
+  ok('but the sign-in screen can still list who may sign in', directory.status === 200);
 
   console.log();
   console.log('=== WHAT STAYS PRIVATE, STAYS PRIVATE ===');
