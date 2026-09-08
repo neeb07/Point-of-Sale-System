@@ -26,6 +26,12 @@
 
 const { Pool } = require('pg');
 
+// Before the variable is read, not after. Every way into this process — the
+// server, the provisioning script, the tests — reaches the database through
+// this module, so loading the file here is what makes `npm start` work on its
+// own in a fresh terminal. An already-exported value still wins; see env.js.
+require('../env').loadEnv();
+
 const connectionString = process.env.DATABASE_URL;
 
 if (!connectionString) {

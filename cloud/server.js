@@ -19,6 +19,8 @@ const path = require('path');
 const fs = require('fs');
 const cookieParser = require('cookie-parser');
 
+require('./env').loadEnv();
+
 const db = require('./db/pg');
 const { attachUser, startSessionCleanup } = require('./middleware/session');
 const { createSchema } = require('./db/schema');
