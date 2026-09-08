@@ -719,35 +719,21 @@ if (ingCount.count === 0) {
 const backupDir = path.join(userDataDir, 'backups');
 if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
 
-function doAutoBackup() {
-  const date = new Date().toISOString().split('T')[0];
-  const backupPath = path.join(backupDir, `pos_backup_${date}.db`);
-
-  if (!fs.existsSync(backupPath)) {
-    try {
-      fs.copyFileSync(DB_PATH, backupPath);
-      console.log('Auto backup created:', backupPath);
-
-      // Keep only last 7 daily backups
-      const backups = fs.readdirSync(backupDir)
-        .filter(f => f.startsWith('pos_backup_'))
-        .sort();
-      if (backups.length > 7) {
-        backups.slice(0, backups.length - 7)
-          .forEach(f => fs.unlinkSync(path.join(backupDir, f)));
-      }
-    } catch(e) {
-      console.error('Auto backup failed:', e.message);
-    }
-  }
-}
-
-doAutoBackup(); // on startup
-// unref'd so the timer never holds the process open by itself. The server is
-// kept alive by its listening socket; a one-off maintenance script that
-// requires this module can now exit when it finishes instead of hanging on a
-// 24-hour timer that will never fire.
-const backupTimer = setInterval(doAutoBackup, 24 * 60 * 60 * 1000); // every 24h
-if (typeof backupTimer.unref === 'function') backupTimer.unref();
+/*
+ * Backups live in db/backup.js now.
+ *
+ * What stood here copied the database file with fs.copyFileSync, once a day at
+ * startup. In WAL mode that is not a backup of the database — it is a backup of
+ * whatever had last been checkpointed into the main file, with the recent
+ * writes still sitting in the -wal file and left behind. It failed silently:
+ * the copies opened fine, had the right schema, and were simply missing the
+ * most recent day of trading.
+ *
+ * The replacement uses VACUUM INTO, which writes a consistent snapshot
+ * including WAL content, verifies the result before it replaces anything, and
+ * is started from server.js rather than from here — so a maintenance script
+ * that requires this module no longer writes a backup as a side effect of
+ * being run.
+ */
 
 module.exports = db;

@@ -83,6 +83,15 @@ app.use('/api/staff', require('./routes/staff'));
  */
 app.use('/api/payroll', require('./routes/payroll'));
 
+/*
+ * Backups: a till uploading one, and the owner getting it back onto a
+ * different machine. Guards are inside — the upload answers a branch key, the
+ * rest needs a signed-in owner. Mounted before the JSON body parser matters
+ * here: the upload route brings its own raw parser, since a gzipped database
+ * is not JSON. See routes/backup.js.
+ */
+app.use('/api/backup', require('./routes/backup'));
+
 // Expenses, shifts, staff figures and stock — read-only, in the till's own
 // response shapes so the POS screens can be reused on the dashboard unaltered.
 app.use('/api', require('./routes/branch-data'));

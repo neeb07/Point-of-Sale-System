@@ -244,6 +244,18 @@ app.use((err, req, res, next) => {
 require('./sync/heartbeat').start();
 // The sales push: batched, retried, and never in the sale path.
 require('./sync/push').start();
+/*
+ * Backups.
+ *
+ * Two of them, protecting against different things. The local one guards
+ * against a bad restore or a deleted record and is useless if the disk dies;
+ * the cloud one is the only copy that survives losing this machine, which is
+ * the failure the shop actually plans for. Started here rather than from
+ * db/database.js so that requiring the database in a script does not write a
+ * backup as a side effect.
+ */
+require('./db/backup').start();
+require('./sync/backup-upload').start();
 
 const server = app.listen(PORT, HOST, () => {
   console.log(`POS Backend running on http://${HOST}:${PORT}`);

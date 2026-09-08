@@ -17,6 +17,7 @@ import SettingsScreen from './SettingsScreen';
 import OrdersScreen from './OrdersScreen';
 import CustomersScreen from './CustomersScreen';
 import PayrollScreen from './PayrollScreen';
+import BackupsScreen from './BackupsScreen';
 
 /**
  * The signed-in frame.
@@ -40,6 +41,7 @@ const TABS = [
   // till and travels upward; the menu is the one thing that travels down.
   { key: 'menu', label: 'Menu', Screen: MenuManagement },
   { key: 'deals', label: 'Deals', Screen: Deals },
+  { key: 'backups', label: 'Backups', Screen: BackupsScreen },
   { key: 'settings', label: 'Settings', Screen: SettingsScreen },
 ];
 

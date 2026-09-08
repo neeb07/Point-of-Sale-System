@@ -36,6 +36,10 @@ router.get('/status', (req, res) => {
       ...publicStatus(),
       ...heartbeat.status(),
       ...push.status(),
+      // When this till last managed to get a copy of itself off the machine.
+      // A backup nobody checks is a guess, so it is reported beside the sync
+      // state rather than left to be discovered on the day it is needed.
+      ...require('../sync/backup-upload').status(),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

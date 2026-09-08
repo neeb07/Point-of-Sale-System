@@ -159,6 +159,19 @@ router.post('/close', (req, res) => {
      * the network to get it.
      */
     require('../sync/push').syncOnce().catch(() => { /* the timer will retry */ });
+
+    /*
+     * And take a backup, for the same reason.
+     *
+     * A closed drawer is a complete day, and it is the moment a shop is most
+     * likely to shut the machine down — so it is the last chance to capture
+     * the day before anything can happen to it overnight. Forced past the
+     * unchanged-check, because a day that ends exactly as the last upload left
+     * it is still a day worth having its own copy of.
+     */
+    require('../sync/backup-upload')
+      .uploadOnce({ force: true, reason: 'shift-close' })
+      .catch(() => { /* the timer will retry; never block a close */ });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

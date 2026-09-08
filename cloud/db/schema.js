@@ -448,6 +448,41 @@ CREATE TABLE IF NOT EXISTS payslips (
 CREATE INDEX IF NOT EXISTS payslips_period ON payslips (period);
 CREATE INDEX IF NOT EXISTS payslips_paid_on ON payslips (paid_on);
 
+-- ------------------------------------------------------------- backups --
+--
+-- A compressed copy of each till's whole SQLite database, so a branch can be
+-- rebuilt on a different machine. This is the only copy of a till's own
+-- history that is not on that till: the local backups sit on the same disk as
+-- the database, which protects against a deleted record and against nothing
+-- that happens to the machine.
+--
+-- One row per branch per day, replaced in place. That bounds the storage to a
+-- fortnight of compressed copies per branch regardless of how often a till
+-- uploads, while still letting it upload every half hour so the newest is
+-- never far behind. Going back past a problem needs distinct days, not
+-- distinct half-hours.
+--
+-- The blob is gzipped on the till and stored exactly as received; this server
+-- never opens it. The counts beside it are what the till reported at the time,
+-- which is what makes a stale or empty backup visible on the dashboard without
+-- anything having to decompress 40 MB to find out.
+CREATE TABLE IF NOT EXISTS branch_backups (
+  id              SERIAL PRIMARY KEY,
+  branch_id       INTEGER NOT NULL,
+  backup_day      DATE NOT NULL,
+  taken_at        TIMESTAMPTZ NOT NULL,
+  received_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  gz_bytes        BIGINT NOT NULL,
+  raw_bytes       BIGINT,
+  sha256          TEXT,
+  orders_count    INTEGER,
+  last_order_at   TEXT,
+  reason          TEXT,
+  blob            BYTEA NOT NULL,
+  UNIQUE (branch_id, backup_day)
+);
+CREATE INDEX IF NOT EXISTS branch_backups_recent ON branch_backups (branch_id, backup_day DESC);
+
 -- Same derivation the till uses, for branches that predate the column.
 UPDATE branches
    SET code = NULLIF(regexp_replace(
