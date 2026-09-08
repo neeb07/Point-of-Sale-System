@@ -1,5 +1,5 @@
 import React from 'react';
-import { Home as HomeIcon, User, ClipboardList, BarChart2, Settings, LogOut, Utensils, Tag, Package, Clock, Wallet } from 'lucide-react';
+import { Home as HomeIcon, User, Users, ClipboardList, BarChart2, Settings, LogOut, Utensils, Tag, Package, Clock, Wallet } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 
 interface NavItem {
@@ -59,6 +59,7 @@ const MANAGER_NAV: NavItem[] = [
   { id: 'reports',  icon: BarChart2,     label: 'Reports' },
   // The printer and receipt options are the manager's own; everything else on
   // that screen is shown to them greyed. See the allow-list in backend/server.js.
+  { id: 'cashier',  icon: Users,         label: 'Staff' },
   { id: 'settings', icon: Settings,      label: 'Settings' },
 ];
 

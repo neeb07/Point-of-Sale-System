@@ -41,7 +41,16 @@ const screens: Record<string, React.ComponentType<{ onNavigate?: (page: string) 
  *
  * Staff administration stays closed outright.
  */
-const ADMIN_ONLY_SCREENS = new Set(['cashier']);
+/*
+ * Nothing on the till is the owner's alone any more.
+ *
+ * The staff screen used to be, back when staff were created here. They are
+ * created on the dashboard now, and what is left is a roster a manager may
+ * reasonably want to look at — usually to check whether somebody added at head
+ * office has arrived yet. The screen itself hides the buttons a manager cannot
+ * use, and the backend refuses those writes regardless.
+ */
+const ADMIN_ONLY_SCREENS = new Set<string>([]);
 
 /**
  * Where each role lands.

@@ -96,8 +96,22 @@ export default function Settings() {
    * screen that silently omits half its sections is more confusing than one
    * that greys them.
    */
-  const MANAGER_EDITABLE = new Set(['receipt', 'printer']);
-  const OWNER_ONLY = new Set(['backup', 'reports', 'branch']);
+  /*
+   * What a manager may change on the till they are standing at.
+   *
+   * Receipt and printer are how this machine behaves. Branch & Cloud and Data
+   * & Backup were the owner's until it became clear the owner is never in the
+   * shop — a till that needs pairing or restoring needs the person who is
+   * there, and waiting for somebody to drive over is not a recovery plan.
+   *
+   * Restaurant, tax and reports stay with the owner: those are the shop's
+   * identity, its prices and sending the day's figures out of the building,
+   * and all three are set from the dashboard now anyway. Within Data & Backup
+   * the download button and the factory reset stay owner-only too — see the
+   * section itself.
+   */
+  const MANAGER_EDITABLE = new Set(['receipt', 'printer', 'branch', 'backup']);
+  const OWNER_ONLY = new Set(['reports']);
   const canEditSection = (id) => isAdmin || MANAGER_EDITABLE.has(id);
   const [activeSection, setActiveSection] = useState('restaurant');
   const [toast, setToast] = useState(null);
@@ -717,7 +731,7 @@ export default function Settings() {
     catch (err) { setPairing({ error: err.message }); }
   };
 
-  useEffect(() => { if (activeSection === 'branch' && isAdmin) loadPairing(); }, [activeSection, isAdmin]);
+  useEffect(() => { if (activeSection === 'branch') loadPairing(); }, [activeSection]);
 
   const handlePair = async () => {
     const paired = pairing && pairing.paired;
@@ -847,6 +861,15 @@ export default function Settings() {
 
   const renderBackup = () => (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      {/*
+        Downloading the whole database stays with the owner. The file is every
+        order, every customer's address and telephone number, and every
+        manager's expenses — handing it over would undo, in one click, the rule
+        that a manager sees only their own figures. Nothing is lost by it: the
+        till sends a copy to head office every half hour on its own, and the
+        owner can download any of them from the dashboard.
+      */}
+      {isAdmin && (
       <div style={{ ...CARD_STYLE, padding: 20 }}>
         <div style={{ fontSize: 14, fontWeight: 700, color: '#111827' }}>Backup Data</div>
         <div style={{ fontSize: 13, color: '#6B7280', marginTop: 4 }}>Save a copy of all your data to your computer</div>
@@ -862,6 +885,7 @@ export default function Settings() {
           <Download size={16} /> Backup Now
         </button>
       </div>
+      )}
 
       <div style={{ ...CARD_STYLE, padding: 20 }}>
         <div style={{ fontSize: 14, fontWeight: 700, color: '#111827' }}>Restore from Backup</div>
@@ -892,6 +916,12 @@ export default function Settings() {
         />
       </div>
 
+      {/*
+        Wiping the shop is the owner's alone. Restoring a backup above is
+        recoverable and is why a manager is here at all; deleting every order
+        and starting again is not something anybody needs to do mid-service.
+      */}
+      {isAdmin && (
       <div style={{
         border: '1px solid #FEE2E2', background: '#FFF5F5', borderRadius: 12, padding: 20,
       }}>
@@ -909,6 +939,7 @@ export default function Settings() {
           Reset All Data
         </button>
       </div>
+      )}
     </div>
   );
 

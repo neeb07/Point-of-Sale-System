@@ -16,7 +16,6 @@ const router = express.Router();
 const db = require('../db/database');
 const { publicStatus, writeIdentity, syncConfig } = require('../db/till-identity');
 const heartbeat = require('../sync/heartbeat');
-const { isAdminRole } = require('../middleware/auth');
 const push = require('../sync/push');
 
 /**
@@ -28,15 +27,16 @@ const push = require('../sync/push');
  * HTTPS and writes the file itself, so nobody on site ever sees the key or
  * learns that the file exists.
  *
- * Administrator only. A freshly installed till has exactly one account — the
- * seeded Admin — so whoever is setting the machine up can reach this, and a
- * manager at a working till cannot quietly move it to another branch.
+ * Open to a manager as well as the owner. The owner is not in the shop — that
+ * is the whole premise of the dashboard — so if a machine needs setting up or
+ * reconnecting, the manager is the only person there to do it. Requiring an
+ * administrator would mean a branch sitting unpaired until somebody drove over.
+ *
+ * What stops this being a way to move a till somewhere it should not be is not
+ * the role: it is the pairing code, which only the owner can issue and which
+ * works once. A manager cannot invent one.
  */
 router.post('/pair', async (req, res) => {
-  if (!isAdminRole(req.user && req.user.role)) {
-    return res.status(403).json({ error: 'Administrator access required' });
-  }
-
   const cloudUrl = String((req.body && req.body.cloud_url) || '').trim().replace(/\/+$/, '');
   const code = String((req.body && req.body.code) || '').trim();
 
@@ -142,16 +142,11 @@ router.post('/pair', async (req, res) => {
 /**
  * Where this till thinks it is and whether it is paired.
  *
- * Admin-only (enforced at the mount in server.js). A manager has no use for it
- * and it names the branch this machine reports as, which is configuration
- * rather than till work.
+ * Readable by a manager. "Is this branch reporting?" is a question the person
+ * standing at the till needs answered — usually while somebody on the phone is
+ * asking why the dashboard has gone quiet — and it never returns the key.
  */
 router.get('/status', (req, res) => {
-  // The full picture — cloud URL, branch identity, pairing — is configuration,
-  // so it stays with the administrator.
-  if (!isAdminRole(req.user && req.user.role)) {
-    return res.status(403).json({ error: 'Administrator access required' });
-  }
   try {
     res.json({
       ...publicStatus(),

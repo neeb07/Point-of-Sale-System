@@ -120,7 +120,22 @@ app.use('/api/settings', (req, res, next) => {
   if (req.user && isAdminRole(req.user.role)) return next();
   if (!req.user) return requireAdmin(req, res, next);
 
-  // A manager may write, but only these keys, and only via the plain update.
+  /*
+   * Restoring is a manager's job too.
+   *
+   * It is the one action that can only be done by whoever is standing at the
+   * machine, and the machine is in a shop the owner does not sit in. A till
+   * that has just been rebuilt is useless until somebody loads the backup into
+   * it, and telling the manager to wait for the owner to drive over is not a
+   * recovery plan.
+   *
+   * It is destructive, which is why the route itself keeps a safety copy of
+   * what it replaces before it does anything — see routes/settings.js.
+   */
+  if (req.method === 'POST' && req.path === '/restore') return next();
+
+  // Otherwise a manager may write, but only these keys, and only via the plain
+  // update.
   if (req.method !== 'PUT' || req.path !== '/') {
     return res.status(403).json({ error: 'Administrator access required' });
   }
@@ -209,8 +224,18 @@ app.use('/api/reports', requireAuth, require('./routes/reports'));
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 
-// Backup — reads from correct DB location. Admin only: it hands over the
-// entire trading history as a file.
+/*
+ * Download the whole database. Still the owner's, and deliberately not moved
+ * with the rest.
+ *
+ * This file is every order, every customer's name, address and telephone
+ * number, and every manager's expenses. Handing it to a manager would quietly
+ * undo the rule that a manager sees only their own figures — they would simply
+ * open the file. And it costs them nothing to keep, because the till now sends
+ * a copy to the cloud every half hour on its own and the owner can download any
+ * of them from the dashboard. Restoring, which is the part that genuinely needs
+ * somebody at the machine, is open to managers above.
+ */
 app.get('/api/backup', requireAdmin, (req, res) => {
   const userDataDir = process.env.POS_USER_DATA_PATH || path.join(__dirname);
   const dbPath = path.join(userDataDir, 'pos_database.db');

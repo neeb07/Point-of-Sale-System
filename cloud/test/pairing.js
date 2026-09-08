@@ -199,16 +199,17 @@ let proc = null;
      readIdentity().branch_id === BRANCH_A);
 
   console.log();
-  console.log('=== ONLY AN ADMINISTRATOR CAN PAIR ===');
-  const manager = db.prepare("SELECT id FROM staff WHERE role = 'Manager' AND active = 1").get();
-  if (manager) {
-    // A manager's PIN is not known here, so the check is on the guard itself
-    // rather than on a real manager session.
-    const noSession = await fetch(`${TILL}/sync/pair`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cloud_url: 'http://x', code: 'AAAA-AAAA' }) });
-    ok('an unauthenticated caller cannot pair this machine', noSession.status === 401);
-  }
+  console.log('=== PAIRING STILL NEEDS A SIGNED-IN USER ===');
+  /*
+   * A manager may pair — the owner is never in the shop, so the person
+   * standing at the machine has to be able to set it up. What stops this being
+   * a way to move a till somewhere it should not go is the code itself, which
+   * only the owner can issue. What is still refused is nobody at all.
+   */
+  const noSession = await fetch(`${TILL}/sync/pair`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ cloud_url: 'http://x', code: 'AAAA-AAAA' }) });
+  ok('an unauthenticated caller cannot pair this machine', noSession.status === 401);
 
   const badUrl = await till('POST', '/sync/pair', T, { cloud_url: 'not-a-url', code: 'AAAA-AAAA' });
   ok('a malformed cloud address is rejected before anything is written', badUrl.status === 400);

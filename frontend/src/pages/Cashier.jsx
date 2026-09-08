@@ -7,6 +7,7 @@ import Modal from '@/components/pos-ui/Modal';
 import Toast from '@/components/pos-ui/Toast';
 import { staffAPI, branchesAPI } from '@/api/index';
 import { useSettings } from '@/lib/SettingsContext';
+import { useAuth } from '@/context/AuthContext';
 
 const AVATAR_COLORS = ['#DC2626', '#8B5CF6', '#3B82F6', '#10B981', '#EF4444', '#F59E0B'];
 
@@ -66,21 +67,28 @@ function PinInput({ value, onChange, length = 4 }) {
   );
 }
 
-function StaffCard({ staff, onEdit, onResetPin, onToggleActive, menuOpen, onMenuToggle }) {
+function StaffCard({ staff, canManage, onEdit, onResetPin, onToggleActive, menuOpen, onMenuToggle }) {
   const { formatMoney } = useSettings();
   const isActive = staff.status === 'Active' || staff.active === 1;
   const color = staff.color || '#DC2626';
 
   return (
     <div style={{ ...CARD_STYLE, padding: 20, position: 'relative' }}>
-      <button
-        onClick={() => onMenuToggle(staff.id)}
-        style={{ position: 'absolute', top: 12, right: 12, background: 'none', border: 'none', cursor: 'pointer' }}
-      >
-        <MoreVertical size={18} color="#9CA3AF" />
-      </button>
+      {/*
+        Hidden rather than shown-and-refused. Every item behind this menu is
+        something the backend will reject for a manager, and offering a button
+        that always fails is worse than not offering it.
+      */}
+      {canManage && (
+        <button
+          onClick={() => onMenuToggle(staff.id)}
+          style={{ position: 'absolute', top: 12, right: 12, background: 'none', border: 'none', cursor: 'pointer' }}
+        >
+          <MoreVertical size={18} color="#9CA3AF" />
+        </button>
+      )}
 
-      {menuOpen === staff.id && (
+      {canManage && menuOpen === staff.id && (
         <div style={{
           position: 'absolute', top: 36, right: 12, background: '#FFFFFF',
           border: '1px solid #E5E7EB', borderRadius: 8, boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
@@ -156,6 +164,13 @@ export default function Cashier() {
   const [toast, setToast] = useState(null);
   const [perfDate, setPerfDate] = useState('today');
   const [performance, setPerformance] = useState([]);
+  /*
+   * Managers reach this screen now, read-only. The owner is not in the shop,
+   * so a manager checking whether somebody added at head office has arrived is
+   * a reasonable thing to want; changing the roster is not, and the backend
+   * refuses it whatever this renders.
+   */
+  const { isAdmin } = useAuth();
   const [form, setForm] = useState({ name: '', role: 'Manager', color: '#DC2626', pin: '', confirmPin: '', branch_id: '' });
   const [branches, setBranches] = useState([]);
 
@@ -360,13 +375,20 @@ export default function Cashier() {
         <PageHeader
           title="Cashier"
           subtitle="Manage staff accounts and performance"
-          actionLabel="Add Staff"
-          actionIcon={Plus}
-          onAction={openAdd}
+          actionLabel={isAdmin ? 'Add Staff' : undefined}
+          actionIcon={isAdmin ? Plus : undefined}
+          onAction={isAdmin ? openAdd : undefined}
         />
 
         <div style={{ display: 'flex', gap: 4, borderBottom: '1px solid #E5E7EB', marginBottom: 24 }}>
-          {[{ id: 'staff', label: 'Staff Accounts' }, { id: 'performance', label: 'Performance' }].map((tab) => (
+          {/*
+            Performance is every cashier's takings side by side, which is the
+            one thing on this screen a manager should not see — the same rule
+            that keeps their reports and expenses to themselves.
+          */}
+          {[{ id: 'staff', label: 'Staff Accounts' }]
+            .concat(isAdmin ? [{ id: 'performance', label: 'Performance' }] : [])
+            .map((tab) => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
@@ -388,6 +410,7 @@ export default function Cashier() {
               <StaffCard
                 key={s.id}
                 staff={s}
+                canManage={isAdmin}
                 onEdit={openEdit}
                 onResetPin={() => openEdit(s)}
                 onToggleActive={handleToggleActive}
