@@ -107,7 +107,8 @@
     "productName": "Blaze-POS",
     "asar": false,
     "directories": {
-      "output": "release"
+      "output": "release",
+      "buildResources": "build"
     },
     "files": [
       "dist/**/*",
@@ -121,6 +122,13 @@
         "filter": [
           "**/*",
           "!node_modules/**"
+        ]
+      },
+      {
+        "from": "build",
+        "to": ".",
+        "filter": [
+          "icon.ico"
         ]
       }
     ],

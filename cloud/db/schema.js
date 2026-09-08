@@ -483,6 +483,32 @@ CREATE TABLE IF NOT EXISTS branch_backups (
 );
 CREATE INDEX IF NOT EXISTS branch_backups_recent ON branch_backups (branch_id, backup_day DESC);
 
+-- ---------------------------------------------------- staff deletions --
+--
+-- A tombstone per removed staff member, and it is load-bearing in two places.
+--
+-- The till's roster downlink upserts and never deletes, because a row missing
+-- from a snapshot usually means the cloud has not heard about that person yet
+-- rather than that they are gone. So a deletion has to be stated rather than
+-- inferred from an absence — otherwise somebody removed here would keep their
+-- PIN working at the till forever.
+--
+-- And the till pushes its staff up every five minutes. Without a record that
+-- the row was deleted on purpose, that push would simply put it back, and the
+-- delete would appear to work and then quietly undo itself.
+--
+-- Past orders, shifts and expenses are unaffected: each stores the person's
+-- name inline at the time it was recorded, so history keeps reading correctly
+-- with nobody to point at.
+CREATE TABLE IF NOT EXISTS staff_deletions (
+  branch_id  INTEGER NOT NULL,
+  local_id   INTEGER NOT NULL,
+  name       TEXT,
+  deleted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  deleted_by TEXT,
+  PRIMARY KEY (branch_id, local_id)
+);
+
 -- ------------------------------------------------------------- pairing --
 --
 -- Short codes that turn a freshly installed till into a particular branch.

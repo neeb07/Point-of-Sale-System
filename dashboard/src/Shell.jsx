@@ -159,6 +159,31 @@ export default function Shell({ user, onSignOut }) {
                   <active.Screen />
                 </div>
               )}
+
+            {/*
+              Attribution, on every page.
+              
+              Outside the screen switch so it sits below whichever tab is open,
+              and outside `pos-screen` so the till screens' own full-height
+              styling cannot push it off the bottom.
+            */}
+            <footer style={{
+              padding: '18px 20px 24px', textAlign: 'center',
+              fontSize: 12, color: '#9CA3AF',
+            }}>
+              Powered by{' '}
+              <a
+                href="https://www.virtiqo.com"
+                target="_blank"
+                // noopener because the opened page gets a handle on this one
+                // otherwise; noreferrer so the dashboard's address is not sent
+                // along with the click.
+                rel="noopener noreferrer"
+                style={{ color: '#6B7280', textDecoration: 'underline' }}
+              >
+                Virtiqo (Private) Limited
+              </a>
+            </footer>
           </div>
         </POSProvider>
       </SettingsProvider>

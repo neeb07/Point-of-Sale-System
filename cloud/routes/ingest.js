@@ -167,12 +167,33 @@ async function ingestOrders(client, branchId, rows, receivedAt) {
 }
 
 /** The simple tables: one multi-row upsert, no children to remap. */
-function simpleIngest(table, columns, valuesFor, conflictWhere) {
+function simpleIngest(table, columns, valuesFor, conflictWhere, after) {
   return async (client, branchId, rows, receivedAt) => {
     const { sql, params } = buildUpsert(
       table, columns, rows, valuesFor, receivedAt, branchId, conflictWhere);
     await client.query(sql, params);
+    if (after) await after(client, branchId);
   };
+}
+
+/**
+ * Undo anything this push resurrected.
+ *
+ * A till pushes its whole staff list every five minutes and knows nothing about
+ * deletions until its next pull. Without this, deleting somebody on the
+ * dashboard would work and then silently undo itself within the next five
+ * minutes — which looks exactly like the delete button not working.
+ *
+ * Done after the upsert rather than by filtering rows beforehand: the upsert is
+ * one multi-row statement, and one extra DELETE is both cheaper and much harder
+ * to get subtly wrong than per-row filtering inside it.
+ */
+async function dropDeletedStaff(client, branchId) {
+  await client.query(db.toPg(`
+    DELETE FROM staff s
+     USING staff_deletions d
+     WHERE s.branch_id = ? AND d.branch_id = s.branch_id AND d.local_id = s.local_id
+  `), [branchId]);
 }
 
 const HANDLERS = {
@@ -204,7 +225,7 @@ const HANDLERS = {
    */
   staff: simpleIngest('staff', STAFF_COLS, r => [
     str(r.name), str(r.role), str(r.color), num(r.active),
-  ], "staff.origin <> 'cloud'"),
+  ], "staff.origin <> 'cloud'", dropDeletedStaff),
 
   ingredients: simpleIngest('ingredients', INGREDIENT_COLS, r => [
     str(r.name), str(r.unit), num(r.stock), num(r.low_stock_threshold), num(r.cost_per_unit),

@@ -201,9 +201,44 @@ const stopCloud = () => { if (proc) { try { proc.kill(); } catch (e) {} proc = n
   ok('the deactivation survives the till’s own push', stillOff && Number(stillOff.active) === 0);
 
   console.log();
-  console.log('=== THERE IS NO DELETE ===');
+  console.log('=== DELETING FOR GOOD ===');
+  // Reactivated first: the route refuses to remove the last active account at
+  // a branch, and that guard would otherwise be what this section measured.
+  await cloudCall('PUT', `/staff/${BRANCH}/${NEW_ID}`, { body: { active: true } });
+  await cloudCall('POST', '/staff', {
+    body: { name: 'Stays Behind', role: 'Manager', pin: '5150', branch_id: BRANCH } });
+
   const del = await cloudCall('DELETE', `/staff/${BRANCH}/${NEW_ID}`);
-  ok('deletion is refused, with a reason', del.status === 400 && /deactivated/i.test(del.body.error || ''));
+  console.log(`   ${del.status} ${del.body.note || del.body.error || ''}`);
+  ok('the owner can delete a staff account', del.status === 200);
+
+  const listAfter = await cloudCall('GET', `/staff?branch=${BRANCH}`);
+  ok('and they are gone from the cloud',
+     !(listAfter.body || []).some(s2 => Number(s2.id) === NEW_ID));
+
+  // The whole reason for the tombstone table: the till pushes its staff list
+  // every five minutes and knows nothing about the deletion until it pulls.
+  await cloudCall('POST', '/ingest/batch', {
+    bearer: KEY,
+    body: { table: 'staff', rows: [{ id: NEW_ID, name: 'Test Manager', role: 'Manager', color: '#2563EB', active: 1 }] },
+  });
+  const afterPush = await cloudCall('GET', `/staff?branch=${BRANCH}`);
+  ok('and the till pushing them back does not resurrect them',
+     !(afterPush.body || []).some(s2 => Number(s2.id) === NEW_ID));
+
+  const pulledDelete = await staffPull.pullIfNewer();
+  console.log(`   till: ${JSON.stringify({ deleted: pulledDelete.deleted, applied: pulledDelete.applied })}`);
+  ok('the till removes them too', pulledDelete.deleted >= 1);
+
+  const goneRow = db.prepare('SELECT id FROM staff WHERE id = ?').get(NEW_ID);
+  ok('so the row is off that machine', !goneRow);
+  const cannotSignIn = await tillCall('POST', '/staff/login', null, { pin: '9753', staff_id: NEW_ID });
+  ok('and their PIN no longer signs in anywhere', cannotSignIn.status !== 200);
+
+  // History is the thing deletion must not damage.
+  const stillNamed = db.prepare(
+    'SELECT COUNT(*) n FROM orders WHERE cashier_name IS NOT NULL').get().n;
+  ok('past orders still name whoever took them', stillNamed > 0);
 
   console.log();
   console.log('=== ONE BRANCH KEY CANNOT READ ANOTHER BRANCH’S PINS ===');
@@ -234,7 +269,7 @@ const stopCloud = () => { if (proc) { try { proc.kill(); } catch (e) {} proc = n
     cloudExec([
       "const db = require('./db/pg');",
       '(async () => {',
-      "  for (const t of ['live_status','order_items','orders','shifts','expenses','staff','ingredients','customers','sync_cursor']) {",
+      "  for (const t of ['live_status','order_items','orders','shifts','expenses','staff','staff_deletions','ingredients','customers','sync_cursor']) {",
       `    try { await db.run('DELETE FROM ' + t + ' WHERE branch_id = ?', [${BRANCH}]); } catch (e) {}`,
       '  }',
       `  await db.run('DELETE FROM branches WHERE id = ?', [${BRANCH}]);`,

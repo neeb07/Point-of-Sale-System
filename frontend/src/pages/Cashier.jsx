@@ -66,7 +66,7 @@ function PinInput({ value, onChange, length = 4 }) {
   );
 }
 
-function StaffCard({ staff, onEdit, onResetPin, onToggleActive, menuOpen, onMenuToggle }) {
+function StaffCard({ staff, onEdit, onResetPin, onToggleActive, onDelete, menuOpen, onMenuToggle }) {
   const { formatMoney } = useSettings();
   const isActive = staff.status === 'Active' || staff.active === 1;
   const color = staff.color || '#DC2626';
@@ -86,19 +86,24 @@ function StaffCard({ staff, onEdit, onResetPin, onToggleActive, menuOpen, onMenu
           border: '1px solid #E5E7EB', borderRadius: 8, boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
           padding: 4, zIndex: 10,
         }}>
-          {['Edit', 'Reset PIN', isActive ? 'Deactivate' : 'Activate'].map((action) => (
+          {['Edit', 'Reset PIN', isActive ? 'Deactivate' : 'Activate', 'Delete'].map((action) => (
             <button
               key={action}
               onClick={() => {
                 if (action === 'Edit') onEdit(staff);
                 else if (action === 'Reset PIN') onResetPin(staff);
+                else if (action === 'Delete') onDelete(staff);
                 else onToggleActive(staff);
                 onMenuToggle(null);
               }}
               style={{
                 display: 'block', width: '100%', padding: '8px 12px', fontSize: 13,
-                color: action === 'Deactivate' ? '#EF4444' : '#374151',
+                color: action === 'Deactivate' || action === 'Delete' ? '#EF4444' : '#374151',
                 background: 'transparent', border: 'none', cursor: 'pointer', textAlign: 'left',
+                // Set apart, because it is the one that cannot be undone.
+                borderTop: action === 'Delete' ? '1px solid #F3F4F6' : 'none',
+                marginTop: action === 'Delete' ? 4 : 0,
+                paddingTop: action === 'Delete' ? 10 : 8,
               }}
               onMouseEnter={(e) => { e.currentTarget.style.background = '#F9FAFB'; }}
               onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
@@ -269,11 +274,12 @@ export default function Cashier() {
       // filed under none, and neither branch's figures include them.
       if (!form.branch_id) e.branch_id = 'Choose which branch this person works at';
     }
-    // A PIN left blank on an edit means "leave it alone"; one that is typed
-    // must still be four digits and must still match.
+    // A PIN left blank on an edit means "leave it alone". One that is typed
+    // must be four digits and must be confirmed — a mistyped PIN locks somebody
+    // out of the till they are standing at, and nobody finds out until then.
     if (editingStaff && form.pin) {
       if (form.pin.length !== 4) e.pin = 'PIN must be 4 digits';
-      if (form.pin !== form.confirmPin) e.confirmPin = 'PINs do not match';
+      else if (form.pin !== form.confirmPin) e.confirmPin = 'PINs do not match';
     }
     setErrors(e);
     return Object.keys(e).length === 0;
@@ -315,6 +321,37 @@ export default function Cashier() {
       // deactivate staff" looked like: the call was refused, the rejection went
       // nowhere, and the row simply stayed as it was with no explanation.
       setToast({ message: err.message || 'Could not change that account', type: 'error' });
+    }
+  };
+
+  /*
+   * Remove somebody for good.
+   *
+   * Deactivating is the right answer for a person who has left, so the wording
+   * points there first: this is for accounts that should not exist at all — a
+   * test row, a duplicate, a name typed wrong.
+   *
+   * It is safe for the records. Every order, shift and expense stores the name
+   * of whoever recorded it at the time, so deleting the account takes away the
+   * ability to sign in and leaves last month's reports reading exactly as they
+   * did.
+   */
+  const handleDelete = async (s) => {
+    const sure = window.confirm([
+      `Delete ${s.name} permanently?`,
+      '',
+      'They will not be able to sign in at any till. Orders and shifts they',
+      'already recorded keep their name, so your reports are unchanged.',
+      '',
+      'If they have simply left, use Deactivate instead — that can be undone.',
+    ].join('\n'));
+    if (!sure) return;
+    try {
+      await staffAPI.delete(s.id);
+      loadStaff();
+      setToast({ message: `${s.name} deleted`, type: 'success' });
+    } catch (err) {
+      setToast({ message: err.message || 'Could not delete that account', type: 'error' });
     }
   };
 
@@ -391,6 +428,7 @@ export default function Cashier() {
                 onEdit={openEdit}
                 onResetPin={() => openEdit(s)}
                 onToggleActive={handleToggleActive}
+                onDelete={handleDelete}
                 menuOpen={menuOpen}
                 onMenuToggle={setMenuOpen}
               />
@@ -537,9 +575,21 @@ export default function Cashier() {
               <PinInput value={form.pin} onChange={(v) => setForm({ ...form, pin: v })} />
             </div>
             {errors.pin && <div style={{ fontSize: 12, color: '#EF4444', marginTop: 4 }}>{errors.pin}</div>}
+            {editingStaff && !form.pin && (
+              <div style={{ fontSize: 12, color: '#9CA3AF', marginTop: 6 }}>
+                Leave blank to keep their current PIN.
+              </div>
+            )}
           </div>
 
-          {!editingStaff && (
+          {/*
+            Shown when adding, and when editing as soon as a new PIN is typed.
+            It used to be hidden on edit while the validation still demanded it
+            match, so changing somebody's PIN always failed — with the error
+            attached to a field that was not on screen, which is why it looked
+            like the button did nothing at all.
+          */}
+          {(!editingStaff || form.pin) && (
             <div>
               <label style={{ fontSize: 14, fontWeight: 600, color: '#111827' }}>Confirm PIN</label>
               <div style={{ marginTop: 8 }}>

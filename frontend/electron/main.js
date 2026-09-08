@@ -119,6 +119,22 @@ if (!gotTheLock) {
       height: 800,
       minWidth: 1024,
       minHeight: 600,
+      /*
+       * The window and taskbar icon.
+       *
+       * Separate from the one electron-builder stamps into the .exe: that one
+       * is the file's icon in Explorer and the Start menu, this one is what
+       * Windows shows while the app is running. Both have to be set or the
+       * shortcut looks right and the running app still shows Electron's
+       * default.
+       *
+       * In development the file sits beside the source; in the packaged app it
+       * is in resources. Missing either way is not fatal — Electron falls back
+       * to its own icon rather than refusing to open a window.
+       */
+      icon: app.isPackaged
+        ? path.join(process.resourcesPath, 'icon.ico')
+        : path.join(__dirname, '..', 'build', 'icon.ico'),
       webPreferences: {
         nodeIntegration: false,
         contextIsolation: true,

@@ -75,6 +75,7 @@ const updateStaff = db.prepare(`
   UPDATE staff SET name = ?, role = ?, color = ?, active = ?, branch_id = ? WHERE id = ?
 `);
 const updatePin = db.prepare('UPDATE staff SET pin = ? WHERE id = ?');
+const deleteStaff = db.prepare('DELETE FROM staff WHERE id = ?');
 
 /**
  * Apply a roster.
@@ -83,10 +84,31 @@ const updatePin = db.prepare('UPDATE staff SET pin = ? WHERE id = ?');
  * half-applied roster — a new manager inserted without their PIN, say — must
  * never reach a till.
  */
-function applyStaff(rows, branchId) {
-  const result = { inserted: 0, updated: 0, pinsSet: 0, skipped: [] };
+function applyStaff(rows, branchId, deletions = []) {
+  const result = { inserted: 0, updated: 0, pinsSet: 0, deleted: 0, skipped: [] };
 
   const apply = db.transaction(() => {
+    /*
+     * Removals first, so an account re-created under the same number cannot be
+     * wiped by a stale tombstone later in the same pass.
+     *
+     * Only ever from an explicit list. An absence is not a deletion: a row this
+     * till created and has not pushed yet is absent too, and inferring from
+     * that would wipe the shop's own accounts every time a push fell behind.
+     *
+     * Safe to remove outright because every order, shift and expense holds the
+     * person's name inline, recorded at the time. Nothing points at this row,
+     * so last month's report still says who took each sale.
+     */
+    for (const localId of deletions) {
+      const id = Number(localId);
+      if (!Number.isFinite(id)) continue;
+      // A number that is both deleted and present is the cloud contradicting
+      // itself. The living row wins; deleting it would lose a real account.
+      if (rows.some(r => Number(r.local_id) === id)) continue;
+      if (deleteStaff.run(id).changes) result.deleted += 1;
+    }
+
     for (const row of rows) {
       const localId = Number(row.local_id);
       if (!Number.isFinite(localId)) continue;
@@ -180,7 +202,9 @@ async function pullIfNewer(cloudVersion = null) {
     // believes it is: the snapshot is already scoped by the presented key, so
     // this is the authoritative answer to the same question.
     const branchId = Number(snapshot.branch_id) || config.branchId || null;
-    const result = applyStaff(snapshot.staff, branchId);
+    const result = applyStaff(
+      snapshot.staff, branchId,
+      Array.isArray(snapshot.deleted) ? snapshot.deleted : []);
 
     // Recorded only after the transaction committed, so a crash mid-apply
     // leaves the old version and the next attempt downloads again.
@@ -191,7 +215,8 @@ async function pullIfNewer(cloudVersion = null) {
 
     console.log(
       `Staff updated from the cloud: version ${state.localVersion}, ` +
-      `${result.inserted} added, ${result.updated} changed, ${result.pinsSet} PIN(s) set.`
+      `${result.inserted} added, ${result.updated} changed, ` +
+      `${result.pinsSet} PIN(s) set, ${result.deleted} removed.`
     );
     result.skipped.forEach(s => console.warn('  staff skipped — ' + s));
 

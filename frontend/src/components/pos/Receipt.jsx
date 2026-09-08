@@ -203,6 +203,14 @@ const ReceiptTotals = ({ subtotal, discount, employeeDiscount, employeeDiscountR
   );
 };
 
+/**
+ * Printed at the bottom of every receipt, and not configurable.
+ *
+ * Kept as a constant in the component that prints it rather than as a setting:
+ * a value the shop cannot change should not live in the table the shop edits.
+ */
+const POWERED_BY = 'Powered by Virtiqo (Private) Limited';
+
 const ReceiptFooter = ({ restaurant }) => (
   <div
     style={{
@@ -225,6 +233,18 @@ const ReceiptFooter = ({ restaurant }) => (
     )}
     <div style={{ color: '#DC2626', fontSize: 16, marginTop: 4, letterSpacing: 4 }}>
       ★ ★ ★ ★ ★
+    </div>
+    {/*
+      Attribution, on every receipt this software prints.
+      
+      Deliberately a literal rather than a setting. The line above it is the
+      shop's own footer message and is theirs to write; this one is not, and
+      routing it through settings would make it look editable, put it in the
+      cloud-owned settings snapshot, and give it a way to be blanked by
+      accident. There is nothing to configure, so there is no configuration.
+    */}
+    <div style={{ fontSize: 10, color: '#9CA3AF', marginTop: 10, letterSpacing: 0.2 }}>
+      {POWERED_BY}
     </div>
   </div>
 );

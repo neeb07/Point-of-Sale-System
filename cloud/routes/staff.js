@@ -116,12 +116,26 @@ router.post('/', requireUser, async (req, res) => {
     const pinHash = await bcrypt.hash(pin, SALT_ROUNDS);
 
     const created = await db.tx(async (client) => {
-      // Allocated inside the transaction so two creations in the same second
-      // cannot read the same maximum and both claim it.
+      /*
+       * Allocated inside the transaction, so two creations in the same second
+       * cannot read the same maximum and both claim it.
+       *
+       * And counted over the deleted numbers as well as the live ones, which
+       * matters more than it looks. Deleting a staff member frees their number,
+       * so without this the next person created would be handed the same one —
+       * and the tombstone that makes the deletion stick would then delete them
+       * too, seconds later, on the till's next push. A new manager would
+       * silently vanish. Numbers are never reused.
+       */
       const next = await client.query(db.toPg(
-        `SELECT COALESCE(MAX(local_id), ?) + 1 AS id
-           FROM staff WHERE branch_id = ? AND local_id >= ?`),
-        [CLOUD_ID_BASE - 1, branchId, CLOUD_ID_BASE]);
+        `SELECT GREATEST(
+                  COALESCE((SELECT MAX(local_id) FROM staff
+                             WHERE branch_id = ? AND local_id >= ?), ?),
+                  COALESCE((SELECT MAX(local_id) FROM staff_deletions
+                             WHERE branch_id = ? AND local_id >= ?), ?)
+                ) + 1 AS id`),
+        [branchId, CLOUD_ID_BASE, CLOUD_ID_BASE - 1,
+         branchId, CLOUD_ID_BASE, CLOUD_ID_BASE - 1]);
       const localId = Number(next.rows[0].id);
 
       await client.query(db.toPg(
@@ -129,6 +143,13 @@ router.post('/', requireUser, async (req, res) => {
                             pin_hash, origin, updated_ms, received_at)
          VALUES (?, ?, ?, ?, ?, 1, ?, 'cloud', ?, ?)`),
         [branchId, localId, name, role, color, pinHash, Date.now(), Date.now()]);
+
+      // Belt and braces. The allocation above should never hand back a number
+      // that has a tombstone, but if one ever did survive, it would delete this
+      // person on the next push — so clear it here rather than rely on that.
+      await client.query(db.toPg(
+        'DELETE FROM staff_deletions WHERE branch_id = ? AND local_id = ?'),
+        [branchId, localId]);
 
       const version = await bumpVersion(client);
       return { localId, version };
@@ -217,19 +238,77 @@ router.put('/:branchId/:localId', requireUser, async (req, res) => {
 });
 
 /**
- * There is no delete.
+ * DELETE /api/staff/:branchId/:localId — remove somebody for good.
  *
- * Every order, shift and expense already recorded names the person who took it.
- * Removing the row would leave those records pointing at nobody, so an account
- * that is finished with is deactivated: it stops being able to sign in and
- * stays attached to its own history. Answered explicitly rather than as a 404,
- * so the screen can say why.
+ * Safe to do, for a reason worth stating: every order, shift and expense stores
+ * the name of whoever recorded it *inline*, at the time. Deleting the account
+ * does not orphan any of that history — last month's report still says who took
+ * each sale. Only the ability to sign in goes.
+ *
+ * Deactivating remains the better answer for somebody who has simply left, and
+ * the dashboard says so. This exists for the rows that should never have been
+ * there: a test account, a duplicate, a name typed wrong.
+ *
+ * The tombstone is what makes it stick. See db/schema.js — without it the
+ * till's next push would put the row straight back.
  */
-router.delete('/:branchId/:localId', requireUser, (req, res) => {
-  res.status(400).json({
-    error: 'Staff are deactivated, not deleted, so the orders and shifts they recorded keep their name.',
-    code: 'DEACTIVATE_INSTEAD',
-  });
+router.delete('/:branchId/:localId', requireUser, async (req, res) => {
+  const branchId = Number(req.params.branchId);
+  const localId = Number(req.params.localId);
+  if (!Number.isFinite(branchId) || !Number.isFinite(localId)) {
+    return res.status(400).json({ error: 'Bad staff address.' });
+  }
+
+  try {
+    const person = await db.one(
+      'SELECT id, name, active FROM staff WHERE branch_id = ? AND local_id = ?',
+      [branchId, localId]);
+    if (!person) return res.status(404).json({ error: 'No such staff member.' });
+
+    /*
+     * Never leave a branch with nobody who can sign in.
+     *
+     * A paired till refuses to create staff locally — they belong to the
+     * dashboard — so deleting the last active account locks that shop out of
+     * its own POS with no way back except re-pairing. Cheap to check, and the
+     * alternative is a phone call during service.
+     */
+    if (person.active) {
+      const others = await db.one(`
+        SELECT COUNT(*)::int AS n FROM staff
+         WHERE branch_id = ? AND local_id <> ? AND active = 1
+      `, [branchId, localId]);
+      if (!others.n) {
+        return res.status(409).json({
+          error: `${person.name} is the only active account at this branch. Add somebody else first, or nobody will be able to sign in at that till.`,
+          code: 'LAST_ACTIVE_STAFF',
+        });
+      }
+    }
+
+    const version = await db.tx(async (client) => {
+      await client.query(db.toPg(`
+        INSERT INTO staff_deletions (branch_id, local_id, name, deleted_by)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT (branch_id, local_id) DO UPDATE SET
+          deleted_at = NOW(), name = EXCLUDED.name, deleted_by = EXCLUDED.deleted_by
+      `), [branchId, localId, person.name, (req.user && req.user.email) || null]);
+
+      await client.query(db.toPg('DELETE FROM staff WHERE branch_id = ? AND local_id = ?'),
+        [branchId, localId]);
+
+      return bumpVersion(client);
+    });
+
+    res.json({
+      success: true,
+      deleted: person.name,
+      staff_version: version,
+      note: `${person.name} can no longer sign in. Orders and shifts they recorded keep their name.`,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 /* -------------------------------------------------------------- tills -- */
@@ -257,17 +336,21 @@ router.get('/version', requireBranch, async (req, res) => {
  */
 router.get('/snapshot', requireBranch, async (req, res) => {
   try {
-    const [version, staff] = await Promise.all([
+    const [version, staff, deleted] = await Promise.all([
       db.one('SELECT version FROM staff_version WHERE id = 1'),
       db.q(
         `SELECT local_id, name, role, color, active, pin_hash, origin
            FROM staff WHERE branch_id = ? ORDER BY local_id`,
         [req.branch.id]),
+      // Stated, not inferred. The till never treats an absence as a deletion,
+      // because a row it has not pushed yet is absent too.
+      db.q('SELECT local_id FROM staff_deletions WHERE branch_id = ?', [req.branch.id]),
     ]);
     res.json({
       version: version ? Number(version.version) : 0,
       branch_id: req.branch.id,
       staff,
+      deleted: deleted.map(d => Number(d.local_id)),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
