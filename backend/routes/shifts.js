@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db/database');
 const { resolveBranchId } = require('../db/branch');
-const { isAdminRole } = require('../middleware/auth');
+const { isAdminRole, requireAdmin } = require('../middleware/auth');
 const {
   openShiftFor, withTotals, shiftTotalsStmt, shiftExpensesStmt,
 } = require('../db/shift-totals');
@@ -116,14 +116,24 @@ router.post('/open', (req, res) => {
   }
 });
 
-// POST close the open shift
-router.post('/close', (req, res) => {
+/*
+ * Close a shift.
+ *
+ * `/close` closes your own. `/:id/close` closes anybody's and is administrator
+ * only — without it a drawer left open by somebody who has gone home could not
+ * be closed by anyone at all, because openShiftFor() is strictly the signed-in
+ * person's own shift and always has been, for administrators too.
+ *
+ * That was survivable while the app could still be shut down over an open
+ * shift. It stopped being survivable when closing the POS started requiring
+ * every shift to be closed first: without this route a forgotten drawer would
+ * leave the till unable to close, with nobody able to do anything about it.
+ */
+function closeShift(shift, req, res) {
+  if (!shift) return res.status(404).json({ error: 'You have no open shift to close' });
   const { closing_cash } = req.body;
 
   try {
-    const shift = openShiftFor(req);
-    if (!shift) return res.status(404).json({ error: 'You have no open shift to close' });
-
     const totals = shiftTotalsStmt.get(shift.id);
     const spend = shiftExpensesStmt.get(shift.id);
 
@@ -175,6 +185,24 @@ router.post('/close', (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+}
+
+// Your own.
+router.post('/close', (req, res) => closeShift(openShiftFor(req), req, res));
+
+/*
+ * Anybody's, by id. Administrator only.
+ *
+ * The drawer somebody went home without counting. The variance is recorded
+ * against whoever opened it, exactly as if they had closed it themselves —
+ * this changes who presses the button, not whose shift it was.
+ */
+router.post('/:id/close', requireAdmin, (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'Bad shift.' });
+  const shift = db.prepare("SELECT * FROM shifts WHERE id = ? AND status = 'open'").get(id);
+  if (!shift) return res.status(404).json({ error: 'No open shift with that number.' });
+  return closeShift(shift, req, res);
 });
 
 module.exports = router;

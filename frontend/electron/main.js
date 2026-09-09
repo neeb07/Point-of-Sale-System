@@ -138,6 +138,10 @@ if (!gotTheLock) {
       webPreferences: {
         nodeIntegration: false,
         contextIsolation: true,
+        // The one channel main has to the UI. See electron/preload.js — with
+        // context isolation on, the renderer has no other way to be told
+        // anything, and the close refusal below needs to reach the screen.
+        preload: path.join(__dirname, 'preload.js'),
         // SECURITY: this was `false`, which disables the same-origin policy for
         // the whole renderer. It was presumably switched off because the
         // packaged app is served from file:// and calls http://localhost:3001,
@@ -172,6 +176,30 @@ if (!gotTheLock) {
     });
 
     mainWindow.once('ready-to-show', () => mainWindow.show());
+
+    /*
+     * The guard has to live here, not only on `before-quit`.
+     *
+     * Pressing the window's X closes the window first and quits afterwards, so
+     * by the time `before-quit` runs the window is already destroyed and there
+     * is nothing left to show a dialog in — the refusal would be invisible and
+     * the app would look frozen. Holding the `close` event keeps the window
+     * alive long enough to say why.
+     *
+     * `before-quit` is kept as the backstop for quits that do not start with
+     * this window. Both consult the same check.
+     */
+    mainWindow.on('close', (event) => {
+      if (quitConfirmed || sessionEnding) return;
+      event.preventDefault();
+      mayQuit(mainWindow).then((proceed) => {
+        if (!proceed) return;
+        quitConfirmed = true;
+        stopBackend();
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close();
+      });
+    });
+
     mainWindow.on('closed', () => { mainWindow = null; });
   }
 
@@ -209,49 +237,97 @@ if (!gotTheLock) {
   });
 
   /*
-   * Do not let the POS close on an open shift without saying so.
+   * The POS does not close over an open drawer.
    *
-   * Closing the app does not close the drawer: the shift stays open, the cash
-   * is never counted, and the variance is discovered the next morning by
-   * somebody who was not there. A prompt at the moment of closing is the last
-   * point where the person who filled the drawer is still standing at it.
+   * Closing the app does not close the shift: it stays open, the cash is never
+   * counted, and the variance surfaces the next morning in front of somebody
+   * who was not there. This used to be a prompt with a "Close anyway" button,
+   * which meant the one person who could still count the drawer was offered a
+   * way not to. Now it is a refusal.
    *
-   * Advisory, not a lock. Someone may genuinely need to shut the machine down
-   * mid-shift, so the second button lets them, and the shift simply stays open.
+   * A refusal has to be escapable, or a shop ends up with a machine it cannot
+   * turn off. Three ways out, and each is deliberate:
+   *
+   *   - The backend is unreachable. Nothing can be closed through a POS that is
+   *     not answering, and a dead backend must never leave the machine stuck.
+   *   - Windows is shutting down or restarting. Refusing there does not save
+   *     the drawer; it stalls the shutdown and gets the process killed anyway,
+   *     which is worse because it skips the cleanup below.
+   *   - Every open shift has been closed, which is the intended way out and is
+   *     what the dialog points at.
+   *
+   * An administrator can close anybody's shift from the Shifts screen, so a
+   * drawer left open by somebody who has gone home is never a dead end. That
+   * route did not exist until this refusal made it necessary — see
+   * backend/routes/shifts.js.
    */
   let quitConfirmed = false;
+  let sessionEnding = false;
 
-  async function hasOpenShift() {
+  /** Set when Windows is logging out or restarting. See below. */
+  app.on('session-end', () => { sessionEnding = true; });
+
+  async function openShifts() {
     try {
       const res = await fetch('http://127.0.0.1:3001/api/shifts/open-count', {
         signal: AbortSignal.timeout(2000),
       });
-      if (!res.ok) return false;
+      if (!res.ok) return [];
       const body = await res.json();
-      return Number(body.open) > 0;
+      return Array.isArray(body.shifts) ? body.shifts : [];
     } catch (err) {
-      // Backend already gone, or unreachable. Never block a quit on that.
-      return false;
+      // Backend already gone, or unreachable. Never hold the machine hostage
+      // to a component that is not answering.
+      return [];
     }
   }
 
-  async function confirmQuit(win) {
-    if (quitConfirmed) return true;
-    if (!(await hasOpenShift())) return true;
+  /**
+   * Ask the screen to explain the refusal.
+   *
+   * The in-app dialog is preferred over a native message box: it is the same
+   * design as the rest of the till, it can list who has a drawer open, and it
+   * can put the person one press from the screen that fixes it. The native box
+   * stays as the fallback for the case where the window is gone or the page
+   * has not loaded, because a refusal nobody can see is indistinguishable from
+   * the app being broken.
+   */
+  async function explainRefusal(win, shifts) {
+    const payload = { shifts };
+    if (win && !win.isDestroyed() && !win.webContents.isLoading()) {
+      try {
+        if (win.isMinimized()) win.restore();
+        win.focus();
+        win.webContents.send('blaze:close-blocked', payload);
+        return;
+      } catch (err) {
+        log('Could not reach the window: ' + err.message);
+      }
+    }
 
-    const { response } = await dialog.showMessageBox(win || null, {
+    const names = shifts.map(s => s.staff_name).filter(Boolean).join(', ');
+    await dialog.showMessageBox(win || null, {
       type: 'warning',
-      buttons: ['Go back and close the shift', 'Close anyway'],
+      buttons: ['Go back'],
       defaultId: 0,
-      cancelId: 0,
-      title: 'A shift is still open',
+      title: 'Close the shift first',
       message: 'A shift is still open on this till.',
       detail:
-        'Closing Blaze POS now leaves it open and the drawer uncounted. ' +
-        'Close the shift on the Shifts screen first, so the cash is reconciled ' +
-        'while you are still here.',
+        (names ? `Open by: ${names}.
+
+` : '') +
+        'Blaze POS will not close while a drawer is open, so the cash is ' +
+        'counted while the person who took it is still here. Close the shift ' +
+        'on the Shifts screen, then close the app.',
     });
-    return response === 1;
+  }
+
+  async function mayQuit(win) {
+    if (quitConfirmed || sessionEnding) return true;
+    const shifts = await openShifts();
+    if (!shifts.length) return true;
+    await explainRefusal(win, shifts);
+    return false;
   }
 
   app.on('window-all-closed', () => {
@@ -260,12 +336,12 @@ if (!gotTheLock) {
   });
 
   app.on('before-quit', (event) => {
-    if (quitConfirmed) { stopBackend(); return; }
+    if (quitConfirmed || sessionEnding) { stopBackend(); return; }
 
-    // Hold the quit while the question is asked; `before-quit` cannot await.
+    // Hold the quit while the check runs; `before-quit` cannot await.
     event.preventDefault();
     const win = BrowserWindow.getAllWindows()[0];
-    confirmQuit(win).then((proceed) => {
+    mayQuit(win).then((proceed) => {
       if (!proceed) return;
       quitConfirmed = true;
       stopBackend();

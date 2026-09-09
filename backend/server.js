@@ -212,8 +212,23 @@ app.use('/api/branches', requireAuth, require('./routes/branches'));
  */
 app.get('/api/shifts/open-count', (req, res) => {
   try {
-    const row = db.prepare("SELECT COUNT(*) AS n FROM shifts WHERE status = 'open'").get();
-    res.json({ open: row.n });
+    /*
+     * Who, as well as how many.
+     *
+     * Closing the app is now refused while a drawer is open, and a refusal
+     * that will not say whose drawer it is leaves somebody guessing at the end
+     * of a shift. The names are already listed, unauthenticated, on the
+     * sign-in screen of this same machine — this adds no exposure that the PIN
+     * pad does not — and the route stays bound to loopback either way.
+     *
+     * Deliberately no figures: the takings in a drawer are not something an
+     * unauthenticated caller needs.
+     */
+    const shifts = db.prepare(`
+      SELECT id, staff_name, opened_at FROM shifts
+       WHERE status = 'open' ORDER BY opened_at
+    `).all();
+    res.json({ open: shifts.length, shifts });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

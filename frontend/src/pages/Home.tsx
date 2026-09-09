@@ -9,6 +9,7 @@ import Settings from '@/pages/Settings';
 import Deals from '@/pages/Deals';
 import InventoryScreen from '@/pages/InventoryScreen';
 import ShiftsScreen from '@/pages/ShiftsScreen';
+import CloseBlockedDialog from '@/components/pos/CloseBlockedDialog';
 import ExpensesScreen from '@/pages/ExpensesScreen';
 import LoginScreen from '@/pages/LoginScreen';
 import AccessDenied from '@/components/AccessDenied';
@@ -115,6 +116,12 @@ export default function Home() {
         ) : (
           <ActiveScreen onNavigate={setActivePage} />
         )}
+        {/*
+          Mounted here rather than inside a screen so it survives whichever one
+          is open — somebody presses the X from the sale screen, not from
+          Shifts. Renders nothing until the main process refuses a close.
+        */}
+        <CloseBlockedDialog onGoToShifts={() => setActivePage('shifts')} />
       </div>
     </POSProvider>
   );

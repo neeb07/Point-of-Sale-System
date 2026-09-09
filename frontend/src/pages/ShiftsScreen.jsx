@@ -36,7 +36,7 @@ const parseStamp = (value) => (value ? new Date(String(value).replace(' ', 'T'))
 const fmtTime = (d) => (d ? d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : '—');
 
 export default function ShiftsScreen() {
-  const { currentUser, canOperateTill } = useAuth();
+  const { currentUser, canOperateTill, isAdmin } = useAuth();
   const { formatMoney, currencySymbol } = useSettings();
 
   const [currentShift, setCurrentShift] = useState(null);
@@ -51,18 +51,65 @@ export default function ShiftsScreen() {
   const [actualCash, setActualCash] = useState('');
   const [now, setNow] = useState(Date.now());
 
+  /*
+   * Drawers other people have left open on this till.
+   *
+   * Only an administrator sees these, and only the ones that are not their own.
+   * It exists because the app now refuses to close over an open shift: without
+   * somewhere to close a drawer whose owner has gone home, that refusal would
+   * leave the till unable to shut down at all.
+   */
+  const [othersOpen, setOthersOpen] = useState([]);
+  const [closingOther, setClosingOther] = useState(null);
+  const [otherCash, setOtherCash] = useState('');
+
+  const closeSomeoneElses = async () => {
+    if (!closingOther) return;
+    setBusy(true);
+    try {
+      const result = await shiftsAPI.closeById(closingOther.id, {
+        closing_cash: Number(otherCash) || 0,
+      });
+      setClosingOther(null);
+      setOtherCash('');
+      await load();
+      const variance = Number(result?.variance || 0);
+      setToast({
+        message: variance === 0
+          ? `${result.staff_name}'s shift closed, drawer balanced.`
+          : `${result.staff_name}'s shift closed, ${variance > 0 ? 'over' : 'short'} by ${formatMoney(Math.abs(variance))}.`,
+        type: variance === 0 ? 'success' : 'error',
+      });
+    } catch (err) {
+      setToast({ message: err.message || 'Could not close that shift', type: 'error' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const [cur, hist] = await Promise.all([shiftsAPI.current(), shiftsAPI.history(10)]);
       setCurrentShift(cur);
       setHistory(hist || []);
+
+      if (isAdmin) {
+        try {
+          const all = await shiftsAPI.openOnThisTill();
+          setOthersOpen((all.shifts || []).filter(s2 => Number(s2.id) !== Number(cur?.id)));
+        } catch {
+          // Never let this break the screen: it is a convenience beside the
+          // person's own shift, which is what they came here for.
+          setOthersOpen([]);
+        }
+      }
     } catch (err) {
       setToast({ message: err.message || 'Could not load shifts', type: 'error' });
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [isAdmin]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -220,6 +267,57 @@ export default function ShiftsScreen() {
           </div>
         )}
 
+        {/*
+          Somebody else's drawer, still open.
+
+          Shown only to an administrator, and only when there is one. This is
+          the way out of a till that will not close because whoever opened the
+          drawer has gone home — the dialog that refuses the close points here.
+        */}
+        {!loading && isAdmin && othersOpen.length > 0 && (
+          <div style={{
+            border: '1px solid #FDE68A', background: '#FFFBEB', borderRadius: 12,
+            padding: 20, marginBottom: 24,
+          }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: '#92400E' }}>
+              Left open by somebody else
+            </div>
+            <div style={{ fontSize: 12.5, color: '#92400E', marginTop: 4, marginBottom: 14 }}>
+              The POS will not close until these are counted. Closing one records
+              the variance against the person who opened it.
+            </div>
+            {othersOpen.map((s2) => (
+              <div
+                key={s2.id}
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  gap: 12, padding: '10px 0', borderTop: '1px solid #FDE68A',
+                }}
+              >
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 14, color: '#78350F' }}>
+                    {s2.staff_name || 'Unknown'}
+                  </div>
+                  <div style={{ fontSize: 12, color: '#92400E' }}>
+                    Open since {fmtTime(parseStamp(s2.opened_at))}
+                  </div>
+                </div>
+                <button
+                  onClick={() => { setClosingOther(s2); setOtherCash(''); }}
+                  disabled={busy}
+                  style={{
+                    background: '#FFFFFF', border: '1px solid #B45309', color: '#B45309',
+                    height: 36, borderRadius: 8, fontWeight: 600, fontSize: 13,
+                    padding: '0 16px', cursor: busy ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  Count and close
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
         <div style={{ fontSize: 14, fontWeight: 700, color: '#111827', marginBottom: 12 }}>Recent Shifts</div>
         <div style={{ background: '#FFFFFF', borderRadius: 12, padding: '4px 16px', border: '1px solid #EBEBEB' }}>
           {!loading && history.length === 0 && (
@@ -327,6 +425,62 @@ export default function ShiftsScreen() {
             }}
           >
             {busy ? 'Closing…' : 'Close Shift'}
+          </button>
+        </div>
+      </Modal>
+
+      {/*
+        Counting somebody else's drawer.
+
+        Deliberately plainer than the modal above: whoever is doing this did not
+        take the money, so the expected figure is shown but nothing is
+        pre-filled. They count what is physically there and type that.
+      */}
+      <Modal
+        isOpen={Boolean(closingOther)}
+        onClose={() => setClosingOther(null)}
+        title={closingOther ? `Close ${closingOther.staff_name || 'this'} shift` : 'Close shift'}
+        width={420}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ fontSize: 13, color: '#6B7280', lineHeight: 1.5 }}>
+            Open since {closingOther ? fmtTime(parseStamp(closingOther.opened_at)) : '—'}.
+            Count the cash actually in the drawer and enter it. The variance is
+            recorded against {closingOther?.staff_name || 'them'}, not against you.
+          </div>
+          <div>
+            <label style={{ fontSize: 13, fontWeight: 600, color: '#374151' }}>
+              Cash counted in the drawer
+            </label>
+            <div style={{ position: 'relative', marginTop: 6 }}>
+              <span style={{
+                position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)',
+                color: '#9CA3AF', fontSize: 14,
+              }}>
+                {currencySymbol}
+              </span>
+              <input
+                autoFocus
+                type="number"
+                min="0"
+                value={otherCash}
+                onChange={(e) => setOtherCash(e.target.value)}
+                placeholder="0"
+                style={{ ...INPUT_STYLE, paddingLeft: 32 }}
+              />
+            </div>
+          </div>
+          <button
+            onClick={closeSomeoneElses}
+            disabled={busy || otherCash === ''}
+            style={{
+              height: 44, borderRadius: 8, border: 'none', background: '#B45309',
+              color: '#FFFFFF', fontSize: 14, fontWeight: 600,
+              cursor: busy || otherCash === '' ? 'not-allowed' : 'pointer',
+              opacity: busy || otherCash === '' ? 0.6 : 1,
+            }}
+          >
+            {busy ? 'Closing…' : 'Count and close'}
           </button>
         </div>
       </Modal>

@@ -235,6 +235,14 @@ export const shiftsAPI = {
     request<Record<string, unknown>>('POST', '/shifts/open', body),
   close: (body: { closing_cash: number }) =>
     request<Record<string, unknown>>('POST', '/shifts/close', body),
+  // Every drawer open on this till, whoever opened it. Unauthenticated on the
+  // backend because Electron's main process asks it too, and it names people
+  // without carrying any figures.
+  openOnThisTill: () => request<{ open: number; shifts: Record<string, unknown>[] }>(
+    'GET', '/shifts/open-count'),
+  // Somebody else's, by number. Administrator only — see backend/routes/shifts.js.
+  closeById: (id: number, body: { closing_cash: number }) =>
+    request<Record<string, unknown>>('POST', `/shifts/${id}/close`, body),
   summary: (id: number) => request<Record<string, unknown>>('GET', `/shifts/${id}/summary`),
 };
 
