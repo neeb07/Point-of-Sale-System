@@ -8,6 +8,7 @@ import { useSettings } from '@/lib/SettingsContext';
 import PageHeader from '@/components/pos-ui/PageHeader';
 import Modal from '@/components/pos-ui/Modal';
 import Toast from '@/components/pos-ui/Toast';
+import useConfirm from '@/components/pos/useConfirm';
 import SearchBar from '@/components/pos-ui/SearchBar';
 
 /**
@@ -66,6 +67,7 @@ export default function ExpensesScreen() {
   const [shift, setShift] = useState(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const [toast, setToast] = useState(null);
 
   const [modalOpen, setModalOpen] = useState(false);
@@ -144,7 +146,14 @@ export default function ExpensesScreen() {
   };
 
   const remove = async (row) => {
-    if (!window.confirm(`Remove this ${formatMoney(row.amount)} expense?`)) return;
+    const ok = await confirm({
+      title: 'Remove this expense?',
+      message: 'It comes off the drawer total and out of the day’s figures.',
+      detail: `${formatMoney(row.amount)}${row.description ? ' — ' + row.description : ''}`,
+      confirmLabel: 'Remove it',
+      tone: 'danger',
+    });
+    if (!ok) return;
     try {
       await expensesAPI.remove(row.id);
       await load();
@@ -451,6 +460,7 @@ export default function ExpensesScreen() {
         </div>
       </Modal>
 
+      {confirmDialog}
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
     </div>
   );

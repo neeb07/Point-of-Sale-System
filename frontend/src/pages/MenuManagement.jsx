@@ -6,6 +6,7 @@ import { MENU_CATEGORIES, DEFAULT_CATEGORY } from '@/lib/constants';
 import { useSettings } from '@/lib/SettingsContext';
 import { useAuth } from '@/context/AuthContext';
 import SearchBar from '@/components/pos-ui/SearchBar';
+import useConfirm from '@/components/pos/useConfirm';
 
 /**
  * FIX (Bug 2): this file used to declare 22 invented categories ('Starters',
@@ -62,6 +63,7 @@ export default function MenuManagement() {
   const { menuItems, addMenuItem, updateMenuItem, deleteMenuItem, loading } = usePOS();
   const [search, setSearch] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const [editingItem, setEditingItem] = useState(null);
 
   // FIX (Bug 2): merge the canonical list with categories actually present in
@@ -83,8 +85,14 @@ export default function MenuManagement() {
 
   const openAdd = () => { setEditingItem(null); setModalOpen(true); };
   const openEdit = (item) => { setEditingItem(item); setModalOpen(true); };
-  const handleDelete = (id) => {
-    if (window.confirm('Delete this item?')) deleteMenuItem(id);
+  const handleDelete = async (id) => {
+    const ok = await confirm({
+      title: 'Delete this item?',
+      message: 'It comes off the menu straight away. Orders that already include it keep their line and their category.',
+      confirmLabel: 'Delete it',
+      tone: 'danger',
+    });
+    if (ok) deleteMenuItem(id);
   };
 
   if (loading) {
@@ -591,6 +599,7 @@ function ItemModal({ item, categories = MENU_CATEGORIES, onClose, onSave }) {
           </button>
         </div>
       </div>
+      {confirmDialog}
     </div>
   );
 }

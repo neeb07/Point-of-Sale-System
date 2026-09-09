@@ -8,6 +8,7 @@ import Modal from '@/components/pos-ui/Modal';
 import { settingsAPI, reportsAPI, shiftsAPI, syncAPI } from '@/api/index';
 import { useAuth } from '@/context/AuthContext';
 import { useSettings } from '@/lib/SettingsContext';
+import useConfirm from '@/components/pos/useConfirm';
 
 const NAV_ITEMS = [
   { id: 'restaurant', label: 'Restaurant', icon: Store },
@@ -159,6 +160,7 @@ export default function Settings() {
   const shiftCashRevenue = Number(currentShift?.cash_revenue || 0);
   const shiftDiscounts = Number(currentShift?.total_discounts || 0);
 
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const [lastBackup, setLastBackup] = useState('Never');
   // Which branch this machine reports as. Read from the backend rather than
   // stored here: the identity lives in a file beside the database, and the API
@@ -322,12 +324,14 @@ export default function Settings() {
     e.target.value = '';
     if (!file) return;
 
-    const ok = window.confirm(
-      `Restore from "${file.name}"?\n\n` +
-      'This replaces ALL current data — orders, menu, staff and settings.\n' +
-      'A safety copy of your current database is saved first, and the restore ' +
-      'is applied the next time Blaze POS starts.'
-    );
+    const ok = await confirm({
+      title: 'Restore from a backup?',
+      message: 'This replaces everything on this till — orders, menu, staff and settings — with whatever is in that file.',
+      detail: file.name,
+      note: 'A copy of the current database is saved first, and the restore is applied the next time Blaze POS starts.',
+      confirmLabel: 'Replace everything',
+      tone: 'danger',
+    });
     if (!ok) return;
 
     setRestoring(true);
@@ -735,11 +739,14 @@ export default function Settings() {
 
   const handlePair = async () => {
     const paired = pairing && pairing.paired;
-    if (paired && !window.confirm(
-      `This till is already set up as ${pairing.branch_name || 'a branch'}.\n\n` +
-      'Pairing again will replace that. Only do this if you are moving this ' +
-      'machine to a different branch, or reconnecting it after a problem.\n\nContinue?'
-    )) return;
+    if (paired && !(await confirm({
+      title: 'Pair this till again?',
+      message: 'Only do this if you are moving this machine to a different branch, or reconnecting it after a problem.',
+      detail: `Currently set up as ${pairing.branch_name || 'a branch'}.`,
+      note: 'Sales already recorded here keep the branch they were rung up at, and anything not yet sent refuses to move to a different branch.',
+      confirmLabel: 'Pair again',
+      tone: 'warning',
+    }))) return;
 
     setPairBusy(true);
     try {
@@ -1285,6 +1292,8 @@ export default function Settings() {
           Reset All Data
         </button>
       </Modal>
+
+      {confirmDialog}
     </div>
   );
 }

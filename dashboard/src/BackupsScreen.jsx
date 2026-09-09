@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import useConfirm from '@/components/pos/useConfirm';
 
 /**
  * Backups, and getting a branch trading again on a different machine.
@@ -71,6 +72,7 @@ export default function BackupsScreen() {
   const [data, setData] = useState({ branches: [], backups: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const [pairing, setPairing] = useState(null);
   const [busy, setBusy] = useState(false);
 
@@ -99,12 +101,13 @@ export default function BackupsScreen() {
    * real key itself, over HTTPS, and writes the file.
    */
   const pair = async (branch) => {
-    const sure = window.confirm(
-      `Generate a pairing code for ${branch.name}?\n\n` +
-      'When a till uses this code, the machine that branch is running now ' +
-      'stops being able to sync. Do this when you are replacing it — not ' +
-      'while it is working.'
-    );
+    const sure = await confirm({
+      title: `Generate a pairing code for ${branch.name}?`,
+      message: 'When a till uses this code, the machine that branch is running now stops being able to sync.',
+      note: 'Do this when you are replacing a machine — not while the current one is working.',
+      confirmLabel: 'Generate a code',
+      tone: 'warning',
+    });
     if (!sure) return;
     setBusy(true);
     try {
@@ -312,6 +315,7 @@ export default function BackupsScreen() {
           Orders screen here.
         </p>
       </section>
+      {confirmDialog}
     </div>
   );
 }

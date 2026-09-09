@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Plus, Package, Edit2, AlertCircle } from 'lucide-react';
 import { inventoryAPI } from '@/api/index';
 import SearchBar from '@/components/pos-ui/SearchBar';
+import useConfirm from '@/components/pos/useConfirm';
 
 interface Ingredient {
   id: number;
@@ -11,7 +12,9 @@ interface Ingredient {
   low_stock_threshold: number;
 }
 
+
 export default function InventoryScreen() {
+  const { notify, dialog: confirmDialog } = useConfirm();
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -79,7 +82,12 @@ export default function InventoryScreen() {
       fetchInventory();
     } catch (err) {
       console.error(err);
-      alert(err instanceof Error ? err.message : 'Failed to add ingredient');
+      await notify({
+        title: 'That ingredient was not added',
+        message: 'Nothing has changed on the stock list, so it can be entered again.',
+        detail: err instanceof Error ? err.message : 'Unknown error',
+        tone: 'danger',
+      });
     }
   };
 
@@ -331,6 +339,7 @@ export default function InventoryScreen() {
           </div>
         </div>
       )}
+      {confirmDialog}
     </div>
   );
 }

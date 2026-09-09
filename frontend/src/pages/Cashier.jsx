@@ -5,6 +5,7 @@ import PageHeader from '@/components/pos-ui/PageHeader';
 import DataTable from '@/components/pos-ui/DataTable';
 import Modal from '@/components/pos-ui/Modal';
 import Toast from '@/components/pos-ui/Toast';
+import useConfirm from '@/components/pos/useConfirm';
 import { staffAPI, branchesAPI } from '@/api/index';
 import { useSettings } from '@/lib/SettingsContext';
 
@@ -158,6 +159,7 @@ export default function Cashier() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editingStaff, setEditingStaff] = useState(null);
   const [menuOpen, setMenuOpen] = useState(null);
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const [toast, setToast] = useState(null);
   const [perfDate, setPerfDate] = useState('today');
   const [performance, setPerformance] = useState([]);
@@ -337,14 +339,13 @@ export default function Cashier() {
    * did.
    */
   const handleDelete = async (s) => {
-    const sure = window.confirm([
-      `Delete ${s.name} permanently?`,
-      '',
-      'They will not be able to sign in at any till. Orders and shifts they',
-      'already recorded keep their name, so your reports are unchanged.',
-      '',
-      'If they have simply left, use Deactivate instead — that can be undone.',
-    ].join('\n'));
+    const sure = await confirm({
+      title: `Delete ${s.name} permanently?`,
+      message: 'They will not be able to sign in at any till. Orders and shifts they already recorded keep their name, so your reports are unchanged.',
+      note: 'If they have simply left, use Deactivate instead — that can be undone.',
+      confirmLabel: 'Delete permanently',
+      tone: 'danger',
+    });
     if (!sure) return;
     try {
       await staffAPI.delete(s.id);
@@ -617,6 +618,7 @@ export default function Cashier() {
         </div>
       </Modal>
 
+      {confirmDialog}
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
     </div>
   );
