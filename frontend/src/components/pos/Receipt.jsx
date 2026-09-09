@@ -1,48 +1,51 @@
 import React from 'react';
 import { useSettings } from '@/lib/SettingsContext';
 
+/**
+ * The top of the receipt.
+ *
+ * This was a red gradient block with white text and a white circle holding the
+ * shop's initial. It printed as nothing at all: browsers drop background
+ * colours when printing unless a page asks otherwise, and no rule here does, so
+ * the background vanished and the white text was left on white paper. Every
+ * receipt came off the roll with a blank space where the shop's name, address
+ * and telephone number should be — which is exactly the "empty space at the
+ * top" this was reported as.
+ *
+ * The fix is not to force the colour through. A thermal printer has one ink and
+ * makes a solid black block of it, which is slow, drains the head, and looks
+ * nothing like a receipt. Dark text on bare paper is what a receipt is.
+ *
+ * The circle went with it. It cost sixty vertical millimetres of roll to print
+ * one letter that the shop's name says underneath anyway.
+ */
 const ReceiptHeader = ({ restaurant }) => (
   <div
     style={{
-      background: 'linear-gradient(135deg, #DC2626, #B91C1C)',
-      color: '#FFFFFF',
-      padding: '24px 20px',
-      borderTopLeftRadius: 16,
-      borderTopRightRadius: 16,
+      padding: '12px 20px 8px',
+      color: '#111827',
       display: 'flex',
       flexDirection: 'column',
       alignItems: 'center',
       textAlign: 'center',
     }}
   >
-    <div
-      style={{
-        width: 48,
-        height: 48,
-        borderRadius: 24,
-        background: '#FFFFFF',
-        color: '#DC2626',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        fontWeight: 800,
-        fontSize: 24,
-        marginBottom: 12,
-      }}
-    >
-      {(restaurant?.name || 'R').charAt(0)}
-    </div>
-    <div style={{ fontWeight: 700, fontSize: 18, fontFamily: 'Inter, sans-serif', marginBottom: 4 }}>
+    <div style={{ fontWeight: 800, fontSize: 20, fontFamily: 'Inter, sans-serif', letterSpacing: 0.5 }}>
       {restaurant?.name || 'Restaurant'}
     </div>
     {restaurant?.tagline && (
-      <div style={{ fontSize: 12, opacity: 0.9, marginBottom: 4, fontStyle: 'italic' }}>
+      <div style={{ fontSize: 11, marginTop: 2, fontStyle: 'italic', color: '#4B5563' }}>
         {restaurant.tagline}
       </div>
     )}
-    {(restaurant?.address || restaurant?.phone) && (
-      <div style={{ fontSize: 12, opacity: 0.9 }}>
-        {[restaurant?.address, restaurant?.phone].filter(Boolean).join(' · ')}
+    {restaurant?.address && (
+      <div style={{ fontSize: 11, marginTop: 4, color: '#374151', lineHeight: 1.35 }}>
+        {restaurant.address}
+      </div>
+    )}
+    {restaurant?.phone && (
+      <div style={{ fontSize: 11, marginTop: 2, color: '#374151' }}>
+        {restaurant.phone}
       </div>
     )}
   </div>
@@ -52,7 +55,7 @@ const ReceiptMeta = ({ orderInfo }) => {
   // Settings offered toggles for these rows but nothing consulted them.
   const { showCashier, showOrderNumber, showPayment } = useSettings();
   return (
-  <div style={{ padding: '16px 20px', display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#6B7280' }}>
+  <div style={{ padding: '8px 20px', display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#374151' }}>
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
       <div>Date: {orderInfo.date}</div>
       <div>Time: {orderInfo.time}</div>
@@ -77,10 +80,10 @@ const ReceiptCustomer = ({ customer }) => {
   const has = customer && (customer.name || customer.phone || customer.address);
   if (!has) return null;
   return (
-    <div style={{ padding: '12px 20px', fontSize: 12, color: '#374151' }}>
+    <div style={{ padding: '8px 20px', fontSize: 11, color: '#374151' }}>
       <div style={{
-        fontSize: 11, color: '#9CA3AF', textTransform: 'uppercase',
-        fontWeight: 700, marginBottom: 6, letterSpacing: 0.5,
+        fontSize: 10, color: '#4B5563', textTransform: 'uppercase',
+        fontWeight: 700, marginBottom: 4, letterSpacing: 0.5,
       }}>
         Deliver To
       </div>
@@ -96,7 +99,9 @@ const ReceiptCustomer = ({ customer }) => {
 const ReceiptDivider = ({ dashed = true }) => (
   <div
     style={{
-      borderTop: dashed ? '2px dashed #E5E7EB' : '1px solid #E5E7EB',
+      // Was #E5E7EB, which is very nearly white and printed as nothing at
+      // all — the receipt came out as one undivided column of text.
+      borderTop: dashed ? '1px dashed #9CA3AF' : '1px solid #9CA3AF',
       margin: '0 20px',
     }}
   />
@@ -112,13 +117,13 @@ const ReceiptDivider = ({ dashed = true }) => (
 const ReceiptItemsTable = ({ items, showPrices = true }) => {
   const { formatMoney } = useSettings();
   return (
-  <div style={{ padding: '16px 20px' }}>
-    <div style={{ display: 'flex', fontSize: 11, color: '#9CA3AF', textTransform: 'uppercase', fontWeight: 600, marginBottom: 12 }}>
+  <div style={{ padding: '10px 20px' }}>
+    <div style={{ display: 'flex', fontSize: 10, color: '#4B5563', textTransform: 'uppercase', fontWeight: 700, marginBottom: 6, borderBottom: '1px solid #D1D5DB', paddingBottom: 4 }}>
       <div style={{ flex: 1 }}>Item</div>
       <div style={{ width: 60, textAlign: showPrices ? 'center' : 'right' }}>Qty</div>
       {showPrices && <div style={{ width: 80, textAlign: 'right' }}>Amount</div>}
     </div>
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       {items.map((item, idx) => (
         <div key={idx} style={{ display: 'flex', alignItems: 'center' }}>
           <div style={{ flex: 1, fontWeight: 500, fontSize: 13, color: '#374151' }}>
@@ -150,7 +155,7 @@ const ReceiptTotals = ({ subtotal, discount, employeeDiscount, employeeDiscountR
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column' }}>
-      <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 8, fontSize: 13, color: '#374151', fontWeight: 500 }}>
+      <div style={{ padding: '8px 20px', display: 'flex', flexDirection: 'column', gap: 5, fontSize: 12, color: '#374151', fontWeight: 500 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
           <span>Subtotal</span>
           <span>{formatMoney(subtotal)}</span>
@@ -187,8 +192,15 @@ const ReceiptTotals = ({ subtotal, discount, employeeDiscount, employeeDiscountR
       <ReceiptDivider dashed={false} />
       <div
         style={{
-          background: '#FEEFD0',
-          padding: '16px 20px',
+          /*
+            Bordered rather than filled. The peach background behind this row
+            is dropped when printing, which left the one line the customer
+            actually checks looking like every other line on the paper. Rules
+            above and below survive the print head; a fill does not.
+          */
+          borderTop: '2px solid #111827',
+          borderBottom: '2px solid #111827',
+          padding: '8px 20px',
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
@@ -232,9 +244,9 @@ const SOFTWARE_BY = {
 const SoftwareBy = () => (
   <div
     style={{
-      borderTop: '1px solid #E5E7EB',
-      marginTop: 16,
-      paddingTop: 12,
+      borderTop: '1px solid #9CA3AF',
+      marginTop: 10,
+      paddingTop: 8,
       // The footer is a centring flex column, so a child has to say explicitly
       // that it wants the full width — otherwise it shrinks to its text and the
       // left alignment has nothing to align against.
@@ -254,28 +266,26 @@ const SoftwareBy = () => (
   </div>
 );
 
+/**
+ * The bottom.
+ *
+ * The stars are gone, and so is the second printing of the shop's name — it is
+ * already at the top of the same piece of paper. Both cost roll, and a till
+ * roll is a consumable the shop buys.
+ */
 const ReceiptFooter = ({ restaurant }) => (
   <div
     style={{
-      background: '#F9FAFB',
-      padding: '24px 20px',
-      borderBottomLeftRadius: 16,
-      borderBottomRightRadius: 16,
+      padding: '10px 20px 12px',
       display: 'flex',
       flexDirection: 'column',
       alignItems: 'center',
       textAlign: 'center',
-      gap: 6,
+      gap: 4,
     }}
   >
-    <div style={{ fontWeight: 600, fontSize: 14, color: '#4B5563' }}>
+    <div style={{ fontWeight: 600, fontSize: 12, color: '#374151' }}>
       {restaurant?.footerMessage || 'Thank you for visiting!'}
-    </div>
-    {restaurant?.name && (
-      <div style={{ fontSize: 12, color: '#9CA3AF' }}>{restaurant.name}</div>
-    )}
-    <div style={{ color: '#DC2626', fontSize: 16, marginTop: 4, letterSpacing: 4 }}>
-      ★ ★ ★ ★ ★
     </div>
     {/*
       On every receipt this software prints. The message above it is the shop's
@@ -304,11 +314,15 @@ const CopyBanner = ({ copyType }) => {
   return (
     <div
       style={{
-        background: '#111111',
-        color: '#FFFFFF',
+        // Was white on near-black, which printed as a blank strip for the same
+        // reason the header did. The whole point of this line is to tell the
+        // kitchen copy from the customer's after they come off the roll, so it
+        // is the last thing that should be invisible on paper.
+        color: '#111111',
+        borderBottom: '1px solid #111111',
         textAlign: 'center',
-        padding: '6px 0',
-        fontSize: 13,
+        padding: '5px 0',
+        fontSize: 12,
         fontWeight: 800,
         letterSpacing: 2,
         fontFamily: 'Inter, sans-serif',
