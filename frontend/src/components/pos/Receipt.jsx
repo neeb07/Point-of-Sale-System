@@ -207,9 +207,52 @@ const ReceiptTotals = ({ subtotal, discount, employeeDiscount, employeeDiscountR
  * Printed at the bottom of every receipt, and not configurable.
  *
  * Kept as a constant in the component that prints it rather than as a setting:
- * a value the shop cannot change should not live in the table the shop edits.
+ * a value the shop cannot change should not live in the table the shop edits,
+ * where it would look editable and could be blanked by accident.
  */
-const POWERED_BY = 'Powered by Virtiqo (Private) Limited';
+const SOFTWARE_BY = {
+  label: 'POS Software By:',
+  company: 'Virtiqo (Private) Limited',
+  phone: '+92 300 8536046',
+  email: 'info@virtiqo.com',
+};
+
+/**
+ * The maker's line, in the shape these receipts take locally.
+ *
+ * Left-aligned under a rule rather than centred with the thank-you message
+ * above it — the two are different kinds of thing, and running them together
+ * reads as though the shop is thanking you on behalf of a software company.
+ *
+ * Printed in black, not the grey used elsewhere on screen. A thermal printer
+ * has no greys: it either burns a dot or it does not, so light text comes out
+ * broken up or missing entirely. Anything that must survive the print head is
+ * full black.
+ */
+const SoftwareBy = () => (
+  <div
+    style={{
+      borderTop: '1px solid #E5E7EB',
+      marginTop: 16,
+      paddingTop: 12,
+      // The footer is a centring flex column, so a child has to say explicitly
+      // that it wants the full width — otherwise it shrinks to its text and the
+      // left alignment has nothing to align against.
+      width: '100%',
+      alignSelf: 'stretch',
+      textAlign: 'left',
+      fontSize: 11,
+      lineHeight: 1.45,
+      color: '#111827',
+    }}
+  >
+    <div style={{ fontWeight: 700 }}>{SOFTWARE_BY.label}</div>
+    <div style={{ fontWeight: 700 }}>
+      {SOFTWARE_BY.company} {SOFTWARE_BY.phone}
+    </div>
+    <div style={{ fontWeight: 700 }}>{SOFTWARE_BY.email}</div>
+  </div>
+);
 
 const ReceiptFooter = ({ restaurant }) => (
   <div
@@ -235,17 +278,11 @@ const ReceiptFooter = ({ restaurant }) => (
       ★ ★ ★ ★ ★
     </div>
     {/*
-      Attribution, on every receipt this software prints.
-      
-      Deliberately a literal rather than a setting. The line above it is the
-      shop's own footer message and is theirs to write; this one is not, and
-      routing it through settings would make it look editable, put it in the
-      cloud-owned settings snapshot, and give it a way to be blanked by
-      accident. There is nothing to configure, so there is no configuration.
+      On every receipt this software prints. The message above it is the shop's
+      own and is theirs to write; this one is not, and there is nothing to
+      configure — so there is no configuration.
     */}
-    <div style={{ fontSize: 10, color: '#9CA3AF', marginTop: 10, letterSpacing: 0.2 }}>
-      {POWERED_BY}
-    </div>
+    <SoftwareBy />
   </div>
 );
 
