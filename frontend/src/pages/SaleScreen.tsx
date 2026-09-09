@@ -4,14 +4,15 @@ import MenuPanel from '@/components/pos/MenuPanel';
 import OrderCart from '@/components/pos/OrderCart';
 import ReceiptModal from '@/components/pos/ReceiptModal';
 import Modal from '@/components/pos-ui/Modal';
-import { ordersAPI } from '@/api/index';
-import { Loader2, CreditCard } from 'lucide-react';
+import { ordersAPI, ApiError } from '@/api/index';
+import { Loader2, CreditCard, Clock, AlertTriangle, ArrowRight } from 'lucide-react';
 import { usePOS } from '@/lib/POSContext';
 import { useAuth } from '@/context/AuthContext';
 import moment from 'moment';
 import { PAYMENT_METHODS, type PaymentMethod } from '@/lib/constants';
 import { useSettings } from '@/lib/SettingsContext';
 import CustomerLookup from '@/components/pos/CustomerLookup';
+import AlertDialog, { AlertPanel } from '@/components/pos/AlertDialog';
 import type { Customer } from '@/api/index';
 
 interface CartItem {
@@ -60,6 +61,16 @@ interface SaleScreenProps {
 }
 
 export default function SaleScreen({ onNavigate }: SaleScreenProps = {}) {
+  /*
+   * Why a sale did not go through.
+   *
+   * This was `alert()`, which on a till is the worst of both worlds: it stops
+   * everything, looks nothing like the rest of the screen, and — for the one
+   * case that actually happens in service, ringing up before opening a shift —
+   * told somebody what was wrong without telling them where to fix it.
+   */
+  const [saleError, setSaleError] = useState<{ noShift: boolean; message: string } | null>(null);
+
   const [cart, setCart] = useState<CartItem[]>([]);
   const [search, setSearch] = useState('');
   const [orderType, setOrderType] = useState<'Dine-in' | 'Delivery'>('Dine-in');
@@ -253,7 +264,11 @@ export default function SaleScreen({ onNavigate }: SaleScreenProps = {}) {
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Unknown error';
       console.error('Failed to charge order:', err);
-      alert('Failed to complete sale: ' + message);
+      // The backend refuses an order with no open shift and says so with a
+      // code rather than only a sentence, so this does not have to match on
+      // wording that might later be reworded. See backend/routes/orders.js.
+      const noShift = err instanceof ApiError && err.code === 'NO_OPEN_SHIFT';
+      setSaleError({ noShift, message });
     }
   };
 
@@ -493,6 +508,54 @@ export default function SaleScreen({ onNavigate }: SaleScreenProps = {}) {
           </div>
         </div>
       </Modal>
+
+      {/*
+        A sale that did not go through.
+
+        The same dialog the app uses to refuse a close, for the same reason:
+        these are the two moments the till says no, and they should not look
+        like two different products. The no-shift case is amber and offers the
+        way out; anything else is red, because it means something is actually
+        wrong rather than merely not ready.
+      */}
+      <AlertDialog
+        open={saleError !== null}
+        icon={saleError?.noShift ? Clock : AlertTriangle}
+        tone={saleError?.noShift ? 'warning' : 'danger'}
+        title={saleError?.noShift ? 'Open a shift first' : 'That sale did not go through'}
+        message={
+          saleError?.noShift ? (
+            <>
+              Orders are recorded against a shift, so the drawer can be counted
+              against them at the end of it. Nothing has been charged and the
+              order is still here &mdash; open a shift and take it again.
+            </>
+          ) : (
+            <>
+              Nothing was charged and the order is still in the cart, so it can
+              be taken again once this is sorted out.
+            </>
+          )
+        }
+        note={
+          saleError?.noShift
+            ? 'Opening a shift takes a moment: enter the cash you are starting the drawer with.'
+            : undefined
+        }
+        confirmLabel={saleError?.noShift ? 'Open a shift' : undefined}
+        confirmIcon={saleError?.noShift ? ArrowRight : undefined}
+        onConfirm={saleError?.noShift ? () => { setSaleError(null); onNavigate?.('shifts'); } : undefined}
+        dismissLabel={saleError?.noShift ? 'Not now' : 'Close'}
+        onDismiss={() => setSaleError(null)}
+      >
+        {!saleError?.noShift && saleError?.message && (
+          <AlertPanel label="What the till reported" tone="danger">
+            <div style={{ fontSize: 13, color: '#991B1B', lineHeight: 1.5 }}>
+              {saleError.message}
+            </div>
+          </AlertPanel>
+        )}
+      </AlertDialog>
     </div>
   );
 }
