@@ -106,6 +106,9 @@ app.use('/api/deals', adminOnlyWrites, menuOwnedByCloud, require('./routes/deals
  */
 const MANAGER_EDITABLE = new Set([
   'paper_size',
+  // Which printer this machine sends receipts to. As local as paper size —
+  // it names a device attached to this till and nothing beyond it.
+  'printer_name',
   'auto_print',
   'show_tax',
   'show_cashier',

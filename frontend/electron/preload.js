@@ -30,6 +30,18 @@ function subscribe(channel, handler) {
   return () => ipcRenderer.removeListener(channel, wrapped);
 }
 
+/**
+ * Channels the renderer may call and wait on.
+ *
+ * Wider than the listeners above, and narrow on purpose: two named calls, both
+ * about printing, neither able to name a file or run anything. Adding to this
+ * means adding a name here rather than opening a general pipe.
+ */
+const INVOKE = {
+  listPrinters: 'blaze:list-printers',
+  printCopy: 'blaze:print-copy',
+};
+
 contextBridge.exposeInMainWorld('blazePOS', {
   /** True only inside the packaged or dev Electron shell, never in a browser. */
   isElectron: true,
@@ -42,4 +54,19 @@ contextBridge.exposeInMainWorld('blazePOS', {
    * work out whose.
    */
   onCloseBlocked: (handler) => subscribe(CHANNELS.closeBlocked, handler),
+
+  /** The printers Windows knows about, so Settings can offer a real list. */
+  listPrinters: () => ipcRenderer.invoke(INVOKE.listPrinters),
+
+  /**
+   * Print what is on screen at an exact page size.
+   *
+   * This exists because `window.print()` cannot set the length of the paper.
+   * The print dialog picks a size from the ones the driver advertises, and on a
+   * roll printer that is a fixed length — so a 62mm receipt still feeds a full
+   * page and the rest comes out blank. Electron can ask for an exact page
+   * instead, in microns, which is the only way to make the roll stop where the
+   * receipt ends.
+   */
+  printCopy: (options) => ipcRenderer.invoke(INVOKE.printCopy, options),
 });

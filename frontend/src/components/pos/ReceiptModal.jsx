@@ -20,7 +20,7 @@ export default function ReceiptModal({ open, onClose, orderData, autoPrintEnable
    * damaged, lost, or the customer asks for another.
    */
   const [selection, setSelection] = useState('all');
-  const { autoPrint, paperSize } = useSettings();
+  const { autoPrint, paperSize, printerName } = useSettings();
 
   /**
    * Size the printed page to the receipt before handing off to the printer.
@@ -95,6 +95,85 @@ export default function ReceiptModal({ open, onClose, orderData, autoPrintEnable
   };
 
   /**
+   * Print each copy at an exact page size, straight to the printer.
+   *
+   * `window.print()` lays the receipt out correctly and then has no say over
+   * how much paper comes out: the dialog picks a size from the ones the driver
+   * advertises, and on a roll printer those are fixed lengths. A 62mm receipt
+   * is fed onto a much longer page and the rest comes off the roll blank. That
+   * is not the stylesheet being wrong — measured against a real print layout it
+   * is accurate to half a millimetre — it is the page size simply not being the
+   * page's to choose.
+   *
+   * Electron can name the page in microns, which the driver takes as a custom
+   * form, so the roll stops where the receipt ends. One job per copy, because
+   * the three are different lengths — and a job boundary is also where a cutter
+   * fires, which is what puts a cut between them.
+   *
+   * Used only when a printer has been chosen in Settings. Without one this
+   * would print silently to whatever Windows happens to call the default, which
+   * on an office machine is usually a PDF writer. Returns false to let the
+   * caller fall back to the dialog.
+   */
+  const printEachCopyExactly = async () => {
+    const api = typeof window !== 'undefined' ? window.blazePOS : null;
+    if (!api?.printCopy || !printerName) return false;
+
+    const area = document.getElementById('printable-area');
+    const copies = area ? Array.from(area.querySelectorAll('.receipt-copy')) : [];
+    if (!area || !copies.length) return false;
+
+    const roll = rollFor(paperSize);
+    document.documentElement.style.setProperty('--receipt-width', `${roll.contentMm}mm`);
+
+    area.classList.add('measuring-print');
+    const measured = copies.map(el => ({ el, mm: pageHeightMm(el.offsetHeight) }));
+    area.classList.remove('measuring-print');
+
+    let tag = document.getElementById('receipt-page-size');
+    if (!tag) {
+      tag = document.createElement('style');
+      tag.id = 'receipt-page-size';
+      document.head.appendChild(tag);
+    }
+
+    // Restoring has to happen whatever goes wrong, or the modal is left showing
+    // one copy and the others hidden.
+    const restore = () => copies.forEach(el => el.style.removeProperty('display'));
+
+    try {
+      for (const { el, mm } of measured) {
+        // Only this copy is in the document for the length of its own job.
+        // `important`, because the print stylesheet is full of them.
+        copies.forEach(other => other.style.setProperty(
+          'display', other === el ? 'flex' : 'none', 'important'));
+
+        // The page box has to agree with the paper, or the content paginates
+        // against one size while the roll feeds another.
+        tag.textContent =
+          `@media print { @page { size: ${roll.pageMm}mm ${mm}mm; margin: 0; } }`;
+
+        const result = await api.printCopy({
+          deviceName: printerName,
+          widthMicron: roll.pageMm * 1000,
+          heightMicron: mm * 1000,
+        });
+        if (!result?.ok) {
+          console.warn('Direct print failed, falling back to the dialog:', result?.error);
+          restore();
+          return false;
+        }
+      }
+      return true;
+    } catch (err) {
+      console.warn('Direct print threw, falling back to the dialog:', err);
+      return false;
+    } finally {
+      restore();
+    }
+  };
+
+  /**
    * Settings has an "auto print" switch that nothing ever read, so a shop that
    * turned it on still had to click Print on every single sale.
    *
@@ -117,7 +196,11 @@ export default function ReceiptModal({ open, onClose, orderData, autoPrintEnable
     printedFor.current = key;
 
     // Let the receipts paint before measuring and handing off to the printer.
-    const t = setTimeout(() => { sizePageToReceipt(); window.print(); }, 300);
+    const t = setTimeout(async () => {
+      if (await printEachCopyExactly()) return;
+      sizePageToReceipt();
+      window.print();
+    }, 300);
     return () => clearTimeout(t);
   }, [open, orderData, autoPrint, autoPrintEnabled]);
 
@@ -125,7 +208,8 @@ export default function ReceiptModal({ open, onClose, orderData, autoPrintEnable
 
   const copiesToPrint = selection === 'all' ? COPY_TYPES : [selection];
 
-  const handlePrint = () => {
+  const handlePrint = async () => {
+    if (await printEachCopyExactly()) return;
     sizePageToReceipt();
     window.print();
   };

@@ -120,6 +120,10 @@ function buildValue(raw, loading, refresh) {
     showOrderNumber: raw.show_order_number !== 'false',
     showPayment: raw.show_payment !== 'false',
     paperSize: raw.paper_size || '80mm',
+    // Empty means "ask through the print dialog", which is the safe default:
+    // printing silently to whatever Windows calls the default is usually a PDF
+    // writer on an office machine.
+    printerName: raw.printer_name || '',
   };
 }
 

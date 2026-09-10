@@ -129,7 +129,7 @@ export default function Settings() {
   const [taxOriginal, setTaxOriginal] = useState(null);
 
   const [receiptSettings, setReceiptSettings] = useState({
-    autoPrint: true, showTax: true, showCashier: true, showOrderNumber: true, showPayment: true, paperSize: '80mm',
+    autoPrint: true, showTax: true, showCashier: true, showOrderNumber: true, showPayment: true, paperSize: '80mm', printerName: '',
   });
 
   const [printerType, setPrinterType] = useState('USB');
@@ -161,6 +161,9 @@ export default function Settings() {
   const shiftDiscounts = Number(currentShift?.total_discounts || 0);
 
   const { confirm, dialog: confirmDialog } = useConfirm();
+  // The printers Windows knows about. Only reachable inside the Electron
+  // shell; in a browser this stays empty and the picker is not offered.
+  const [printers, setPrinters] = useState([]);
   const [lastBackup, setLastBackup] = useState('Never');
   // Which branch this machine reports as. Read from the backend rather than
   // stored here: the identity lives in a file beside the database, and the API
@@ -207,6 +210,7 @@ export default function Settings() {
         showOrderNumber: data.show_order_number !== 'false',
         showPayment: data.show_payment !== 'false',
         paperSize: data.paper_size || '80mm',
+        printerName: data.printer_name || '',
       });
       if (data.last_backup) setLastBackup(data.last_backup);
     }).catch(() => {});
@@ -285,6 +289,7 @@ export default function Settings() {
         show_order_number: String(next.showOrderNumber),
         show_payment: String(next.showPayment),
         paper_size: next.paperSize,
+        printer_name: next.printerName,
       });
       refreshSettings();
     } catch (err) {
@@ -589,8 +594,49 @@ export default function Settings() {
     </div>
   );
 
+  useEffect(() => {
+    const api = typeof window !== 'undefined' ? window.blazePOS : null;
+    if (!api?.listPrinters) return;
+    api.listPrinters().then(setPrinters).catch(() => setPrinters([]));
+  }, []);
+
   const renderPrinter = () => (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+      {/*
+        Which printer, by name.
+        
+        This is what lets the till print each receipt at its exact length. The
+        print dialog can only offer the paper sizes the driver advertises, and
+        on a roll printer those are fixed lengths — so a short receipt is fed
+        onto a long page and the remainder comes off blank. Naming the printer
+        here lets the app ask for a custom page instead, and the roll stops
+        where the receipt ends.
+
+        Left unset, printing goes through the usual dialog exactly as before.
+      */}
+      {printers.length > 0 && (
+        <div>
+          <FieldLabel label="Receipt Printer" />
+          <select
+            value={receiptSettings.printerName || ''}
+            onChange={(e) => updateReceiptSetting({ printerName: e.target.value })}
+            style={{ ...INPUT_STYLE, cursor: 'pointer' }}
+          >
+            <option value="">Ask me each time (use the print dialog)</option>
+            {printers.map(p => (
+              <option key={p.name} value={p.name}>
+                {p.displayName}{p.isDefault ? ' — Windows default' : ''}
+              </option>
+            ))}
+          </select>
+          <div style={{ fontSize: 12, color: '#6B7280', marginTop: 6 }}>
+            {receiptSettings.printerName
+              ? 'Receipts print straight to this printer, each cut to its own length, with no dialog.'
+              : 'Choose your thermal printer to print without a dialog and stop the roll at the end of each receipt.'}
+          </div>
+        </div>
+      )}
+
       <div>
         <FieldLabel label="Printer Type" />
         <SegmentedButton

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
 const fs = require('fs');
@@ -346,6 +346,70 @@ if (!gotTheLock) {
       quitConfirmed = true;
       stopBackend();
       app.quit();
+    });
+  });
+
+  /*
+   * Printing at an exact page size.
+   *
+   * `window.print()` cannot set how much paper comes out. The print dialog
+   * chooses from the sizes the *driver* advertises, and on a roll printer those
+   * are fixed lengths — so a 62mm receipt is laid out correctly and then fed
+   * onto a much longer page, and the remainder comes off the roll blank. The
+   * CSS is not what is wrong in that case; it is measured and applied
+   * correctly, and simply has no say over the paper.
+   *
+   * Electron can name the page size in microns, which the driver takes as a
+   * custom form. That is the only way to make the roll stop where the receipt
+   * ends. One job per copy, because each of the three is a different length —
+   * and a job boundary is also where a cutter fires.
+   */
+  ipcMain.handle('blaze:list-printers', async (event) => {
+    try {
+      const printers = await event.sender.getPrintersAsync();
+      return printers.map(p => ({
+        name: p.name,
+        displayName: p.displayName || p.name,
+        isDefault: Boolean(p.isDefault),
+      }));
+    } catch (err) {
+      log('Could not list printers: ' + err.message);
+      return [];
+    }
+  });
+
+  ipcMain.handle('blaze:print-copy', async (event, options = {}) => {
+    const widthMicron = Math.round(Number(options.widthMicron) || 0);
+    const heightMicron = Math.round(Number(options.heightMicron) || 0);
+    if (widthMicron <= 0 || heightMicron <= 0) {
+      return { ok: false, error: 'Bad page size' };
+    }
+
+    return new Promise((resolve) => {
+      const settings = {
+        // No dialog: three copies would mean three dialogs, and a cashier
+        // mid-service should press Print once.
+        silent: true,
+        printBackground: false,
+        // The receipt already carries its own padding; a driver margin on top
+        // of it narrows the text and can push the right-hand column off.
+        margins: { marginType: 'none' },
+        pageSize: { width: widthMicron, height: heightMicron },
+        copies: 1,
+      };
+      // Omitted rather than empty: Electron falls back to the system default
+      // printer when no device is named, which is what a till has.
+      if (options.deviceName) settings.deviceName = options.deviceName;
+
+      try {
+        event.sender.print(settings, (success, failureReason) => {
+          resolve(success
+            ? { ok: true }
+            : { ok: false, error: failureReason || 'The printer refused the job' });
+        });
+      } catch (err) {
+        resolve({ ok: false, error: err.message });
+      }
     });
   });
 
