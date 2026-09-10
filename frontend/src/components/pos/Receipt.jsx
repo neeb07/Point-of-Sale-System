@@ -358,7 +358,14 @@ export default function Receipt({
 
   return (
     <div
-      className="receipt-copy"
+      /*
+        The copy type is in the class so the print stylesheet can give each one
+        its own page height. The three copies are not the same length — the
+        kitchen copy carries no prices, so it has no totals block at all — and a
+        single page size for the whole job is what pushed the taller two onto a
+        second page. See ReceiptModal.
+      */
+      className={`receipt-copy${copyType ? ` copy-${copyType}` : ''}`}
       style={{
         width,
         background: '#FFFFFF',
