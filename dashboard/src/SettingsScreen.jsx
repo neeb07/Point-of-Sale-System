@@ -1,3 +1,4 @@
+import ResetSection from './ResetSection';
 import React, { useEffect, useState } from 'react';
 
 /**
@@ -179,6 +180,9 @@ export default function SettingsScreen() {
           ))}
         </div>
       </section>
+
+      {/* Last, and set apart: the only destructive thing on this page. */}
+      <ResetSection />
     </div>
   );
 }

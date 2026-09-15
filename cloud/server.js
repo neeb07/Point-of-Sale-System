@@ -102,6 +102,13 @@ app.use('/api/backup', require('./routes/backup'));
  */
 app.use('/api/pairing', require('./routes/pairing'));
 
+/*
+ * Wiping the trading history. Owner's password re-entered, a fresh export
+ * downloaded first, one transaction, and the menu, stock, staff, payroll and
+ * backups untouched. See routes/admin.js.
+ */
+app.use('/api/admin', require('./routes/admin'));
+
 // Expenses, shifts, staff figures and stock — read-only, in the till's own
 // response shapes so the POS screens can be reused on the dashboard unaltered.
 app.use('/api', require('./routes/branch-data'));
