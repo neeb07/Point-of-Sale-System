@@ -128,6 +128,22 @@ export const ordersAPI = {
   },
   getOne: (id: number) => request<Order>('GET', `/orders/${id}`),
   void: (id: number) => request<Order>('PUT', `/orders/${id}/void`),
+
+  /*
+   * Held orders — tickets sent to the kitchen and not yet paid for.
+   *
+   * A hold is not a sale: it reaches no report, shift total or sync until it is
+   * confirmed. The same request body that `create` takes is what `hold` takes,
+   * and what `updateHeld` replaces; `confirmHeld` turns it into a sale through
+   * the same path `create` uses. See backend/routes/orders.js.
+   */
+  hold: (order: Order) => request<Record<string, any>>('POST', '/orders/hold', order),
+  held: () => request<Record<string, any>[]>('GET', '/orders/held'),
+  getHeld: (id: number) => request<Record<string, any>>('GET', `/orders/held/${id}`),
+  updateHeld: (id: number, order: Order) => request<Record<string, any>>('PUT', `/orders/held/${id}`, order),
+  confirmHeld: (id: number, data: { payment_method?: string } = {}) =>
+    request<Record<string, any>>('POST', `/orders/held/${id}/confirm`, data),
+  cancelHeld: (id: number) => request<{ success: boolean }>('DELETE', `/orders/held/${id}`),
 };
 
 export const reportsAPI = {

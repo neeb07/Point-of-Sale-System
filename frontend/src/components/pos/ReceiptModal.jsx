@@ -12,13 +12,23 @@ const COPY_TABS = [
   { value: 'restaurant', label: 'Restaurant' },
 ];
 
-export default function ReceiptModal({ open, onClose, orderData, autoPrintEnabled = true }) {
+/**
+ * `copies` restricts which of the three can be shown and printed.
+ *
+ * A ticket going to the kitchen prints the kitchen copy and nothing else — the
+ * customer has not paid, so there is no bill yet. Confirming it later prints
+ * the other two. Left unset, all three are offered as before.
+ */
+export default function ReceiptModal({ open, onClose, orderData, autoPrintEnabled = true, copies = null }) {
   /**
    * Which copies go to the printer. Defaults to all three, which is the
    * normal flow — the cashier hits Print once and separates the stack.
    * The individual options exist for reprints, when only one copy was
    * damaged, lost, or the customer asks for another.
    */
+  const allowed = Array.isArray(copies) && copies.length ? copies : COPY_TYPES;
+  // Default to everything allowed. If only one copy is allowed the selector
+  // never appears and that one is simply what prints.
   const [selection, setSelection] = useState('all');
   const { autoPrint, paperSize, printerName } = useSettings();
 
@@ -206,7 +216,9 @@ export default function ReceiptModal({ open, onClose, orderData, autoPrintEnable
 
   if (!open || !orderData) return null;
 
-  const copiesToPrint = selection === 'all' ? COPY_TYPES : [selection];
+  const copiesToPrint = selection === 'all'
+    ? allowed
+    : allowed.includes(selection) ? [selection] : allowed;
 
   const handlePrint = async () => {
     if (await printEachCopyExactly()) return;
@@ -214,9 +226,9 @@ export default function ReceiptModal({ open, onClose, orderData, autoPrintEnable
     window.print();
   };
 
-  const printLabel = selection === 'all'
-    ? 'Print All 3 Copies'
-    : `Print ${COPY_TABS.find(t => t.value === selection)?.label} Copy`;
+  const printLabel = copiesToPrint.length > 1
+    ? `Print All ${copiesToPrint.length} Copies`
+    : `Print ${COPY_TABS.find(t => t.value === copiesToPrint[0])?.label || ''} Copy`;
 
   return (
     /*
@@ -257,7 +269,9 @@ export default function ReceiptModal({ open, onClose, orderData, autoPrintEnable
           </button>
         </div>
 
-        {/* Copy selector — screen only, never printed. */}
+        {/* Copy selector — screen only, never printed. Hidden when there is
+            only one copy on offer, since there is nothing to select. */}
+        {allowed.length > 1 && (
         <div
           className="no-print"
           style={{
@@ -266,7 +280,7 @@ export default function ReceiptModal({ open, onClose, orderData, autoPrintEnable
             boxShadow: '0 4px 12px rgba(17,17,17,0.10)',
           }}
         >
-          {COPY_TABS.map(tab => {
+          {COPY_TABS.filter(tab => tab.value === 'all' || allowed.includes(tab.value)).map(tab => {
             const active = selection === tab.value;
             return (
               <button
@@ -287,6 +301,7 @@ export default function ReceiptModal({ open, onClose, orderData, autoPrintEnable
             );
           })}
         </div>
+        )}
 
         {/*
           Printable area. Every selected copy is rendered here; the print

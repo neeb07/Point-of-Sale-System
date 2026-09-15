@@ -34,6 +34,8 @@ interface OrderCartProps {
   onRemoveItem: (id: number, name: string) => void;
   onClearCart: () => void;
   onCharge: () => void;
+  /** Set while a held ticket has been loaded for changing; the button says so. */
+  editingTicket?: string | null;
 }
 
 const PAYMENT_ICONS: Record<PaymentMethod, React.ElementType> = {
@@ -63,6 +65,7 @@ export default function OrderCart({
   onRemoveItem,
   onClearCart,
   onCharge,
+  editingTicket = null,
 }: OrderCartProps) {
   const { formatMoney, currencySymbol, employeeDiscountRate } = useSettings();
   const subtotal = cart.reduce((sum: number, item: CartItem) => sum + (item.price * item.qty), 0);
@@ -407,7 +410,12 @@ export default function OrderCart({
             onMouseLeave={e => { if (cart.length > 0) e.currentTarget.style.background = '#111111'; }}
           >
             <CreditCard size={17} />
-            Charge Order
+            {/*
+              Charging sends the ticket to the kitchen; the sale is recorded
+              when it is confirmed from Held. The label says which, so nobody
+              presses it expecting the money to be taken here.
+            */}
+            {editingTicket ? `Update ${editingTicket}` : 'Send to Kitchen'}
           </button>
         </div>
       </div>

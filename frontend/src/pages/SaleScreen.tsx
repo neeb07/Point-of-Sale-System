@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import TopBar from '@/components/pos/TopBar';
 import MenuPanel from '@/components/pos/MenuPanel';
 import OrderCart from '@/components/pos/OrderCart';
@@ -13,6 +13,7 @@ import { PAYMENT_METHODS, type PaymentMethod } from '@/lib/constants';
 import { useSettings } from '@/lib/SettingsContext';
 import CustomerLookup from '@/components/pos/CustomerLookup';
 import AlertDialog, { AlertPanel } from '@/components/pos/AlertDialog';
+import HeldOrdersPanel from '@/components/pos/HeldOrdersPanel';
 import type { Customer } from '@/api/index';
 
 interface CartItem {
@@ -41,6 +42,8 @@ interface ReceiptData {
     paymentMethod: string;
     cashier: string;
     orderType: string;
+    /** A ticket that has not been paid — the bill copies say so. */
+    provisional?: boolean;
   };
   items: { name: string; quantity: number; price: number }[];
   subtotal: number;
@@ -98,6 +101,19 @@ export default function SaleScreen({ onNavigate }: SaleScreenProps = {}) {
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerAddress, setCustomerAddress] = useState('');
   const [receiptData, setReceiptData] = useState<ReceiptData | null>(null);
+  /*
+   * Held orders.
+   *
+   * Charging no longer records a sale; it sends a ticket to the kitchen. The
+   * board lists those tickets, and `editingHold` is set while one of them has
+   * been loaded back into the cart to be changed. `receiptCopies` says which
+   * copies the receipt modal may offer: the kitchen copy alone when a ticket
+   * is sent, the bill copies when one is confirmed.
+   */
+  const [heldOpen, setHeldOpen] = useState(false);
+  const [heldCount, setHeldCount] = useState(0);
+  const [editingHold, setEditingHold] = useState<{ id: number; ticket_no: string } | null>(null);
+  const [receiptCopies, setReceiptCopies] = useState<string[] | null>(null);
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
   const { loading } = usePOS();
   const { currentUser } = useAuth();
@@ -168,7 +184,7 @@ export default function SaleScreen({ onNavigate }: SaleScreenProps = {}) {
     setCustomerAddress('');
   };
 
-  const handleClearCart = () => resetOrder();
+  const handleClearCart = () => { setEditingHold(null); resetOrder(); };
 
   const handleOrderTypeChange = (type: 'Dine-in' | 'Delivery') => {
     setOrderType(type);
@@ -193,77 +209,101 @@ export default function SaleScreen({ onNavigate }: SaleScreenProps = {}) {
     placeOrder();
   };
 
+  /**
+   * A server order — held, confirmed or reprinted — as the receipt wants it.
+   *
+   * Always the server's figures. The client's arithmetic is only for the live
+   * cart; the paper has to match what was actually recorded. `provisional`
+   * marks a ticket that has not been paid for, so the customer and restaurant
+   * copies say so rather than pass for a paid bill.
+   */
+  const receiptFrom = (order: any, opts: { provisional?: boolean; paymentMethod?: string } = {}): ReceiptData => ({
+    orderInfo: {
+      date: moment().format('DD/MM/YYYY'),
+      time: moment().format('hh:mm A'),
+      // A confirmed sale carries the branch-coded order number (E-18-041). A
+      // ticket carries its ticket number, labelled as such, because it has no
+      // order number yet — it is not an order until somebody pays.
+      orderNumber: order.order_no
+        || (order.ticket_no ? `Ticket ${order.ticket_no}` : (order.id ? `#${order.id}` : '')),
+      table: order.table_number || '—',
+      paymentMethod: opts.provisional ? 'Not yet paid' : (opts.paymentMethod || order.payment_method || 'Cash'),
+      cashier: currentUser?.name || 'Unknown',
+      orderType: order.order_type || 'Dine-in',
+      provisional: Boolean(opts.provisional),
+    },
+    items: (order.items || []).map((i: any) => ({ name: i.name, quantity: i.quantity, price: i.price })),
+    subtotal: order.subtotal ?? 0,
+    // The server's `discount` is the combined figure; the receipt shows the
+    // manual and staff portions on separate lines, so take the manual part.
+    discount: order.manual_discount ?? 0,
+    employeeDiscount: order.employee_discount ?? 0,
+    employeeDiscountRate: order.employee_discount_rate ?? 0,
+    isEmployee: (order.is_employee ?? 0) === 1,
+    taxRate: order.tax_rate ?? 0,
+    taxAmount: order.tax_amount ?? 0,
+    deliveryCharge: order.delivery_charge ?? 0,
+    total: order.total ?? 0,
+    restaurant: restaurantDetails,
+    customer: {
+      name: order.customer_name ?? '',
+      phone: order.customer_phone ?? '',
+      address: order.customer_address ?? '',
+    },
+  });
+
+  /** The request body for the cart as it stands — what `hold`, `updateHeld` and `create` all take. */
+  const cartAsOrder = (customer?: { name: string; phone: string; address: string }) => ({
+    items: cart.map((c: CartItem) => ({
+      id: c.id,
+      name: c.name,
+      price: c.price,
+      quantity: c.qty,
+      is_deal: c.isDeal || false,
+      variant_id: c.variant_id || null,
+    })),
+    total,
+    discount,
+    payment_method: paymentMethod,
+    order_type: orderType,
+    delivery_charge: deliveryCharge,
+    table_number: tableNumber || null,
+    is_employee: isEmployee,
+    customer_name: customer?.name || customerName || null,
+    customer_phone: customer?.phone || customerPhone || null,
+    customer_address: customer?.address || customerAddress || null,
+    cashier_id: currentUser?.id || null,
+    cashier_name: currentUser?.name || 'Unknown',
+  });
+
+  /**
+   * Charging sends the order to the kitchen. It does not record a sale.
+   *
+   * The sale is recorded when the ticket is confirmed from the held-orders
+   * board, which is where payment is taken. Until then it is a ticket: the
+   * kitchen copy prints now, the customer and restaurant copies print on
+   * confirmation, and nothing reaches a report or a shift total.
+   *
+   * If a held ticket was loaded for editing, this replaces it rather than
+   * creating a second one — and prints the kitchen copy again, because the
+   * kitchen is cooking from the old one.
+   */
   const placeOrder = async (customer?: { name: string; phone: string; address: string }) => {
     setDeliveryModalOpen(false);
     try {
-      const items = cart.map((c: CartItem) => ({
-        id: c.id,
-        name: c.name,
-        price: c.price,
-        quantity: c.qty,
-        is_deal: c.isDeal || false,
-        variant_id: c.variant_id || null,
-      }));
+      const body = cartAsOrder(customer);
+      const ticket = editingHold
+        ? await ordersAPI.updateHeld(editingHold.id, body)
+        : await ordersAPI.hold(body);
 
-      const order = await ordersAPI.create({
-        items,
-        total,
-        discount,
-        payment_method: paymentMethod,
-        order_type: orderType,
-        delivery_charge: deliveryCharge,
-        table_number: tableNumber || null,
-        is_employee: isEmployee,
-        customer_name: customer?.name || null,
-        customer_phone: customer?.phone || null,
-        customer_address: customer?.address || null,
-        cashier_id: currentUser?.id || null,
-        cashier_name: currentUser?.name || 'Unknown',
-      });
-
-      setReceiptData({
-        orderInfo: {
-          date: moment().format('DD/MM/YYYY'),
-          time: moment().format('hh:mm A'),
-          // The server formats this, branch code and all (E-18-041). Falling back to
-          // the bare id keeps an unbranched till printing what it always did.
-          orderNumber: order.order_no || (order.id ? `#${order.id}` : `#${Math.floor(1000 + Math.random() * 9000)}`),
-          table: tableNumber || '—',
-          paymentMethod,
-          cashier: currentUser?.name || 'Unknown',
-          orderType,
-        },
-        items: cart.map((c: CartItem) => ({
-          name: c.name,
-          quantity: c.qty,
-          price: c.price,
-        })),
-        // Prefer the figures the server computed and stored. The client's
-        // arithmetic is only for live display; if the two ever disagree the
-        // receipt must match what was actually recorded against the sale.
-        subtotal: order.subtotal ?? subtotal,
-        // The server's `discount` is the combined figure; the receipt shows the
-        // manual and staff portions on separate lines, so take the manual part.
-        discount: order.manual_discount ?? discount,
-        employeeDiscount: order.employee_discount ?? employeeDiscount,
-        employeeDiscountRate: order.employee_discount_rate ?? employeeDiscountRate,
-        isEmployee: (order.is_employee ?? (isEmployee ? 1 : 0)) === 1,
-        taxRate: order.tax_rate ?? taxRate,
-        taxAmount: order.tax_amount ?? taxAmount,
-        deliveryCharge: order.delivery_charge ?? deliveryCharge,
-        total: order.total ?? total,
-        restaurant: restaurantDetails,
-        customer: {
-          name: order.customer_name ?? customer?.name ?? '',
-          phone: order.customer_phone ?? customer?.phone ?? '',
-          address: order.customer_address ?? customer?.address ?? '',
-        },
-      });
-
+      setReceiptCopies(['kitchen']);
+      setReceiptData(receiptFrom(ticket, { provisional: true }));
+      setEditingHold(null);
       resetOrder();
+      refreshHeldCount();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Unknown error';
-      console.error('Failed to charge order:', err);
+      console.error('Failed to hold order:', err);
       // The backend refuses an order with no open shift and says so with a
       // code rather than only a sentence, so this does not have to match on
       // wording that might later be reworded. See backend/routes/orders.js.
@@ -271,6 +311,45 @@ export default function SaleScreen({ onNavigate }: SaleScreenProps = {}) {
       setSaleError({ noShift, message });
     }
   };
+
+  /** Load a held ticket back into the cart so it can be changed. */
+  const editHeld = (t: any) => {
+    setCart((t.items || []).map((i: any) => ({
+      id: i.id, name: i.name, price: i.price, qty: i.quantity,
+      isDeal: Boolean(i.is_deal), variant_id: i.variant_id ?? null,
+    })));
+    setOrderType(t.order_type === 'Delivery' ? 'Delivery' : 'Dine-in');
+    setTableNumber(t.table_number || '');
+    setPaymentMethod(t.payment_method || 'Cash');
+    setIsEmployee((t.is_employee ?? 0) === 1);
+    // The manual discount comes back as a flat figure whatever it was typed as.
+    setDiscountType('flat');
+    setDiscountValue(t.manual_discount ? String(t.manual_discount) : '');
+    setCustomerName(t.customer_name || '');
+    setCustomerPhone(t.customer_phone || '');
+    setCustomerAddress(t.customer_address || '');
+    setEditingHold({ id: t.id, ticket_no: t.ticket_no });
+    setHeldOpen(false);
+  };
+
+  /** A ticket was confirmed on the board: it is a sale now, so print the bill. */
+  const heldConfirmed = (order: any) => {
+    setHeldOpen(false);
+    setReceiptCopies(['customer', 'restaurant']);
+    setReceiptData(receiptFrom(order, { paymentMethod: order.payment_method }));
+    refreshHeldCount();
+  };
+
+  /** Any copy of a ticket, printed again while it is still held. */
+  const printHeld = (t: any, copies: string[]) => {
+    setReceiptCopies(copies);
+    setReceiptData(receiptFrom(t, { provisional: true }));
+  };
+
+  const refreshHeldCount = () => {
+    ordersAPI.held().then(rows => setHeldCount(Array.isArray(rows) ? rows.length : 0)).catch(() => {});
+  };
+  useEffect(() => { refreshHeldCount(); }, []);
 
   if (loading) {
     return (
@@ -288,6 +367,8 @@ export default function SaleScreen({ onNavigate }: SaleScreenProps = {}) {
         onNavigate={onNavigate}
         tableNumber={tableNumber}
         onTableNumberChange={setTableNumber}
+        heldCount={heldCount}
+        onOpenHeld={() => setHeldOpen(true)}
       />
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
         <MenuPanel onAddToCart={handleAddToCart} search={search} />
@@ -312,6 +393,7 @@ export default function SaleScreen({ onNavigate }: SaleScreenProps = {}) {
           onRemoveItem={handleRemoveItem}
           onClearCart={handleClearCart}
           onCharge={handleCharge}
+          editingTicket={editingHold?.ticket_no || null}
         />
       </div>
 
@@ -419,19 +501,36 @@ export default function SaleScreen({ onNavigate }: SaleScreenProps = {}) {
 
       <ReceiptModal
         open={!!receiptData}
-        onClose={() => setReceiptData(null)}
+        onClose={() => { setReceiptData(null); setReceiptCopies(null); }}
         orderData={receiptData}
+        copies={receiptCopies}
+      />
+
+      <HeldOrdersPanel
+        open={heldOpen}
+        onClose={() => setHeldOpen(false)}
+        onEdit={editHeld}
+        onConfirmed={heldConfirmed}
+        onPrint={printHeld}
+        onCountChange={setHeldCount}
       />
 
       <Modal
         isOpen={confirmModalOpen}
         onClose={() => setConfirmModalOpen(false)}
-        title="Confirm Sale"
+        title={editingHold ? `Update ticket ${editingHold.ticket_no}` : 'Send to Kitchen'}
         width={420}
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {/*
+            Said plainly, because it is the change from before: this does not
+            take the money. The kitchen copy prints now; the sale is recorded
+            and the bill printed when the ticket is confirmed from Held.
+          */}
           <div style={{ fontSize: 14, color: '#6B6B63', lineHeight: 1.5 }}>
-            Are you sure you want to complete this sale?
+            {editingHold
+              ? 'The ticket is replaced and a fresh kitchen copy prints. It stays on hold until it is confirmed.'
+              : 'The kitchen copy prints now. Payment is taken and the sale recorded when you confirm it from Held orders.'}
           </div>
           <div style={{ background: '#F5F5F0', borderRadius: 8, padding: 16, border: '1px solid #EBEBEB' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
@@ -503,7 +602,7 @@ export default function SaleScreen({ onNavigate }: SaleScreenProps = {}) {
               }}
             >
               <CreditCard size={18} />
-              Confirm Sale
+              {editingHold ? 'Update ticket' : 'Send to kitchen'}
             </button>
           </div>
         </div>

@@ -4,24 +4,43 @@ const db = require('../db/database');
 const { resolveBranchId, branchCode, recordCustomer, openShiftIdFor } = require('../db/branch');
 const { formatOrderNo } = require('../db/order-no');
 
-// Create a new completed order
-router.post('/', (req, res) => {
-  const {
-    items, total, discount, payment_method, cashier_id, cashier_name,
-    order_type, delivery_charge, table_number,
-    customer_name, customer_phone, customer_address,
-  } = req.body;
+/*
+ * Pricing, committing and describing a sale are three separate steps.
+ *
+ * They used to be one request handler. Held orders split them apart: a ticket
+ * sent to the kitchen has to be priced — the kitchen copy shows the table and
+ * the screen shows the total — but must not be committed, because it is not a
+ * sale yet. Nothing about it may reach a report, a shift total, the cloud, the
+ * stock count or the customer book until somebody confirms it. Keeping the
+ * pricing and the committing as separate functions, and having the confirm
+ * route call the very same commit as a direct sale, is what guarantees that a
+ * confirmed ticket is a sale in exactly the way a direct sale is.
+ */
+
+const VALID_PAYMENTS = ['Cash', 'Card', 'Online'];
+
+const trimmed = (v) => (v && String(v).trim()) || null;
+
+/**
+ * Price an order from its request body and the shop's settings.
+ *
+ * Pure apart from two settings reads. Throws a 400-shaped error for a body that
+ * cannot be priced, and never trusts a figure the client sent: the total, the
+ * tax and the staff discount are all recomputed here.
+ */
+function priceOrder(body) {
+  const { items, total, discount, payment_method, delivery_charge } = body || {};
 
   if (!items || items.length === 0) {
-    return res.status(400).json({ error: 'Order must have at least one item' });
+    const err = new Error('Order must have at least one item');
+    err.status = 400;
+    throw err;
   }
 
   // FIX (Bug 6): discount and payment_method were always sent as 0/'Cash'
   // from the UI. Now that the client sends real values, validate them here
   // so a bad payload can't write a negative or nonsensical order.
-  const VALID_PAYMENTS = ['Cash', 'Card', 'Online'];
   const paymentMethod = VALID_PAYMENTS.includes(payment_method) ? payment_method : 'Cash';
-
   const safeDiscount = Math.max(0, Number(discount) || 0);
   const safeDelivery = Math.max(0, Number(delivery_charge) || 0);
 
@@ -29,6 +48,7 @@ router.post('/', (req, res) => {
   const itemsSubtotal = items.reduce(
     (sum, i) => sum + (Number(i.price) || 0) * (Number(i.quantity) || 0), 0
   );
+
   /**
    * Staff discount.
    *
@@ -38,12 +58,10 @@ router.post('/', (req, res) => {
    * then applies to what is left, so the two together can never exceed the
    * order value.
    */
-  const isEmployee = req.body.is_employee === true || req.body.is_employee === 1;
+  const isEmployee = body.is_employee === true || body.is_employee === 1;
   const empRateRow = db.prepare("SELECT value FROM settings WHERE key = 'employee_discount_rate'").get();
   const employeeRate = Math.max(0, Math.min(100, Number(empRateRow && empRateRow.value) || 0));
-  const employeeDiscount = isEmployee
-    ? Math.round(itemsSubtotal * employeeRate) / 100
-    : 0;
+  const employeeDiscount = isEmployee ? Math.round(itemsSubtotal * employeeRate) / 100 : 0;
 
   const manualDiscount = Math.min(safeDiscount, Math.max(0, itemsSubtotal - employeeDiscount));
 
@@ -63,16 +81,30 @@ router.post('/', (req, res) => {
   const computedTotal = Math.max(0, taxable + taxAmount + safeDelivery);
 
   // Trust the server figure; log when the client disagreed.
-  if (Number(total) !== computedTotal) {
+  if (total !== undefined && Number(total) !== computedTotal) {
     console.warn(`Order total mismatch — client sent ${total}, server computed ${computedTotal}. Using server value.`);
   }
 
-  // Resolved once, ahead of the transaction: the row's branch and the branch
-  // code printed on the receipt must be the same answer, not two lookups.
-  const branchId = resolveBranchId(req);
+  return {
+    items, paymentMethod, safeDelivery, itemsSubtotal, isEmployee, employeeRate,
+    employeeDiscount, manualDiscount, cappedDiscount, taxRate, taxAmount, computedTotal,
+  };
+}
 
-  // Insert order in a transaction so it is atomic
-  const createOrder = db.transaction(() => {
+/**
+ * Write a priced order as a sale. Returns the new order id.
+ *
+ * Everything that makes a sale a sale happens here and nowhere else: the row,
+ * its lines, the stock deduction, the customer book. Both a direct sale and a
+ * confirmed ticket come through this one function.
+ */
+function commitOrder(body, req, p, branchId) {
+  const {
+    cashier_id, cashier_name, order_type, table_number,
+    customer_name, customer_phone, customer_address,
+  } = body;
+
+  const run = db.transaction(() => {
     // FIX (Bug 5): attach the order to the open shift so shift totals are
     // derived from real sales instead of hardcoded demo numbers.
     // The cashier's own open shift — not whichever shift is open globally,
@@ -88,9 +120,6 @@ router.post('/', (req, res) => {
      * figure, and whoever counts up at the end is short by exactly that amount
      * with nothing to explain it. Refusing at the point of sale is the only
      * moment anyone can still do something about it.
-     *
-     * Deliberately narrow. Everything else on the till works without a shift —
-     * the menu, reports, stock, expenses — because none of those move cash.
      */
     if (!openShiftId) {
       const err = new Error('Open a shift before taking orders.');
@@ -110,9 +139,9 @@ router.post('/', (req, res) => {
           customer_name, customer_phone, customer_address, branch_id)
        VALUES (?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'), ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
-      computedTotal,
-      cappedDiscount,
-      paymentMethod,
+      p.computedTotal,
+      p.cappedDiscount,
+      p.paymentMethod,
       // Attribution comes from the signed-in session, not the request body.
       // Taking it from the body let a caller credit a sale to somebody else,
       // and it is what the manager report scoping keys on — so it has to be
@@ -121,18 +150,18 @@ router.post('/', (req, res) => {
       (req.user && req.user.staffId) || cashier_id || null,
       (req.user && req.user.name) || cashier_name || 'Unknown',
       order_type || 'Dine-in',
-      safeDelivery,
+      p.safeDelivery,
       table_number || null,
       openShiftId,
-      taxRate,
-      taxAmount,
-      isEmployee ? 1 : 0,
-      employeeDiscount,
-      isEmployee ? employeeRate : 0,
+      p.taxRate,
+      p.taxAmount,
+      p.isEmployee ? 1 : 0,
+      p.employeeDiscount,
+      p.isEmployee ? p.employeeRate : 0,
       // Delivery details are optional — the cashier may skip the prompt.
-      (customer_name && String(customer_name).trim()) || null,
-      (customer_phone && String(customer_phone).trim()) || null,
-      (customer_address && String(customer_address).trim()) || null,
+      trimmed(customer_name),
+      trimmed(customer_phone),
+      trimmed(customer_address),
       // The sale belongs to the branch the till is standing in. Stamped at
       // write time rather than derived later, so moving a manager between
       // branches never rewrites the history of sales they already rang up.
@@ -146,10 +175,8 @@ router.post('/', (req, res) => {
     // again. Only delivery orders — a walk-in has nothing worth keeping.
     if ((order_type || 'Dine-in') === 'Delivery') {
       recordCustomer({
-        name: customer_name,
-        phone: customer_phone,
-        address: customer_address,
-        total: computedTotal,
+        name: customer_name, phone: customer_phone, address: customer_address,
+        total: p.computedTotal,
       });
     }
 
@@ -159,34 +186,27 @@ router.post('/', (req, res) => {
     const insertItem = db.prepare(
       'INSERT INTO order_items (order_id, menu_item_id, name, price, quantity, is_deal, variant_id) VALUES (?, ?, ?, ?, ?, ?, ?)'
     );
-
     const getRecipe = db.prepare(
       'SELECT id FROM recipes WHERE menu_item_id = ? AND (variant_id = ? OR variant_id IS NULL)'
     );
     const getRecipeIngredients = db.prepare(
       'SELECT ingredient_id, quantity_required FROM recipe_ingredients WHERE recipe_id = ?'
     );
-    const deductStock = db.prepare(
-      'UPDATE ingredients SET stock = stock - ? WHERE id = ?'
-    );
+    const deductStock = db.prepare('UPDATE ingredients SET stock = stock - ? WHERE id = ?');
 
-    items.forEach(item => {
+    p.items.forEach(item => {
       insertItem.run(orderId, item.id, item.name, item.price, item.quantity, item.is_deal ? 1 : 0, item.variant_id || null);
 
       // --- INVENTORY DEDUCTION ---
-      // NOTE: Deal deduction is intentionally deferred for now. Do not attempt to explode deals
-      // into their component items for stock purposes in this stage. Treat them exactly like
-      // items with no recipes (like pizzas).
-      if (item.is_deal) {
-        return; // Skip deduction
-      }
+      // Deal deduction is intentionally deferred: deals are not exploded into
+      // their component items for stock purposes. They are treated like items
+      // with no recipe.
+      if (item.is_deal) return;
 
       const recipeRow = getRecipe.get(item.id, item.variant_id || null);
       if (recipeRow) {
-        const ingredients = getRecipeIngredients.all(recipeRow.id);
-        ingredients.forEach(ing => {
-          const totalQty = ing.quantity_required * item.quantity;
-          deductStock.run(totalQty, ing.ingredient_id);
+        getRecipeIngredients.all(recipeRow.id).forEach(ing => {
+          deductStock.run(ing.quantity_required * item.quantity, ing.ingredient_id);
         });
       }
     });
@@ -194,41 +214,240 @@ router.post('/', (req, res) => {
     return orderId;
   });
 
+  return run();
+}
+
+/** The figures the receipt prints — the server's, never the client's arithmetic. */
+function describeOrder(body, p, branchId, extra = {}) {
+  return {
+    success: true,
+    ...extra,
+    total: p.computedTotal,
+    discount: p.cappedDiscount,
+    subtotal: p.itemsSubtotal,
+    tax_rate: p.taxRate,
+    tax_amount: p.taxAmount,
+    delivery_charge: p.safeDelivery,
+    is_employee: p.isEmployee ? 1 : 0,
+    employee_discount: p.employeeDiscount,
+    employee_discount_rate: p.employeeRate,
+    manual_discount: p.manualDiscount,
+    payment_method: p.paymentMethod,
+    order_type: body.order_type || 'Dine-in',
+    table_number: body.table_number || null,
+    items: p.items,
+    customer_name: trimmed(body.customer_name),
+    customer_phone: trimmed(body.customer_phone),
+    customer_address: trimmed(body.customer_address),
+  };
+}
+
+function sendOrderError(res, err, what) {
+  if (err.code === 'NO_OPEN_SHIFT') {
+    // 409, not 500: nothing is broken, the till is simply not ready to trade.
+    return res.status(409).json({
+      error: 'Open a shift before taking orders. Go to Shifts and enter your opening cash.',
+      code: 'NO_OPEN_SHIFT',
+    });
+  }
+  if (err.status === 400) return res.status(400).json({ error: err.message });
+  console.error(`Error ${what}:`, err);
+  return res.status(500).json({ error: err.message });
+}
+
+// Create a new completed order — a direct sale, paid and done in one step.
+router.post('/', (req, res) => {
   try {
-    const orderId = createOrder();
-    res.status(201).json({
-      success: true,
+    const p = priceOrder(req.body);
+    // Resolved once, ahead of the transaction: the row's branch and the branch
+    // code printed on the receipt must be the same answer, not two lookups.
+    const branchId = resolveBranchId(req);
+    const orderId = commitOrder(req.body, req, p, branchId);
+    res.status(201).json(describeOrder(req.body, p, branchId, {
       id: orderId,
       // What the receipt prints and the customer quotes back. Computed here so
       // the till, the receipt and the dashboard cannot disagree about it.
       order_no: formatOrderNo(branchCode(branchId), orderId),
-      total: computedTotal,
-      discount: cappedDiscount,
-      // Returned so the receipt prints the figures the server actually stored
-      // rather than the client's own arithmetic.
-      subtotal: itemsSubtotal,
-      tax_rate: taxRate,
-      tax_amount: taxAmount,
-      delivery_charge: safeDelivery,
-      is_employee: isEmployee ? 1 : 0,
-      employee_discount: employeeDiscount,
-      employee_discount_rate: employeeRate,
-      manual_discount: manualDiscount,
-      customer_name: (customer_name && String(customer_name).trim()) || null,
-      customer_phone: (customer_phone && String(customer_phone).trim()) || null,
-      customer_address: (customer_address && String(customer_address).trim()) || null,
-    });
+    }));
   } catch (err) {
-    if (err.code === 'NO_OPEN_SHIFT') {
-      // 409, not 500: nothing is broken, the till is simply not ready to trade.
-      return res.status(409).json({
-        error: 'Open a shift before taking orders. Go to Shifts and enter your opening cash.',
-        code: 'NO_OPEN_SHIFT',
-      });
-    }
-    console.error('Error creating order:', err);
+    sendOrderError(res, err, 'creating order');
+  }
+});
+
+/* ------------------------------------------------------------ held orders -- */
+
+/*
+ * A ticket that has gone to the kitchen and has not been paid for.
+ *
+ * Not a sale, and deliberately not a row in `orders`. Forty-odd queries across
+ * the till and the cloud read that table as the record of sales — reports,
+ * shift totals, the heartbeat, the sync push, the backup counts — and a held
+ * order must appear in none of them. Adding a status to that table would mean
+ * every one of those queries having to remember to exclude it, and each one
+ * that forgot would be a phantom sale in a report. A separate table cannot be
+ * forgotten by anything.
+ *
+ * What is stored is the request body itself. Editing a ticket replaces it;
+ * confirming one prices and commits it through the very same functions a direct
+ * sale uses. So a confirmed ticket is a sale in exactly the way a direct sale
+ * is, and there is one definition of what an order is worth.
+ */
+db.exec(`
+  CREATE TABLE IF NOT EXISTS held_orders (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    payload       TEXT NOT NULL,
+    order_type    TEXT,
+    table_number  TEXT,
+    customer_name TEXT,
+    total         REAL NOT NULL DEFAULT 0,
+    item_count    INTEGER NOT NULL DEFAULT 0,
+    staff_id      INTEGER,
+    staff_name    TEXT,
+    held_at       DATETIME DEFAULT (datetime('now', 'localtime')),
+    updated_at    DATETIME
+  )
+`);
+
+/** Ticket numbers read "H-12" on the kitchen copy, to say plainly they are not invoices. */
+const ticketNo = (id) => `H-${id}`;
+
+/** A held row, with its payload re-priced so the screen shows current figures. */
+function describeHeld(row) {
+  const body = JSON.parse(row.payload);
+  const p = priceOrder(body);
+  return describeOrder(body, p, null, {
+    id: row.id,
+    ticket_no: ticketNo(row.id),
+    // Said explicitly so a receipt printed from a ticket can label itself
+    // provisional rather than pass for a paid bill.
+    held: true,
+    held_at: row.held_at,
+    updated_at: row.updated_at,
+    staff_id: row.staff_id,
+    staff_name: row.staff_name,
+  });
+}
+
+/**
+ * Price the ticket and store it. Needs an open shift, the same as a sale —
+ * the rule is "no trading without a drawer", and a ticket is trading.
+ */
+function storeHeld(body, req, existingId = null) {
+  const p = priceOrder(body);
+  if (!openShiftIdFor(req.user && req.user.staffId)) {
+    const err = new Error('Open a shift before taking orders.');
+    err.code = 'NO_OPEN_SHIFT';
+    throw err;
+  }
+  const itemCount = p.items.reduce((n, i) => n + (Number(i.quantity) || 0), 0);
+
+  if (existingId) {
+    db.prepare(`
+      UPDATE held_orders
+         SET payload = ?, order_type = ?, table_number = ?, customer_name = ?,
+             total = ?, item_count = ?, updated_at = datetime('now', 'localtime')
+       WHERE id = ?
+    `).run(JSON.stringify(body), body.order_type || 'Dine-in', body.table_number || null,
+           trimmed(body.customer_name), p.computedTotal, itemCount, existingId);
+    return existingId;
+  }
+  return db.prepare(`
+    INSERT INTO held_orders
+      (payload, order_type, table_number, customer_name, total, item_count, staff_id, staff_name)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(JSON.stringify(body), body.order_type || 'Dine-in', body.table_number || null,
+         trimmed(body.customer_name), p.computedTotal, itemCount,
+         (req.user && req.user.staffId) || null, (req.user && req.user.name) || null)
+    .lastInsertRowid;
+}
+
+const getHeld = () => db.prepare('SELECT * FROM held_orders WHERE id = ?');
+
+// Send a ticket to the kitchen without taking payment.
+router.post('/hold', (req, res) => {
+  try {
+    const id = storeHeld(req.body, req);
+    res.status(201).json(describeHeld(getHeld().get(id)));
+  } catch (err) {
+    sendOrderError(res, err, 'holding order');
+  }
+});
+
+// Every open ticket, oldest first. Anyone at the till sees all of them: a
+// manager confirms tickets other people took.
+router.get('/held', (req, res) => {
+  try {
+    res.json(db.prepare('SELECT * FROM held_orders ORDER BY held_at ASC').all().map(describeHeld));
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+router.get('/held/:id', (req, res) => {
+  const row = getHeld().get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'That ticket is no longer held.' });
+  try {
+    res.json(describeHeld(row));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Change a ticket — add or remove items, change a size, correct the table.
+router.put('/held/:id', (req, res) => {
+  const row = getHeld().get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'That ticket is no longer held.' });
+  try {
+    storeHeld(req.body, req, row.id);
+    res.json(describeHeld(getHeld().get(row.id)));
+  } catch (err) {
+    sendOrderError(res, err, 'updating held order');
+  }
+});
+
+/**
+ * Confirm a ticket: it becomes a sale.
+ *
+ * Priced again now rather than trusting the figure stored at hold time, so a
+ * tax or discount rate changed in between is applied to what is actually paid.
+ * Committed through the same function as a direct sale, and the ticket is
+ * removed in the same transaction — a crash between the two would otherwise
+ * leave a paid ticket still on the board to be confirmed twice.
+ */
+router.post('/held/:id/confirm', (req, res) => {
+  const row = getHeld().get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'That ticket is no longer held.' });
+
+  try {
+    const body = JSON.parse(row.payload);
+    // Payment is decided at confirmation, not when the ticket was taken.
+    if (req.body && req.body.payment_method) body.payment_method = req.body.payment_method;
+
+    const p = priceOrder(body);
+    const branchId = resolveBranchId(req);
+
+    const confirm = db.transaction(() => {
+      const orderId = commitOrder(body, req, p, branchId);
+      db.prepare('DELETE FROM held_orders WHERE id = ?').run(row.id);
+      return orderId;
+    });
+    const orderId = confirm();
+
+    res.status(201).json(describeOrder(body, p, branchId, {
+      id: orderId,
+      order_no: formatOrderNo(branchCode(branchId), orderId),
+      ticket_no: ticketNo(row.id),
+    }));
+  } catch (err) {
+    sendOrderError(res, err, 'confirming held order');
+  }
+});
+
+// Cancel a ticket. Nothing was sold, so nothing to void — the row simply goes.
+router.delete('/held/:id', (req, res) => {
+  const info = db.prepare('DELETE FROM held_orders WHERE id = ?').run(req.params.id);
+  if (!info.changes) return res.status(404).json({ error: 'That ticket is no longer held.' });
+  res.json({ success: true });
 });
 
 // Get all orders (for Orders screen)

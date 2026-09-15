@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, RefreshCw, LayoutGrid, AlertTriangle, X } from 'lucide-react';
+import { Search, RefreshCw, LayoutGrid, AlertTriangle, X, ClipboardList } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { inventoryAPI } from '@/api/index';
 import SyncNowButton from './SyncNowButton';
@@ -11,12 +11,17 @@ interface TopBarProps {
   /** FIX (Bug 6): "Select Table" was a button that did nothing at all. */
   tableNumber?: string;
   onTableNumberChange?: (value: string) => void;
+  /** Tickets in the kitchen and not yet paid. Shown as a badge; opens the board. */
+  heldCount?: number;
+  onOpenHeld?: () => void;
 }
 
 export default function TopBar({
   search,
   onSearchChange,
   onNavigate,
+  heldCount = 0,
+  onOpenHeld,
   tableNumber = '',
   onTableNumberChange,
 }: TopBarProps) {
@@ -124,6 +129,37 @@ export default function TopBar({
 
       {/* Right */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        {/*
+          The board of tickets sent to the kitchen and not yet paid for. The
+          count is the number a manager glances at between customers, so it is
+          on the button rather than behind it.
+        */}
+        {onOpenHeld && (
+          <button
+            onClick={onOpenHeld}
+            title="Held orders"
+            style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              height: 38, padding: '0 14px', borderRadius: 10, cursor: 'pointer',
+              background: heldCount > 0 ? '#111111' : '#FFFFFF',
+              color: heldCount > 0 ? '#FFFFFF' : '#374151',
+              border: `1px solid ${heldCount > 0 ? '#111111' : '#EBEBEB'}`,
+              fontSize: 13, fontWeight: 600, fontFamily: 'inherit',
+            }}
+          >
+            <ClipboardList size={16} />
+            Held
+            {heldCount > 0 && (
+              <span style={{
+                minWidth: 22, height: 22, padding: '0 6px', borderRadius: 11,
+                background: '#DC2626', color: '#FFFFFF', fontSize: 12, fontWeight: 800,
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                {heldCount}
+              </span>
+            )}
+          </button>
+        )}
         {/* Both roles: when the connection returns it is whoever is on the till
             who wants to see the day's takings go up. */}
         <SyncNowButton />

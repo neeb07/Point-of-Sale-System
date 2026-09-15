@@ -309,8 +309,20 @@ const COPY_LABELS = {
   restaurant: 'RESTAURANT COPY',
 };
 
-const CopyBanner = ({ copyType }) => {
+/**
+ * Says whether this piece of paper is a bill.
+ *
+ * A ticket that has gone to the kitchen and not been paid for can still be
+ * printed — a customer asks what they owe, a table is split — and that print
+ * must not pass for a paid receipt. So the customer and restaurant copies of a
+ * held order carry PROVISIONAL across the top, the way a real shop's does; the
+ * kitchen copy is left alone, because the kitchen never sees money.
+ */
+const CopyBanner = ({ copyType, provisional }) => {
   if (!copyType || !COPY_LABELS[copyType]) return null;
+  const label = provisional && copyType !== 'kitchen'
+    ? `${COPY_LABELS[copyType]} — PROVISIONAL, NOT PAID`
+    : COPY_LABELS[copyType];
   return (
     <div
       style={{
@@ -328,7 +340,7 @@ const CopyBanner = ({ copyType }) => {
         fontFamily: 'Inter, sans-serif',
       }}
     >
-      {COPY_LABELS[copyType]}
+      {label}
     </div>
   );
 };
@@ -379,7 +391,7 @@ export default function Receipt({
         overflow: 'hidden',
       }}
     >
-      <CopyBanner copyType={copyType} />
+      <CopyBanner copyType={copyType} provisional={Boolean(orderInfo?.provisional)} />
       <ReceiptHeader restaurant={restaurant} />
       <ReceiptMeta orderInfo={orderInfo} />
       <ReceiptCustomer customer={customer} />
