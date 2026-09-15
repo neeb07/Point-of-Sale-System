@@ -1,0 +1,26 @@
+# What never belongs in the server image.
+#
+# backend/ and frontend/electron are the till — installed on shop PCs, not
+# deployed. The dev laptop's database, its backups and every .env are secrets
+# or data, and the build outputs are rebuilt inside the image anyway.
+**/node_modules
+**/dist
+**/release
+**/.env
+**/.env.*
+!**/.env.example
+**/*.db
+**/*.db-wal
+**/*.db-shm
+**/backups
+**/cloud-sync.json
+backend
+frontend/electron
+frontend/build
+frontend/public
+frontend/test
+cloud/test
+.git
+.claude
+*.md
+!cloud/README.md

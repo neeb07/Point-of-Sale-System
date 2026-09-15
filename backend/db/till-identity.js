@@ -21,7 +21,7 @@
  *
  *   {
  *     "enabled": true,
- *     "cloud_url": "https://blaze.virtiqo.com",
+ *     "cloud_url": "https://blaze.virtiqosolutions.com",
  *     "branch_id": 1,
  *     "branch_name": "E-18 Branch",
  *     "api_key": "<64 hex chars>"

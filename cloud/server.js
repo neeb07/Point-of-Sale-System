@@ -1,17 +1,20 @@
 /**
  * Blaze cloud API.
  *
- * Sits behind the admin dashboard at blaze.virtiqo.com. Two kinds of caller,
+ * Sits behind the admin dashboard at blaze.virtiqosolutions.com. Two kinds of caller,
  * with two entirely separate credentials:
  *
  *   - **Tills**, authenticated by a per-branch API key. They only ever push:
  *     live status now, sales later. They never read another branch's data.
  *   - **The owner**, authenticated by an httpOnly session cookie. Reads only.
  *
- * Deployment: Node listens on loopback and Virtualmin's Apache/nginx vhost
- * reverse-proxies blaze.virtiqo.com to it, terminating TLS. This process never
- * faces the internet directly, which is why it binds 127.0.0.1 by default —
- * the same reasoning as the till's backend.
+ * Deployment: a container on Railway, behind Railway's edge, which terminates
+ * TLS and forwards to this process. The Dockerfile at the repo root sets
+ * BLAZE_CLOUD_HOST=0.0.0.0 so the process listens on the container's
+ * interface; the default here stays loopback, because that is the right
+ * answer on any box with a reverse proxy in front — the same reasoning as the
+ * till's backend. `trust proxy` below is what lets the rate limiters see the
+ * caller's address rather than the edge's.
  */
 
 const express = require('express');

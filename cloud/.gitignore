@@ -16,3 +16,7 @@ data/
 
 # Never commit the database credential.
 .env
+
+# Written by scripts/handover.js before it deletes anything. Holds PIN and
+# password hashes, so it never goes in.
+scripts/handover-export-*.json

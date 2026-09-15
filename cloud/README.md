@@ -1,6 +1,6 @@
 # Blaze cloud
 
-The API behind the admin dashboard at `blaze.virtiqo.com`. It ingests each
+The API behind the admin dashboard at `blaze.virtiqosolutions.com`. It ingests each
 branch's live status and sales, and serves both-branch reporting.
 
 Two kinds of caller, with two entirely separate credentials:
@@ -49,64 +49,90 @@ Electron userData folder, beside `pos_database.db`.
 recovered — `provision.js rekey <id>` issues a new one and invalidates the old
 one immediately.
 
-## Deploying on the Virtualmin server
+## Deploying on Railway
 
-The Node process listens on loopback only; Apache/nginx terminates TLS and
-proxies to it. This process never faces the internet directly.
+The cloud runs as one container at `https://blaze.virtiqosolutions.com`,
+serving both the API and the dashboard. The `Dockerfile` at the repo root is
+the whole deployment; Railway detects it.
 
-1. **Create the sub-server.** Virtualmin → *Create Virtual Server* →
-   `blaze.virtiqo.com` as a sub-server of `virtiqo.com`. `virtiqo.com` itself is
-   untouched.
-2. **Deploy the code** somewhere outside the web root, e.g.
-   `/home/virtiqo/apps/blaze-cloud`, then `npm ci --omit=dev`.
-3. **Reverse proxy.** Virtualmin → *Web Configuration → Proxying* → proxy `/`
-   to `http://127.0.0.1:4000`.
-4. **systemd unit** so it survives reboots and crashes
-   (`/etc/systemd/system/blaze-cloud.service`):
+Prove the image on a laptop first — the failure that matters (an unresolved
+package in the dashboard build) shows up here in a minute rather than in a
+Railway log:
 
-   ```ini
-   [Unit]
-   Description=Blaze cloud API
-   After=network.target
+```powershell
+docker build -t blaze-cloud .
+docker run --rm -p 4000:4000 --env-file cloud/.env blaze-cloud
+# http://localhost:4000 — the dashboard renders, /api/health answers
+```
 
-   [Service]
-   Type=simple
-   User=virtiqo
-   WorkingDirectory=/home/virtiqo/apps/blaze-cloud
-   Environment=NODE_ENV=production
-   Environment=TZ=Asia/Karachi
-   Environment=PORT=4000
-   Environment=BLAZE_CLOUD_DATA=/home/virtiqo/apps/blaze-cloud-data
-   ExecStart=/usr/bin/node server.js
-   Restart=always
-   RestartSec=5
+Then, in Railway:
 
-   [Install]
-   WantedBy=multi-user.target
-   ```
+1. **New Project → Deploy from GitHub** → this repository, branch `main`.
+2. **Variables** on the service:
 
-   `systemctl enable --now blaze-cloud`
-5. **HTTPS.** Virtualmin → *Manage SSL Certificate → Let's Encrypt*. Free and
-   self-renewing. Non-negotiable: this is the shop's whole trading history
-   leaving the building.
+   | Variable | Value | Why |
+   |---|---|---|
+   | `DATABASE_URL` | the Supabase *session pooler* URI, port 5432, `%` in the password written as `%25` | the direct host is IPv6-only and hangs rather than failing |
+   | `NODE_ENV` | `production` | makes the session cookie `Secure`; without it sign-in will not stick over HTTPS |
+   | `TZ` | `Asia/Karachi` | reports group by local calendar day |
+   | `BLAZE_CLOUD_HOST` | `0.0.0.0` | already set in the Dockerfile; harmless to set again |
 
-### Two things to check on the server first
+   `PORT` is injected by Railway. Leave `BLAZE_DASHBOARD_DIST` unset.
 
-- **Free disk.** `node_modules` alone is ~150–300 MB, and the database grows for
-  years. A 1 GiB quota is not enough.
-- **The data directory must be on a local disk, not network storage.** SQLite's
-  file locking is unreliable over NFS. Normally a non-issue on a VPS; worth one
-  look before committing.
+3. **Settings → Networking → Custom Domain** → `blaze.virtiqosolutions.com`.
+   Railway shows a CNAME target; add it at the DNS host for
+   `virtiqosolutions.com`. TLS is issued once the record resolves.
+4. **Settings → Deploy → Healthcheck Path** → `/api/health`. Restart on failure.
+5. Open `https://blaze.virtiqosolutions.com/api/health` — `{"status":"ok"}` —
+   then the dashboard, then sign in.
 
-Two environment variables are load-bearing:
+### What the image contains, and why
 
-- **`NODE_ENV=production`** is what makes the session cookie `Secure`. Without
-  it, sessions travel unencrypted.
-- **`TZ=Asia/Karachi`** must match the shop. The tills write every timestamp in
-  their own local wall-clock time, and the reports group by calendar day, so a
-  server left on UTC would file the first five hours of every trading day under
-  the day before — silently, and only for the early morning, which is exactly
-  the kind of discrepancy nobody notices until the month does not add up.
+Only `cloud/` and the built `dashboard/dist`. The till (`backend/`, the
+Electron app) is installed on shop PCs and has no place on a server;
+`.dockerignore` keeps it out, along with every `.env`, database and backup.
+
+The dashboard is built in a first stage that installs `frontend`'s runtime
+packages. That is not an accident of layout: the dashboard compiles its screens
+out of `frontend/src`, whose imports resolve upward into `frontend/node_modules`,
+which a clean checkout does not have. All of those packages are runtime
+dependencies and everything heavy (Electron, electron-builder) is dev-only, so
+`npm ci --omit=dev` there is a few dozen megabytes. Nothing from that stage's
+`node_modules` reaches the final image, which is ~250 MB of which ~6 MB is the
+cloud's own dependencies.
+
+The process listens on loopback by default, which is right behind a reverse
+proxy on the same box. In a container the proxy is Railway's edge on another
+machine, so the Dockerfile sets `BLAZE_CLOUD_HOST=0.0.0.0`. `trust proxy` is
+already `1` in `server.js`, so the login and pairing rate limiters see the
+caller's address rather than the edge's.
+
+### Handing over to the client
+
+Everything so far was built against a database full of test data. Before the
+client signs in for the first time:
+
+```powershell
+cd cloud
+node scripts/handover.js                                   # shows counts, does nothing
+node scripts/handover.js --confirm "blaze.virtiqosolutions.com"
+node scripts/provision.js owner <client-email> "<password>" "<name>"
+```
+
+The script deletes the trading history, every staff account, every dashboard
+login, the payroll, the uploaded backups and the pairing codes; keeps the menu,
+deals, shop settings, the two branches and the ingredients mirror; rekeys both
+branches so the laptops this was built on stop reporting as the client's
+shops; and writes a full export of what it deleted beside itself before it
+starts. It refuses without the exact `--confirm` phrase.
+
+Then the client changes the password you gave them (Settings → *Your
+password*) and pairs each till (Backups → *Set up a replacement machine* → a
+code, typed into the till's Settings → Branch & Cloud).
+
+**Inventory does not come down.** Stock and recipes are per-till and are pushed
+up only; the mirror kept in Supabase never reaches a fresh till. Each shop PC
+starts with an empty stock list and has to have ingredients entered on it.
 
 ## Supabase, and what it costs
 

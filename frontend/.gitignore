@@ -29,3 +29,9 @@ dist-ssr
 
 .env
 .vite
+
+# Tracked, like cloud/ and dashboard/: the server image installs this
+# package's runtime dependencies with `npm ci`, which refuses to run without a
+# lockfile, and a build that resolves versions afresh each time is not
+# reproducible. The root .gitignore drops lockfiles by default.
+!package-lock.json

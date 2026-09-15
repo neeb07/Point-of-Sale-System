@@ -66,7 +66,7 @@ function printKey(id, name, key) {
   console.log('  File: <userData>\\cloud-sync.json   (beside pos_database.db)\n');
   console.log(JSON.stringify({
     enabled: true,
-    cloud_url: 'https://blaze.virtiqo.com',
+    cloud_url: 'https://blaze.virtiqosolutions.com',
     branch_id: id,
     branch_name: name,
     api_key: key,

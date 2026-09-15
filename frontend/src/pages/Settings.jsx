@@ -877,7 +877,7 @@ export default function Settings() {
               <label style={{ fontSize: 13, fontWeight: 600, color: '#374151' }}>Cloud address</label>
               <input
                 style={{ ...INPUT_STYLE, width: '100%', marginTop: 6 }}
-                placeholder="https://blaze.virtiqo.com"
+                placeholder="https://blaze.virtiqosolutions.com"
                 value={pairForm.cloud_url || pairing?.cloud_url || ''}
                 onChange={(e) => setPairForm({ ...pairForm, cloud_url: e.target.value })}
               />

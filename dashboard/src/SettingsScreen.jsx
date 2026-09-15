@@ -1,4 +1,5 @@
 import ResetSection from './ResetSection';
+import PasswordSection from './PasswordSection';
 import React, { useEffect, useState } from 'react';
 
 /**
@@ -180,6 +181,8 @@ export default function SettingsScreen() {
           ))}
         </div>
       </section>
+
+      <PasswordSection />
 
       {/* Last, and set apart: the only destructive thing on this page. */}
       <ResetSection />

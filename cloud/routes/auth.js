@@ -10,7 +10,7 @@ const bcrypt = require('bcryptjs');
 const router = express.Router();
 
 const db = require('../db/pg');
-const { createSession, destroySession, requireUser } = require('../middleware/session');
+const { COOKIE, createSession, destroySession, requireUser } = require('../middleware/session');
 
 /*
  * Rate limiting.
@@ -104,5 +104,57 @@ router.post('/logout', async (req, res) => {
 
 /** Who am I — lets the dashboard restore a session on page load. */
 router.get('/me', requireUser, (req, res) => res.json(req.user));
+
+/**
+ * Change your own password.
+ *
+ * Exists because the alternative is the client using, forever, a password we
+ * chose for them at handover and typed into a terminal. The current password
+ * is required again rather than trusting the cookie: a session proves somebody
+ * signed in at some point, not that the person at the keyboard now is the one
+ * who may lock everybody else out.
+ *
+ * Every other session for this account is ended. That is what a password
+ * change is for — if it is being changed because somebody else may have it,
+ * their open tab has to stop working too. The session making the change stays.
+ */
+router.put('/password', requireUser, async (req, res) => {
+  const current = String((req.body && req.body.current_password) || '');
+  const next = String((req.body && req.body.new_password) || '');
+  const key = `pw|${req.user.id}`;
+
+  if (isLockedOut(key)) {
+    return res.status(429).json({ error: 'Too many attempts. Try again in a few minutes.', code: 'RATE_LIMITED' });
+  }
+  if (next.length < 10) {
+    return res.status(400).json({ error: 'Use at least ten characters.' });
+  }
+  if (next === current) {
+    return res.status(400).json({ error: 'That is the password you already have.' });
+  }
+
+  try {
+    const user = await db.one('SELECT password_hash FROM users WHERE id = $1 AND active = 1', [req.user.id]);
+    const hash = (user && user.password_hash) || '$2a$10$invalidinvalidinvalidinvalidinvalidinvalidinvalidinvalidinv';
+    if (!(await bcrypt.compare(current, hash))) {
+      recordFailure(key);
+      return res.status(403).json({ error: 'That is not your current password.', code: 'BAD_PASSWORD' });
+    }
+    attempts.delete(key);
+
+    const newHash = await bcrypt.hash(next, 10);
+    const mine = req.cookies && req.cookies[COOKIE];
+    await db.tx(async (client) => {
+      await client.query('UPDATE users SET password_hash = $1 WHERE id = $2', [newHash, req.user.id]);
+      // Everyone else signed in as this account is signed out.
+      await client.query('DELETE FROM sessions WHERE user_id = $1 AND token <> $2', [req.user.id, mine || '']);
+    });
+
+    res.json({ success: true, note: 'Your password is changed. Any other browser signed in as you has been signed out.' });
+  } catch (err) {
+    console.error('Password change failed:', err.message);
+    res.status(500).json({ error: 'Could not change the password' });
+  }
+});
 
 module.exports = router;

@@ -182,3 +182,6 @@ router.post('/reset', requireUser, async (req, res) => {
 });
 
 module.exports = router;
+// The lists, for scripts/handover.js — one definition of what trading data is.
+module.exports.CLEARED = CLEARED;
+module.exports.KEPT = KEPT;
