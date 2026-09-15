@@ -4,6 +4,7 @@ import { X, Printer } from 'lucide-react';
 import Receipt, { COPY_TYPES } from './Receipt';
 import { useSettings } from '@/lib/SettingsContext';
 import { rollFor, pageHeightMm, buildPageCss } from '@/lib/print-page';
+import { receiptJob, COLUMNS } from '@/lib/receipt-escpos';
 
 const COPY_TABS = [
   { value: 'all', label: 'All 3' },
@@ -30,7 +31,12 @@ export default function ReceiptModal({ open, onClose, orderData, autoPrintEnable
   // Default to everything allowed. If only one copy is allowed the selector
   // never appears and that one is simply what prints.
   const [selection, setSelection] = useState('all');
-  const { autoPrint, paperSize, printerName } = useSettings();
+  const copiesToPrint = selection === 'all'
+    ? allowed
+    : allowed.includes(selection) ? [selection] : allowed;
+
+  const settings = useSettings();
+  const { autoPrint, paperSize, printerName, printMode } = settings;
 
   /**
    * Size the printed page to the receipt before handing off to the printer.
@@ -101,6 +107,46 @@ export default function ReceiptModal({ open, onClose, orderData, autoPrintEnable
       tag.textContent = css;
     } catch {
       // Fall back to the static rule in index.css rather than blocking a sale.
+    }
+  };
+
+  /**
+   * Print as ESC/POS, with no page at all.
+   *
+   * The page-printing path below asks Windows for a page of an exact size and
+   * trusts the driver to honour it. Some thermal drivers do not: the
+   * BlackCopper BC-87AC substitutes a fixed paper form, and every receipt came
+   * out wrapped in a form's worth of blank paper — worse across three copies,
+   * which are three separate jobs and three chances to hit the fallback.
+   *
+   * A receipt printer's native language has no page. It prints the lines it is
+   * sent, feeds the paper the height of those lines, and cuts where it is told
+   * to. So the receipt is described as text ops and sent straight through the
+   * spooler as bytes; the driver delivers them and renders nothing. One job
+   * for all copies, a cut between each.
+   *
+   * Used when the print mode is direct (the default) and a printer has been
+   * chosen. Returns false to let the caller fall through to page printing.
+   */
+  const printAsEscPos = async (copies) => {
+    const api = typeof window !== 'undefined' ? window.blazePOS : null;
+    if (!api?.printRaw || !printerName || printMode !== 'escpos') return false;
+    try {
+      const ops = receiptJob(orderData, copies, settings);
+      const result = await api.printRaw({
+        deviceName: printerName,
+        ops,
+        columns: COLUMNS[paperSize] || COLUMNS['80mm'],
+        jobName: `Blaze ${orderData?.orderInfo?.orderNumber || 'receipt'}`,
+      });
+      if (!result?.ok) {
+        console.warn('Direct print failed, falling back to page printing:', result?.error);
+        return false;
+      }
+      return true;
+    } catch (err) {
+      console.warn('Direct print threw, falling back to page printing:', err);
+      return false;
     }
   };
 
@@ -207,6 +253,7 @@ export default function ReceiptModal({ open, onClose, orderData, autoPrintEnable
 
     // Let the receipts paint before measuring and handing off to the printer.
     const t = setTimeout(async () => {
+      if (await printAsEscPos(copiesToPrint)) return;
       if (await printEachCopyExactly()) return;
       sizePageToReceipt();
       window.print();
@@ -216,11 +263,9 @@ export default function ReceiptModal({ open, onClose, orderData, autoPrintEnable
 
   if (!open || !orderData) return null;
 
-  const copiesToPrint = selection === 'all'
-    ? allowed
-    : allowed.includes(selection) ? [selection] : allowed;
 
   const handlePrint = async () => {
+    if (await printAsEscPos(copiesToPrint)) return;
     if (await printEachCopyExactly()) return;
     sizePageToReceipt();
     window.print();

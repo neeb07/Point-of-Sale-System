@@ -378,6 +378,30 @@ if (!gotTheLock) {
     }
   });
 
+  /*
+   * Direct printing: ESC/POS bytes, straight to the printer.
+   *
+   * The renderer describes the receipt as a list of text ops (see
+   * src/lib/receipt-escpos.js); this encodes them and hands the bytes to the
+   * Windows spooler as a RAW job. No page, no driver rendering, no paper form
+   * for a driver to substitute — which is what the page-printing path above
+   * could not guarantee on a thermal printer whose driver ignores custom
+   * sizes. The whole receipt, every copy, one job, cut between copies.
+   */
+  ipcMain.handle('blaze:print-raw', async (_event, options = {}) => {
+    const ops = Array.isArray(options.ops) ? options.ops : [];
+    const columns = Number(options.columns) || 48;
+    if (!ops.length) return { ok: false, error: 'Nothing to print' };
+    try {
+      const { encode } = require('./escpos');
+      const { sendRaw } = require('./rawprint');
+      const bytes = encode(ops, { columns });
+      return await sendRaw(options.deviceName, bytes, { jobName: options.jobName || 'Blaze receipt' });
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
   ipcMain.handle('blaze:print-copy', async (event, options = {}) => {
     const widthMicron = Math.round(Number(options.widthMicron) || 0);
     const heightMicron = Math.round(Number(options.heightMicron) || 0);

@@ -109,6 +109,8 @@ const MANAGER_EDITABLE = new Set([
   // Which printer this machine sends receipts to. As local as paper size —
   // it names a device attached to this till and nothing beyond it.
   'printer_name',
+  // How this till talks to that printer: page printing or direct ESC/POS.
+  'print_mode',
   'auto_print',
   'show_tax',
   'show_cashier',

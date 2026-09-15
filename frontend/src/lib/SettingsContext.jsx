@@ -124,6 +124,11 @@ function buildValue(raw, loading, refresh) {
     // printing silently to whatever Windows calls the default is usually a PDF
     // writer on an office machine.
     printerName: raw.printer_name || '',
+    // 'escpos' sends the receipt as printer commands straight to the printer;
+    // 'page' lays it out as a page for the Windows driver. Direct is the
+    // default because it is what a thermal receipt printer is built for, and
+    // page printing is what put blank paper around every receipt on the BC-87AC.
+    printMode: raw.print_mode === 'page' ? 'page' : 'escpos',
   };
 }
 

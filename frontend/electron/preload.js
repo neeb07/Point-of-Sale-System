@@ -40,6 +40,7 @@ function subscribe(channel, handler) {
 const INVOKE = {
   listPrinters: 'blaze:list-printers',
   printCopy: 'blaze:print-copy',
+  printRaw: 'blaze:print-raw',
 };
 
 contextBridge.exposeInMainWorld('blazePOS', {
@@ -69,4 +70,13 @@ contextBridge.exposeInMainWorld('blazePOS', {
    * receipt ends.
    */
   printCopy: (options) => ipcRenderer.invoke(INVOKE.printCopy, options),
+
+  /**
+   * Print a receipt as ESC/POS, bypassing Windows page printing entirely.
+   *
+   * For thermal printers whose driver will not honour a custom page size and
+   * feeds a fixed form's worth of blank paper instead. The receipt is sent as
+   * text and cut commands; the printer feeds exactly what it prints.
+   */
+  printRaw: (options) => ipcRenderer.invoke(INVOKE.printRaw, options),
 });

@@ -129,7 +129,7 @@ export default function Settings() {
   const [taxOriginal, setTaxOriginal] = useState(null);
 
   const [receiptSettings, setReceiptSettings] = useState({
-    autoPrint: true, showTax: true, showCashier: true, showOrderNumber: true, showPayment: true, paperSize: '80mm', printerName: '',
+    autoPrint: true, showTax: true, showCashier: true, showOrderNumber: true, showPayment: true, paperSize: '80mm', printerName: '', printMode: 'escpos',
   });
 
   const [printerType, setPrinterType] = useState('USB');
@@ -211,6 +211,7 @@ export default function Settings() {
         showPayment: data.show_payment !== 'false',
         paperSize: data.paper_size || '80mm',
         printerName: data.printer_name || '',
+        printMode: data.print_mode === 'page' ? 'page' : 'escpos',
       });
       if (data.last_backup) setLastBackup(data.last_backup);
     }).catch(() => {});
@@ -290,6 +291,7 @@ export default function Settings() {
         show_payment: String(next.showPayment),
         paper_size: next.paperSize,
         printer_name: next.printerName,
+        print_mode: next.printMode,
       });
       refreshSettings();
     } catch (err) {
@@ -634,6 +636,36 @@ export default function Settings() {
               ? 'Receipts print straight to this printer, each cut to its own length, with no dialog.'
               : 'Choose your thermal printer to print without a dialog and stop the roll at the end of each receipt.'}
           </div>
+
+          {/*
+            How the receipt reaches that printer.
+
+            Direct sends printer commands — text, feed, cut — and the printer
+            feeds exactly what it prints. Page printing hands the driver a page
+            of an exact size and trusts it to honour that; the BC-87AC's driver
+            does not, and wrapped every receipt in a form's worth of blank
+            paper. Direct is the default because it is what a receipt printer
+            is built for; page printing stays for the rare printer that is not
+            ESC/POS, such as printing to PDF while testing.
+          */}
+          {receiptSettings.printerName && (
+            <div style={{ marginTop: 14 }}>
+              <FieldLabel label="Print Method" />
+              <SegmentedButton
+                options={[
+                  { value: 'escpos', label: 'Direct (thermal)' },
+                  { value: 'page', label: 'Windows page printing' },
+                ]}
+                value={receiptSettings.printMode || 'escpos'}
+                onChange={(v) => updateReceiptSetting({ printMode: v })}
+              />
+              <div style={{ fontSize: 12, color: '#6B7280', marginTop: 6 }}>
+                {(receiptSettings.printMode || 'escpos') === 'escpos'
+                  ? 'Sends printer commands straight to the printer. The roll feeds exactly the length of the receipt and cuts after each copy. Use this for any 58mm or 80mm receipt printer.'
+                  : 'Lays the receipt out as a page for the printer driver. Only for a printer that is not a receipt printer, or for printing to PDF.'}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
