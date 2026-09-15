@@ -19,6 +19,8 @@ const { contextBridge, ipcRenderer } = require('electron');
 const CHANNELS = {
   /** Somebody tried to close the app while a drawer was still open. */
   closeBlocked: 'blaze:close-blocked',
+  /** A newer version is available or downloaded. */
+  updateReady: 'blaze:update-ready',
 };
 
 function subscribe(channel, handler) {
@@ -41,6 +43,8 @@ const INVOKE = {
   listPrinters: 'blaze:list-printers',
   printCopy: 'blaze:print-copy',
   printRaw: 'blaze:print-raw',
+  installUpdate: 'blaze:install-update',
+  updateStatus: 'blaze:update-status',
 };
 
 contextBridge.exposeInMainWorld('blazePOS', {
@@ -79,4 +83,10 @@ contextBridge.exposeInMainWorld('blazePOS', {
    * text and cut commands; the printer feeds exactly what it prints.
    */
   printRaw: (options) => ipcRenderer.invoke(INVOKE.printRaw, options),
+
+  /** Told when a newer version is available, and again when it has downloaded. */
+  onUpdateReady: (handler) => subscribe(CHANNELS.updateReady, handler),
+  /** Install the downloaded update now. Refused, with the usual dialog, while a drawer is open. */
+  installUpdate: () => ipcRenderer.invoke(INVOKE.installUpdate),
+  updateStatus: () => ipcRenderer.invoke(INVOKE.updateStatus),
 });

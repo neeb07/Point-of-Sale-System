@@ -234,6 +234,19 @@ if (!gotTheLock) {
     }
 
     createWindow();
+
+    /*
+     * Updates, fetched from GitHub Releases in the background and applied
+     * when the app closes. The screen is told when one is waiting; it never
+     * restarts the till by itself. See electron/updater.js.
+     */
+    require('./updater').start({
+      log,
+      notify: (payload) => {
+        const win = BrowserWindow.getAllWindows()[0];
+        if (win && !win.isDestroyed()) win.webContents.send('blaze:update-ready', payload);
+      },
+    });
   });
 
   /*
@@ -364,6 +377,26 @@ if (!gotTheLock) {
    * ends. One job per copy, because each of the three is a different length —
    * and a job boundary is also where a cutter fires.
    */
+  /*
+   * Install a downloaded update now, at the person's request.
+   *
+   * Runs the same check as closing the app: an open drawer refuses it and
+   * shows the same dialog, because installing is closing. Otherwise the
+   * installer runs and relaunches the POS.
+   */
+  ipcMain.handle('blaze:install-update', async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!(await mayQuit(win))) return { ok: false, refused: true };
+    const updater = require('./updater');
+    if (!updater.status().downloaded) return { ok: false, error: 'No update is downloaded yet' };
+    quitConfirmed = true;
+    stopBackend();
+    updater.installNow();
+    return { ok: true };
+  });
+
+  ipcMain.handle('blaze:update-status', () => require('./updater').status());
+
   ipcMain.handle('blaze:list-printers', async (event) => {
     try {
       const printers = await event.sender.getPrintersAsync();

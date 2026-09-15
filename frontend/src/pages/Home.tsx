@@ -10,6 +10,7 @@ import Deals from '@/pages/Deals';
 import InventoryScreen from '@/pages/InventoryScreen';
 import ShiftsScreen from '@/pages/ShiftsScreen';
 import CloseBlockedDialog from '@/components/pos/CloseBlockedDialog';
+import UpdateNotice from '@/components/pos/UpdateNotice';
 import ExpensesScreen from '@/pages/ExpensesScreen';
 import LoginScreen from '@/pages/LoginScreen';
 import AccessDenied from '@/components/AccessDenied';
@@ -122,6 +123,9 @@ export default function Home() {
           Shifts. Renders nothing until the main process refuses a close.
         */}
         <CloseBlockedDialog onGoToShifts={() => setActivePage('shifts')} />
+        {/* Same reasoning: an update that finished downloading is announced
+            whichever screen is open. Nothing until there is one. */}
+        <UpdateNotice />
       </div>
     </POSProvider>
   );
