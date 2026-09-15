@@ -231,6 +231,15 @@ export default function MenuManagement() {
           }}
         />
       )}
+      {/*
+        Mounted here, in the component that owns the hook. It briefly sat at
+        the bottom of ItemModal below — a separate component with no
+        `confirmDialog` in scope — so opening the modal threw a ReferenceError
+        and React unmounted the whole screen. A build cannot catch an undefined
+        identifier in JSX; only rendering does, which is why it surfaced as a
+        blank page the first time somebody pressed Add.
+      */}
+      {confirmDialog}
     </div>
   );
 }
@@ -599,7 +608,6 @@ function ItemModal({ item, categories = MENU_CATEGORIES, onClose, onSave }) {
           </button>
         </div>
       </div>
-      {confirmDialog}
     </div>
   );
 }
