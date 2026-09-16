@@ -183,6 +183,43 @@ export default function Settings() {
   const [restoring, setRestoring] = useState(false);
   const [resetModal, setResetModal] = useState(false);
   const [resetConfirm, setResetConfirm] = useState('');
+  const [resetPin, setResetPin] = useState('');
+  const [resetBusy, setResetBusy] = useState(false);
+
+  /**
+   * Wipe the till's trading history, keeping its set-up.
+   *
+   * The server takes a copy first and refuses while a shift is open or while
+   * sales are still unsent; the latter comes back here as a question, since
+   * "the cloud never got these" is a fact the owner may already know.
+   */
+  const handleReset = async (force = false) => {
+    setResetBusy(true);
+    try {
+      const r = await settingsAPI.reset(resetPin, force);
+      setResetModal(false);
+      setResetConfirm('');
+      setResetPin('');
+      const n = Object.values(r.deleted || {}).reduce((a, b) => a + b, 0);
+      setToast({ message: `Cleared ${n} record${n === 1 ? '' : 's'}. Copy saved as ${r.safety_copy}.`, type: 'success' });
+      refreshSettings();
+    } catch (err) {
+      if (err.code === 'UNSYNCED') {
+        const anyway = await confirm({
+          title: 'Some records never reached the dashboard',
+          message: err.message + ' If you delete now they are gone from the reports for good.',
+          note: 'Pair the till or get it back online and try again to keep them.',
+          confirmLabel: 'Delete anyway',
+          tone: 'danger',
+        });
+        if (anyway) { await handleReset(true); return; }
+      } else {
+        setToast({ message: err.message || 'Could not reset', type: 'error' });
+      }
+    } finally {
+      setResetBusy(false);
+    }
+  };
   const restoreInputRef = useRef(null);
 
   useEffect(() => {
@@ -1040,7 +1077,9 @@ export default function Settings() {
       }}>
         <div style={{ fontSize: 14, fontWeight: 700, color: '#DC2626' }}>Danger Zone</div>
         <div style={{ fontSize: 13, color: '#6B7280', marginTop: 4 }}>
-          Permanently delete all orders, menu items, and settings. This cannot be undone.
+          Delete every order, held ticket, shift, expense and customer from this
+          till — for a clean start after testing. The menu, deals, inventory,
+          recipes, staff, settings and pairing all stay.
         </div>
         <button
           onClick={() => setResetModal(true)}
@@ -1049,7 +1088,7 @@ export default function Settings() {
             height: 40, borderRadius: 8, fontWeight: 600, fontSize: 14, padding: '0 20px', cursor: 'pointer',
           }}
         >
-          Reset All Data
+          Clear Trading Data
         </button>
       </div>
       )}
@@ -1376,27 +1415,42 @@ export default function Settings() {
         </div>
       </Modal>
 
-      <Modal isOpen={resetModal} onClose={() => { setResetModal(false); setResetConfirm(''); }} title="Reset All Data">
-        <p style={{ fontSize: 14, color: '#6B7280', marginBottom: 16 }}>
-          This will permanently delete all orders, menu items, and settings. Type CONFIRM to proceed.
+      <Modal isOpen={resetModal} onClose={() => { setResetModal(false); setResetConfirm(''); setResetPin(''); }} title="Clear Trading Data">
+        <div style={{ display: 'flex', gap: 16, marginBottom: 16, fontSize: 13 }}>
+          <div style={{ flex: 1, background: '#FFF5F5', border: '1px solid #FEE2E2', borderRadius: 8, padding: 12 }}>
+            <div style={{ fontWeight: 700, color: '#DC2626', marginBottom: 6 }}>Deleted</div>
+            <div style={{ color: '#4B5563', lineHeight: 1.6 }}>Orders and receipts<br />Held tickets<br />Shifts<br />Expenses<br />Customers</div>
+          </div>
+          <div style={{ flex: 1, background: '#F0FDF4', border: '1px solid #DCFCE7', borderRadius: 8, padding: 12 }}>
+            <div style={{ fontWeight: 700, color: '#16A34A', marginBottom: 6 }}>Kept</div>
+            <div style={{ color: '#4B5563', lineHeight: 1.6 }}>Menu, variants and deals<br />Inventory and recipes<br />Staff and PINs<br />Settings<br />Branch pairing</div>
+          </div>
+        </div>
+        <p style={{ fontSize: 13, color: '#6B7280', marginBottom: 16, lineHeight: 1.5 }}>
+          A copy of the database is saved first, and anything not yet sent to the
+          dashboard is sent before deleting. Order numbers carry on from where
+          they are. The shift must be closed.
         </p>
-        <input style={INPUT_STYLE} value={resetConfirm} onChange={(e) => setResetConfirm(e.target.value)} placeholder="Type CONFIRM" />
+        <FieldLabel label="Your PIN" />
+        <input style={INPUT_STYLE} type="password" inputMode="numeric" value={resetPin}
+          onChange={(e) => setResetPin(e.target.value)} placeholder="Owner PIN" autoComplete="off" />
+        <div style={{ height: 12 }} />
+        <FieldLabel label="Type DELETE to confirm" />
+        <input style={INPUT_STYLE} value={resetConfirm} onChange={(e) => setResetConfirm(e.target.value)} placeholder="DELETE" />
+        {(() => { const ready = resetConfirm === 'DELETE' && resetPin.length >= 4 && !resetBusy; return (
         <button
-          disabled={resetConfirm !== 'CONFIRM'}
-          onClick={() => {
-            setResetModal(false);
-            setResetConfirm('');
-            setToast({ message: 'All data has been reset', type: 'warning' });
-          }}
+          disabled={!ready}
+          onClick={() => handleReset(false)}
           style={{
-            marginTop: 16, background: resetConfirm === 'CONFIRM' ? '#EF4444' : '#E5E7EB',
-            color: resetConfirm === 'CONFIRM' ? '#FFFFFF' : '#9CA3AF',
+            marginTop: 16, background: ready ? '#EF4444' : '#E5E7EB',
+            color: ready ? '#FFFFFF' : '#9CA3AF',
             height: 40, borderRadius: 8, fontWeight: 600, fontSize: 14, padding: '0 20px',
-            border: 'none', cursor: resetConfirm === 'CONFIRM' ? 'pointer' : 'not-allowed',
+            border: 'none', cursor: ready ? 'pointer' : 'not-allowed',
           }}
         >
-          Reset All Data
+          {resetBusy ? 'Clearing…' : 'Clear Trading Data'}
         </button>
+        ); })()}
       </Modal>
 
       {confirmDialog}

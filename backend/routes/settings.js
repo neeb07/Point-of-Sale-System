@@ -117,6 +117,109 @@ router.post('/restore', (req, res) => {
   }
 });
 
+/**
+ * Start the till's trading history again.
+ *
+ * Everything that is a record of business done goes: orders and their lines,
+ * tickets on hold, shifts, expenses, the customer book. Everything that is
+ * the shop's set-up stays: menu, variants and deals, ingredients and recipes,
+ * staff and their PINs, settings, and which branch this till is paired as.
+ * The point is a clean first day after testing, not a reinstall.
+ *
+ * Three protections, in order:
+ *
+ *  1. The owner's own PIN, typed again. The session proves somebody signed in
+ *     as the owner; the PIN proves the owner is the one at the keyboard now.
+ *  2. Nothing unsent is destroyed silently. Sales are pushed to the cloud
+ *     first; if some cannot be (unpaired, offline), the request is refused
+ *     with the count, and only an explicit `force` goes ahead regardless.
+ *  3. A verified copy of the database is written to backups/ before the
+ *     first row is deleted, under its own name so the daily backup never
+ *     overwrites it.
+ *
+ * Order numbers do not restart. They come from the row id, the cloud already
+ * holds the orders that carried the old ones, and a second E-18-005 would
+ * overwrite the first on the dashboard. A fresh install starts at 001; a
+ * reset continues.
+ */
+const CLEARED = ['order_items', 'orders', 'held_orders', 'shifts', 'expenses', 'customers'];
+const KEPT = ['menu_items', 'item_variants', 'deals', 'deal_items', 'ingredients', 'recipes',
+              'recipe_ingredients', 'staff', 'settings', 'branches'];
+
+router.post('/reset', async (req, res) => {
+  const bcrypt = require('bcryptjs');
+  const { pin, force } = req.body || {};
+
+  if (!req.user || !req.user.staffId) {
+    return res.status(401).json({ error: 'Sign in to continue', code: 'UNAUTHENTICATED' });
+  }
+  if (!pin) return res.status(400).json({ error: 'Enter your PIN to confirm', code: 'PIN_REQUIRED' });
+  const me = db.prepare('SELECT pin FROM staff WHERE id = ?').get(req.user.staffId);
+  const pinOk = me && /^\$2[aby]\$/.test(me.pin || '') && await bcrypt.compare(String(pin), me.pin);
+  if (!pinOk) return res.status(403).json({ error: 'That is not your PIN', code: 'WRONG_PIN' });
+
+  const open = db.prepare("SELECT COUNT(*) AS n FROM shifts WHERE status = 'open'").get().n;
+  if (open > 0) {
+    return res.status(409).json({
+      error: 'Close the open shift first — the drawer has to be counted before its records go.',
+      code: 'SHIFT_OPEN',
+    });
+  }
+
+  // Send what has not gone yet, and refuse to destroy what still has not.
+  let pending = { orders: 0, shifts: 0, expenses: 0 };
+  try {
+    const push = require('../sync/push');
+    await push.syncAll();
+    pending = db.prepare(`SELECT
+      (SELECT COUNT(*) FROM orders   WHERE sync_state = 'pending') AS orders,
+      (SELECT COUNT(*) FROM shifts   WHERE sync_state = 'pending') AS shifts,
+      (SELECT COUNT(*) FROM expenses WHERE sync_state = 'pending') AS expenses`).get();
+  } catch (e) { /* push failing is exactly the case the count below catches */ }
+  const unsent = pending.orders + pending.shifts + pending.expenses;
+  if (unsent > 0 && !force) {
+    return res.status(409).json({
+      error: `${unsent} record${unsent === 1 ? ' has' : 's have'} not reached the dashboard yet.`,
+      code: 'UNSYNCED',
+      pending,
+    });
+  }
+
+  // A copy first, verified, under a name the daily backup will never reuse.
+  const safetyDir = path.join(userDataDir, 'backups');
+  if (!fs.existsSync(safetyDir)) fs.mkdirSync(safetyDir, { recursive: true });
+  const safetyPath = path.join(safetyDir, `pre_reset_${Date.now()}.db`);
+  try {
+    db.prepare(`VACUUM INTO '${safetyPath.replace(/'/g, "''")}'`).run();
+    const { verify } = require('../db/backup');
+    const checked = verify(safetyPath);
+    if (!checked.ok) throw new Error(checked.error);
+  } catch (err) {
+    try { if (fs.existsSync(safetyPath)) fs.unlinkSync(safetyPath); } catch (e) { /* nothing */ }
+    return res.status(500).json({ error: 'Could not save a copy first, so nothing was deleted: ' + err.message });
+  }
+
+  const counts = {};
+  const wipe = db.transaction(() => {
+    for (const table of CLEARED) {
+      counts[table] = db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n;
+      db.prepare(`DELETE FROM ${table}`).run();
+    }
+    // Tickets on hold and the customer book may start from 1 again; orders,
+    // shifts and expenses keep counting for the reason given above.
+    db.prepare("DELETE FROM sqlite_sequence WHERE name IN ('held_orders', 'customers')").run();
+  });
+  wipe();
+
+  res.json({
+    success: true,
+    deleted: counts,
+    kept: KEPT,
+    safety_copy: path.basename(safetyPath),
+    unsent_discarded: force ? unsent : 0,
+  });
+});
+
 // NOTE: the old GET /settings/backup route was removed. It pointed at
 // `__dirname/../pos_database.db` and ignored POS_USER_DATA_PATH, so in a
 // packaged build it downloaded the wrong file (or 404'd). The working route

@@ -166,6 +166,15 @@ export const reportsAPI = {
 export const settingsAPI = {
   getAll: () => request<Settings>('GET', '/settings'),
   update: (data: Settings) => request<Settings>('PUT', '/settings', data),
+  /**
+   * Delete the trading history (orders, held tickets, shifts, expenses,
+   * customers) and keep the set-up (menu, inventory, staff, settings). The
+   * owner's PIN confirms it; `force` discards records not yet sent to the
+   * dashboard, which the server otherwise refuses with code UNSYNCED.
+   */
+  reset: (pin: string, force = false) =>
+    request<{ success: boolean; deleted: Record<string, number>; safety_copy: string; unsent_discarded: number }>(
+      'POST', '/settings/reset', { pin, force }),
   /** Upload a .db file to replace the live database. */
   restore: async (file: File) => {
     const buffer = await file.arrayBuffer();
