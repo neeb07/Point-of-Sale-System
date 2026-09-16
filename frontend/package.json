@@ -11,7 +11,7 @@
     "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
     "electron:build": "npm run prepare-backend && vite build && electron-builder build --win --publish never",
     "prepare-backend": "cd ../backend && npm install --ignore-scripts && cd ../frontend && npx electron-rebuild -f -w better-sqlite3 --module-dir ../backend",
-    "release": "npm run prepare-backend && vite build && electron-builder build --win --publish always"
+    "release": "node scripts/tag-release.js && npm run prepare-backend && vite build && electron-builder build --win --publish always"
   },
   "dependencies": {
     "@hello-pangea/dnd": "^17.0.0",
