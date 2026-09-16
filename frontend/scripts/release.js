@@ -2,7 +2,7 @@
  * Build, tag and publish a release with one command:  npm run release
  *
  * `npm run release:publish-only` skips the build and publishes what is
- * already in release/win-unpacked — for when a build finished but the upload
+ * already in release/win-unpacked â€” for when a build finished but the upload
  * did not (a dropped connection, a missing token).
  *
  * The GitHub token is read from, in order:
@@ -52,7 +52,7 @@ const run = (cmd, args) => {
 
 const publishOnly = process.argv.includes('--publish-only');
 
-run('node', [path.join(__dirname, 'tag-release.js')]);
+run('node', [path.join(__dirname, 'tag-release.js'), ...(publishOnly ? ['--any-commit'] : [])]);
 if (!publishOnly) {
   run('npm', ['run', 'prepare-backend']);
   run('npx', ['vite', 'build']);
