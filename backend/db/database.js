@@ -545,8 +545,11 @@ const upsertSetting = db.prepare(
 );
 [
   ['restaurant_name', 'Blaze Pizza House'],
-  ['restaurant_address', 'Paris Mall, Ground Floor, Lehtrar, Road Near Burma Bridge Islamabad'],
-  ['restaurant_phone', '0313-9999774, 0328-4999974'],
+  // Blank on a fresh install: every branch has its own, and a wrong address
+  // printed on the first day's receipts is worse than none. The manager fills
+  // them in from Settings. The receipt simply omits an empty line.
+  ['restaurant_address', ''],
+  ['restaurant_phone', ''],
   ['tax_rate', '0'],
   ['currency_symbol', 'Rs.'],
   ['receipt_footer', 'Thank you for visiting! Eat, Heat, Repeat!'],

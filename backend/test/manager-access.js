@@ -157,6 +157,14 @@ async function waitFor(url, tries = 120) {
   ok('a manager cannot change the tax rate', price.status === 403);
   ok('but can still change their own printer', paper.status === 200);
 
+  // The address and phone are the branch's, not the brand's.
+  const where = await call('PUT', '/settings', M, { restaurant_address: 'Shop 4, Main Boulevard', restaurant_phone: '0300 1112223' });
+  const brand = await call('PUT', '/settings', M, { restaurant_name: 'Somebody Else' });
+  const shown = await call('GET', '/settings', M);
+  ok("a manager can set their branch's address and phone", where.status === 200);
+  ok('and the till prints what they set', shown.body && shown.body.restaurant_address === 'Shop 4, Main Boulevard' && shown.body.restaurant_phone === '0300 1112223');
+  ok("but cannot rename the shop", brand.status === 403);
+
   const wa = await call('POST', '/whatsapp/send-daily', M, {});
   ok("and cannot send the day's figures out of the building", wa.status === 403);
  } catch (e) {

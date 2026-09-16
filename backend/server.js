@@ -116,6 +116,11 @@ const MANAGER_EDITABLE = new Set([
   'show_cashier',
   'show_order_number',
   'show_payment',
+  // Where this shop is and how to ring it. The cloud never sets these — each
+  // branch has its own — so the manager who works there is the right person
+  // to keep them correct. The shop's name stays with the owner.
+  'restaurant_address',
+  'restaurant_phone',
 ]);
 
 app.use('/api/settings', (req, res, next) => {

@@ -114,6 +114,15 @@ export default function Settings() {
   const MANAGER_EDITABLE = new Set(['receipt', 'printer', 'branch', 'backup']);
   const OWNER_ONLY = new Set(['reports']);
   const canEditSection = (id) => isAdmin || MANAGER_EDITABLE.has(id);
+  /*
+   * The one section that is partly theirs.
+   *
+   * The shop's name, tagline and footer are the brand and stay with the
+   * owner; the address and phone are this branch's own — no two shops share
+   * them and the cloud never sets them — so the manager who works there keeps
+   * them right. The server allows exactly those two keys (backend/server.js).
+   */
+  const canEditField = (field) => isAdmin || field === 'address' || field === 'phone';
   const [activeSection, setActiveSection] = useState('restaurant');
   const [toast, setToast] = useState(null);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
@@ -259,12 +268,16 @@ export default function Settings() {
   const taxChanged = taxOriginal && JSON.stringify(tax) !== JSON.stringify(taxOriginal);
 
   const handleSaveProfile = async () => {
-    await settingsAPI.update({
+    // A manager sends only what is theirs; the server would refuse the rest.
+    await settingsAPI.update(isAdmin ? {
       restaurant_name: profile.name,
       restaurant_tagline: profile.tagline,
       restaurant_address: profile.address,
       restaurant_phone: profile.phone,
       receipt_footer: profile.footerMessage,
+    } : {
+      restaurant_address: profile.address,
+      restaurant_phone: profile.phone,
     });
     setProfileOriginal({ ...profile });
     refreshSettings();
@@ -417,8 +430,22 @@ export default function Settings() {
     : 0;
   const cashDiff = Number(actualCash) - expectedCash;
 
+  const fieldStyle = (field) => (canEditField(field)
+    ? INPUT_STYLE
+    : { ...INPUT_STYLE, background: '#F3F4F6', color: '#6B7280', cursor: 'not-allowed' });
+
   const renderRestaurant = () => (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      {!isAdmin && (
+        <div style={{
+          background: '#F3F4F6', border: '1px solid #E5E7EB', borderRadius: 8,
+          padding: '10px 14px', fontSize: 13, color: '#4B5563',
+        }}>
+          The address and phone number are this branch's own — keep them
+          correct here; they print on every receipt. The name, tagline and
+          footer are set by the owner.
+        </div>
+      )}
       <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
         <div
           style={{
@@ -435,6 +462,7 @@ export default function Settings() {
         </div>
         <div>
           <button
+            disabled={!isAdmin}
             onClick={() => fileInputRef.current?.click()}
             style={{
               background: '#FFFFFF', border: '1px solid #DC2626', color: '#DC2626',
@@ -450,11 +478,11 @@ export default function Settings() {
 
       <div>
         <FieldLabel label="Restaurant Name" />
-        <input style={INPUT_STYLE} value={profile.name} onChange={(e) => setProfile({ ...profile, name: e.target.value })} />
+        <input style={fieldStyle('name')} disabled={!canEditField('name')} value={profile.name} onChange={(e) => setProfile({ ...profile, name: e.target.value })} />
       </div>
       <div>
         <FieldLabel label="Tagline" helper="Shown below restaurant name on receipts" />
-        <input style={INPUT_STYLE} value={profile.tagline} onChange={(e) => setProfile({ ...profile, tagline: e.target.value })} />
+        <input style={fieldStyle('tagline')} disabled={!canEditField('tagline')} value={profile.tagline} onChange={(e) => setProfile({ ...profile, tagline: e.target.value })} />
       </div>
       <div>
         <FieldLabel label="Address" />
@@ -466,7 +494,7 @@ export default function Settings() {
       </div>
       <div>
         <FieldLabel label="Receipt Footer Message" helper="Printed at the bottom of every receipt" />
-        <input style={INPUT_STYLE} value={profile.footerMessage} onChange={(e) => setProfile({ ...profile, footerMessage: e.target.value })} />
+        <input style={fieldStyle('footerMessage')} disabled={!canEditField('footerMessage')} value={profile.footerMessage} onChange={(e) => setProfile({ ...profile, footerMessage: e.target.value })} />
       </div>
 
       <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
@@ -1268,7 +1296,7 @@ export default function Settings() {
               `disabled` would be a control that appears to work and then fails
               at the server.
             */}
-            {!canEditSection(activeSection) && (
+            {!canEditSection(activeSection) && activeSection !== 'restaurant' && (
               <div style={{
                 background: '#F3F4F6', border: '1px solid #E5E7EB', borderRadius: 8,
                 padding: '10px 14px', marginBottom: 20, fontSize: 13, color: '#4B5563',
@@ -1277,7 +1305,7 @@ export default function Settings() {
                 can see what this till is using, but not change it here.
               </div>
             )}
-            <div style={canEditSection(activeSection) ? undefined : {
+            <div style={canEditSection(activeSection) || activeSection === 'restaurant' ? undefined : {
               pointerEvents: 'none', opacity: 0.6, userSelect: 'text',
             }}>
               {sectionRenderers[activeSection]?.()}
