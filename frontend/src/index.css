@@ -265,6 +265,37 @@ body {
     break-after: auto;
   }
 
+  /*
+    Ink, not tone.
+
+    A thermal head prints one-bit: a dot or nothing. Every grey the screen
+    receipt uses — captions, the muted item column, the red total, the green
+    discount — comes out as a dither of scattered dots, and 10–11px text at
+    regular weight has strokes thinner than a dot, so letters print broken.
+    The first receipts off the BC-87AC were faint and speckled for exactly
+    these reasons.
+
+    On paper, everything is solid black, bold, and no smaller than 12.5px, in
+    a sturdier face than Inter. The screen preview keeps its greys; this only
+    applies when printing.
+  */
+  .receipt-copy,
+  .receipt-copy * {
+    color: #000 !important;
+    -webkit-text-fill-color: #000 !important;
+    border-color: #000 !important;
+    font-family: Arial, Helvetica, sans-serif !important;
+    font-weight: 700 !important;
+    font-style: normal !important;
+    opacity: 1 !important;
+    text-shadow: none !important;
+  }
+  /* React writes inline sizes as `font-size: 10px`; lift the small ones. */
+  .receipt-copy [style*="font-size: 10px"],
+  .receipt-copy [style*="font-size: 11px"] { font-size: 12.5px !important; }
+  .receipt-copy [style*="font-size: 12px"] { font-size: 13px !important; }
+  .receipt-copy [style*="font-size: 13px"] { font-size: 14px !important; }
+
   /* Screen-only chrome. */
   .no-print {
     display: none !important;
