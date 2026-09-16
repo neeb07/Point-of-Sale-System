@@ -52,11 +52,41 @@ const run = (cmd, args) => {
 
 const publishOnly = process.argv.includes('--publish-only');
 
-run('node', [path.join(__dirname, 'tag-release.js'), ...(publishOnly ? ['--any-commit'] : [])]);
-if (!publishOnly) {
-  run('npm', ['run', 'prepare-backend']);
-  run('npx', ['vite', 'build']);
-  run('npx', ['electron-builder', 'build', '--win', '--publish', 'always']);
-} else {
-  run('npx', ['electron-builder', '--win', '--publish', 'always', '--prepackaged', 'release/win-unpacked']);
+/**
+ * Create the GitHub release before electron-builder starts.
+ *
+ * electron-builder runs one publisher per file, and when the release does
+ * not exist yet each of them tries to create it — one wins, the other gets
+ * "already_exists" and the build fails with half the files uploaded. Making
+ * the release here first, once, means every publisher finds it.
+ */
+async function ensureRelease() {
+  const pkg = require('../package.json');
+  const { owner, repo } = pkg.build.publish[0];
+  const tag = `v${pkg.version}`;
+  const api = `https://api.github.com/repos/${owner}/${repo}/releases`;
+  const headers = {
+    Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json',
+    'User-Agent': 'blaze-release', 'Content-Type': 'application/json',
+  };
+  const existing = await fetch(`${api}/tags/${tag}`, { headers });
+  if (existing.ok) { console.log(`Release ${tag} exists; adding files to it.`); return; }
+  if (existing.status !== 404) throw new Error(`GitHub: ${existing.status} ${await existing.text()}`);
+  const made = await fetch(api, {
+    method: 'POST', headers,
+    body: JSON.stringify({ tag_name: tag, name: tag, draft: false, prerelease: false }),
+  });
+  if (!made.ok) throw new Error(`Could not create release ${tag}: ${made.status} ${await made.text()}`);
+  console.log(`Created release ${tag}.`);
 }
+
+run('node', [path.join(__dirname, 'tag-release.js'), ...(publishOnly ? ['--any-commit'] : [])]);
+ensureRelease().then(() => {
+  if (!publishOnly) {
+    run('npm', ['run', 'prepare-backend']);
+    run('npx', ['vite', 'build']);
+    run('npx', ['electron-builder', 'build', '--win', '--publish', 'always']);
+  } else {
+    run('npx', ['electron-builder', '--win', '--publish', 'always', '--prepackaged', 'release/win-unpacked']);
+  }
+}).catch((err) => { console.error(err.message); process.exit(1); });
