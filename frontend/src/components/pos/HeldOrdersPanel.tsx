@@ -47,6 +47,17 @@ export default function HeldOrdersPanel({ open, onClose, onEdit, onConfirmed, on
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [paying, setPaying] = useState(null);      // ticket being confirmed
+  /**
+   * Which bill copies print once the ticket is a sale. Both by default; a
+   * phone order collected later may want only the restaurant's, a customer
+   * standing at the counter only theirs.
+   */
+  const PRINT_CHOICES = [
+    { value: 'both', label: 'Both copies', copies: ['customer', 'restaurant'] },
+    { value: 'customer', label: 'Customer only', copies: ['customer'] },
+    { value: 'restaurant', label: 'Restaurant only', copies: ['restaurant'] },
+  ];
+  const [printChoice, setPrintChoice] = useState('both');
   const [payment, setPayment] = useState('Cash');
   const [busy, setBusy] = useState(false);
   const [printMenu, setPrintMenu] = useState(null); // ticket id with the print menu open
@@ -97,9 +108,10 @@ export default function HeldOrdersPanel({ open, onClose, onEdit, onConfirmed, on
     setBusy(true);
     try {
       const order = await ordersAPI.confirmHeld(paying.id, { payment_method: payment });
+      const copies = (PRINT_CHOICES.find(c => c.value === printChoice) || PRINT_CHOICES[0]).copies;
       setPaying(null);
       await load();
-      onConfirmed?.(order);
+      onConfirmed?.(order, copies);
     } catch (e) {
       setError(e.message || 'Could not confirm that ticket');
     } finally {
@@ -216,6 +228,22 @@ export default function HeldOrdersPanel({ open, onClose, onEdit, onConfirmed, on
                       </button>
                     ))}
                   </div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: '#374151', marginBottom: 8 }}>
+                    Print
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+                    {PRINT_CHOICES.map((c) => (
+                      <button
+                        key={c.value}
+                        onClick={() => setPrintChoice(c.value)}
+                        style={{
+                          ...btn(printChoice === c.value ? 'primary' : undefined), flex: 1, justifyContent: 'center',
+                        }}
+                      >
+                        {c.label}
+                      </button>
+                    ))}
+                  </div>
                   <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                     <button style={btn()} onClick={() => setPaying(null)} disabled={busy}>Back</button>
                     <button style={btn('primary')} onClick={confirmTicket} disabled={busy}>
@@ -225,7 +253,7 @@ export default function HeldOrdersPanel({ open, onClose, onEdit, onConfirmed, on
                 </div>
               ) : (
                 <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap', position: 'relative' }}>
-                  <button style={btn('primary')} onClick={() => { setPaying(t); setPayment(t.payment_method || 'Cash'); }}>
+                  <button style={btn('primary')} onClick={() => { setPaying(t); setPayment(t.payment_method || 'Cash'); setPrintChoice('both'); }}>
                     <CreditCard size={15} /> Confirm &amp; pay
                   </button>
                   <button style={btn()} onClick={() => onEdit?.(t)}>

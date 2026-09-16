@@ -344,10 +344,10 @@ export default function SaleScreen({ onNavigate }: SaleScreenProps = {}) {
     setHeldOpen(false);
   };
 
-  /** A ticket was confirmed on the board: it is a sale now, so print the bill. */
-  const heldConfirmed = (order: any) => {
+  /** A ticket was confirmed on the board: it is a sale now, so print the bill — the copies chosen there. */
+  const heldConfirmed = (order: any, copies?: string[]) => {
     setHeldOpen(false);
-    setReceiptCopies(['customer', 'restaurant']);
+    setReceiptCopies(copies && copies.length ? copies : ['customer', 'restaurant']);
     setReceiptData(receiptFrom(order, { paymentMethod: order.payment_method }));
     refreshHeldCount();
   };
