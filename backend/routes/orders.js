@@ -18,6 +18,9 @@ const { formatOrderNo } = require('../db/order-no');
  */
 
 const VALID_PAYMENTS = ['Cash', 'Card', 'Online'];
+/** Where the food goes. Anything else is filed as dine-in rather than refused. */
+const VALID_ORDER_TYPES = ['Dine-in', 'Takeaway', 'Delivery'];
+const orderTypeOf = (v) => (VALID_ORDER_TYPES.includes(v) ? v : 'Dine-in');
 
 const trimmed = (v) => (v && String(v).trim()) || null;
 
@@ -42,7 +45,10 @@ function priceOrder(body) {
   // so a bad payload can't write a negative or nonsensical order.
   const paymentMethod = VALID_PAYMENTS.includes(payment_method) ? payment_method : 'Cash';
   const safeDiscount = Math.max(0, Number(discount) || 0);
-  const safeDelivery = Math.max(0, Number(delivery_charge) || 0);
+  // The charge is the till's to decide per order — a longer ride, a regular
+  // who is never charged — but only a delivery has a rider to pay.
+  const orderType = orderTypeOf(body && body.order_type);
+  const safeDelivery = orderType === 'Delivery' ? Math.max(0, Number(delivery_charge) || 0) : 0;
 
   // Recompute the total server-side rather than trusting the client.
   const itemsSubtotal = items.reduce(
@@ -86,7 +92,7 @@ function priceOrder(body) {
   }
 
   return {
-    items, paymentMethod, safeDelivery, itemsSubtotal, isEmployee, employeeRate,
+    items, paymentMethod, orderType, safeDelivery, itemsSubtotal, isEmployee, employeeRate,
     employeeDiscount, manualDiscount, cappedDiscount, taxRate, taxAmount, computedTotal,
   };
 }
@@ -149,7 +155,7 @@ function commitOrder(body, req, p, branchId) {
       // fallback for a request with no session, which the route guard prevents.
       (req.user && req.user.staffId) || cashier_id || null,
       (req.user && req.user.name) || cashier_name || 'Unknown',
-      order_type || 'Dine-in',
+      p.orderType,
       p.safeDelivery,
       table_number || null,
       openShiftId,
@@ -173,7 +179,7 @@ function commitOrder(body, req, p, branchId) {
     // Remember whoever this went out to, so the next time they call the
     // cashier can pick them from the list instead of taking the address down
     // again. Only delivery orders — a walk-in has nothing worth keeping.
-    if ((order_type || 'Dine-in') === 'Delivery') {
+    if (p.orderType === 'Delivery') {
       recordCustomer({
         name: customer_name, phone: customer_phone, address: customer_address,
         total: p.computedTotal,
@@ -233,7 +239,7 @@ function describeOrder(body, p, branchId, extra = {}) {
     employee_discount_rate: p.employeeRate,
     manual_discount: p.manualDiscount,
     payment_method: p.paymentMethod,
-    order_type: body.order_type || 'Dine-in',
+    order_type: p.orderType,
     table_number: body.table_number || null,
     items: p.items,
     customer_name: trimmed(body.customer_name),
@@ -347,7 +353,7 @@ function storeHeld(body, req, existingId = null) {
          SET payload = ?, order_type = ?, table_number = ?, customer_name = ?,
              total = ?, item_count = ?, updated_at = datetime('now', 'localtime')
        WHERE id = ?
-    `).run(JSON.stringify(body), body.order_type || 'Dine-in', body.table_number || null,
+    `).run(JSON.stringify(body), orderTypeOf(body.order_type), body.table_number || null,
            trimmed(body.customer_name), p.computedTotal, itemCount, existingId);
     return existingId;
   }
@@ -355,7 +361,7 @@ function storeHeld(body, req, existingId = null) {
     INSERT INTO held_orders
       (payload, order_type, table_number, customer_name, total, item_count, staff_id, staff_name)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(JSON.stringify(body), body.order_type || 'Dine-in', body.table_number || null,
+  `).run(JSON.stringify(body), orderTypeOf(body.order_type), body.table_number || null,
          trimmed(body.customer_name), p.computedTotal, itemCount,
          (req.user && req.user.staffId) || null, (req.user && req.user.name) || null)
     .lastInsertRowid;

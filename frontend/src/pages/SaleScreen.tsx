@@ -9,7 +9,7 @@ import { Loader2, CreditCard, Clock, AlertTriangle, ArrowRight } from 'lucide-re
 import { usePOS } from '@/lib/POSContext';
 import { useAuth } from '@/context/AuthContext';
 import moment from 'moment';
-import { PAYMENT_METHODS, type PaymentMethod } from '@/lib/constants';
+import { PAYMENT_METHODS, ORDER_TYPES, type PaymentMethod, type OrderType } from '@/lib/constants';
 import { useSettings } from '@/lib/SettingsContext';
 import CustomerLookup from '@/components/pos/CustomerLookup';
 import AlertDialog, { AlertPanel } from '@/components/pos/AlertDialog';
@@ -76,7 +76,13 @@ export default function SaleScreen({ onNavigate }: SaleScreenProps = {}) {
 
   const [cart, setCart] = useState<CartItem[]>([]);
   const [search, setSearch] = useState('');
-  const [orderType, setOrderType] = useState<'Dine-in' | 'Delivery'>('Dine-in');
+  const [orderType, setOrderType] = useState<OrderType>('Dine-in');
+  /**
+   * The delivery charge for this order, as typed. Empty means "the default
+   * from Settings"; anything else is what the manager decided for this run —
+   * a rider going further than usual, or a regular who is never charged.
+   */
+  const [deliveryValue, setDeliveryValue] = useState('');
 
   /**
    * FIX (Bug 6): discount, payment method and table number were hardcoded to
@@ -123,7 +129,9 @@ export default function SaleScreen({ onNavigate }: SaleScreenProps = {}) {
   const { restaurant: restaurantDetails, deliveryPrice, taxRate, employeeDiscountRate, formatMoney, refresh: refreshSettings } = useSettings();
 
   const subtotal = cart.reduce((sum, item) => sum + item.price * item.qty, 0);
-  const deliveryCharge = orderType === 'Delivery' ? deliveryPrice : 0;
+  const deliveryCharge = orderType === 'Delivery'
+    ? (deliveryValue === '' ? deliveryPrice : Math.max(0, Number(deliveryValue) || 0))
+    : 0;
 
   // Percent discounts are computed off the subtotal, and any discount is
   // capped so an order can never go negative. Delivery is added afterwards
@@ -174,6 +182,7 @@ export default function SaleScreen({ onNavigate }: SaleScreenProps = {}) {
   const resetOrder = () => {
     setCart([]);
     setOrderType('Dine-in');
+    setDeliveryValue('');
     setDiscountValue('');
     setDiscountType('flat');
     setPaymentMethod('Cash');
@@ -186,7 +195,7 @@ export default function SaleScreen({ onNavigate }: SaleScreenProps = {}) {
 
   const handleClearCart = () => { setEditingHold(null); resetOrder(); };
 
-  const handleOrderTypeChange = (type: 'Dine-in' | 'Delivery') => {
+  const handleOrderTypeChange = (type: OrderType) => {
     setOrderType(type);
     // Pick up a delivery price changed in Settings since this screen loaded.
     // The provider owns the value now, so this refreshes it rather than
@@ -318,7 +327,10 @@ export default function SaleScreen({ onNavigate }: SaleScreenProps = {}) {
       id: i.id, name: i.name, price: i.price, qty: i.quantity,
       isDeal: Boolean(i.is_deal), variant_id: i.variant_id ?? null,
     })));
-    setOrderType(t.order_type === 'Delivery' ? 'Delivery' : 'Dine-in');
+    setOrderType((ORDER_TYPES as readonly string[]).includes(t.order_type) ? t.order_type : 'Dine-in');
+    // Whatever was charged on the ticket is what the cart shows, even if the
+    // default has changed in Settings since it was held.
+    setDeliveryValue(t.order_type === 'Delivery' && t.delivery_charge != null ? String(t.delivery_charge) : '');
     setTableNumber(t.table_number || '');
     setPaymentMethod(t.payment_method || 'Cash');
     setIsEmployee((t.is_employee ?? 0) === 1);
@@ -375,7 +387,9 @@ export default function SaleScreen({ onNavigate }: SaleScreenProps = {}) {
         <OrderCart
           cart={cart}
           orderType={orderType}
-          deliveryCharge={deliveryPrice}
+          deliveryCharge={deliveryCharge}
+          deliveryValue={deliveryValue}
+          onDeliveryValueChange={setDeliveryValue}
           discountValue={discountValue}
           discountType={discountType}
           discountAmount={discount}

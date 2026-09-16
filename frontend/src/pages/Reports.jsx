@@ -1,6 +1,6 @@
 // @ts-nocheck
 import React, { useState, useEffect, useMemo } from 'react';
-import { DollarSign, ShoppingBag, TrendingUp, Tag, Printer, Download, FileSpreadsheet, Wallet, Users } from 'lucide-react';
+import { DollarSign, ShoppingBag, TrendingUp, Tag, Printer, Download, FileSpreadsheet, Wallet, Users, Utensils, ShoppingBasket, Bike } from 'lucide-react';
 import { reportsAPI, branchesAPI } from '@/api/index';
 import { buildCsv, money } from '@/lib/csv';
 import { useSettings } from '@/lib/SettingsContext';
@@ -27,7 +27,7 @@ export default function Reports() {
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState('');
   
-  const [kpi, setKpi] = useState({ revenue: 0, orders: 0, avg_order_value: 0, total_discounts: 0, total_expenses: 0, drawer_expenses: 0, expense_count: 0, wages_paid: null, net_revenue: 0 });
+  const [kpi, setKpi] = useState({ revenue: 0, orders: 0, avg_order_value: 0, total_discounts: 0, total_expenses: 0, drawer_expenses: 0, expense_count: 0, wages_paid: null, net_revenue: 0, by_type: [] });
   const [revenueData, setRevenueData] = useState([]);
   const [topItems, setTopItems] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -157,6 +157,7 @@ export default function Reports() {
       setKpi({
         revenue: kData.total_revenue || 0,
         orders: kData.total_orders || 0,
+        by_type: Array.isArray(kData.by_type) ? kData.by_type : [],
         avg_order_value: kData.avg_order_value || 0,
         total_discounts: kData.total_discounts || 0,
         // What went out, and what is actually left after it.
@@ -650,6 +651,26 @@ export default function Reports() {
           <KpiCard title="Orders Processed" value={kpi.orders} icon={ShoppingBag} color="#3B82F6" />
           <KpiCard title="Avg. Order Value" value={formatMoney(kpi.avg_order_value)} icon={TrendingUp} color="#10B981" />
           <KpiCard title="Discounts Given" value={formatMoney(kpi.total_discounts)} icon={Tag} color="#EF4444" subtitle={`across ${detailedReport.filter(d => d.discount > 0).length} orders`} />
+        </div>
+
+        {/*
+          Where the food went. Three cards in a fixed order so the eye finds
+          the same one each day, drawn even at zero — an empty delivery card
+          on a rainy evening is information too.
+        */}
+        <div className="grid grid-cols-3 gap-4 print:hidden">
+          {[
+            { type: 'Dine-in', icon: Utensils, color: '#0EA5E9' },
+            { type: 'Takeaway', icon: ShoppingBasket, color: '#F97316' },
+            { type: 'Delivery', icon: Bike, color: '#8B5CF6' },
+          ].map(({ type, icon, color }) => {
+            const row = (kpi.by_type || []).find(r => r.order_type === type) || { orders: 0, revenue: 0, delivery_charges: 0 };
+            const share = kpi.orders > 0 ? Math.round((Number(row.orders) / kpi.orders) * 100) : 0;
+            const subtitle = type === 'Delivery'
+              ? `${row.orders} ${row.orders === 1 ? 'order' : 'orders'} (${share}%) · ${formatMoney(row.delivery_charges || 0)} in delivery charges`
+              : `${row.orders} ${row.orders === 1 ? 'order' : 'orders'} (${share}% of all)`;
+            return <KpiCard key={type} title={type} value={formatMoney(row.revenue || 0)} icon={icon} color={color} subtitle={subtitle} />;
+          })}
         </div>
 
         {/*

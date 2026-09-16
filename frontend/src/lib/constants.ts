@@ -46,5 +46,5 @@ export const PAYMENT_METHODS = ['Cash', 'Card', 'Online'] as const;
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 
 /** Order types. */
-export const ORDER_TYPES = ['Dine-in', 'Delivery'] as const;
+export const ORDER_TYPES = ['Dine-in', 'Takeaway', 'Delivery'] as const;
 export type OrderType = (typeof ORDER_TYPES)[number];

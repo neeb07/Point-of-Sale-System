@@ -119,9 +119,24 @@ router.get('/kpi', (req, res) => {
       ? (((summary.total_orders - prev.total_orders) / prev.total_orders) * 100).toFixed(1)
       : 0;
 
+    // Where the food went: dine-in, takeaway or delivery, with what the riders
+    // brought in. Orders from before takeaway existed are dine-in.
+    const byType = db.prepare(`
+      SELECT
+        COALESCE(order_type, 'Dine-in') AS order_type,
+        COUNT(*) AS orders,
+        COALESCE(SUM(total), 0) AS revenue,
+        COALESCE(SUM(delivery_charge), 0) AS delivery_charges
+      FROM orders
+      WHERE DATE(created_at) BETWEEN DATE(?) AND DATE(?)
+      AND status != 'voided'${scope.sql}
+      GROUP BY COALESCE(order_type, 'Dine-in')
+    `).all(from, to, ...scope.params);
+
     res.json({
       ...summary,
       ...expenses,
+      by_type: byType,
       net_revenue: summary.total_revenue - expenses.total_expenses,
       revenue_trend: revenueTrend,
       orders_trend: ordersTrend,

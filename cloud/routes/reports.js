@@ -155,9 +155,23 @@ router.get('/kpi', requireUser, async (req, res) => {
       ? (((summary.total_orders - prev.total_orders) / prev.total_orders) * 100).toFixed(1)
       : 0;
 
+    // Where the food went — see the till's version of this query.
+    const byType = await db.q(`
+      SELECT
+        COALESCE(order_type, 'Dine-in') AS order_type,
+        COUNT(*)::int AS orders,
+        COALESCE(SUM(total)::float8, 0) AS revenue,
+        COALESCE(SUM(delivery_charge)::float8, 0) AS delivery_charges
+      FROM orders
+      WHERE created_at::date BETWEEN ?::date AND ?::date
+      AND status != 'voided'${scope.sql}
+      GROUP BY COALESCE(order_type, 'Dine-in')
+    `, [from, to, ...scope.params]);
+
     res.json({
       ...summary,
       ...expenses,
+      by_type: byType,
       wages_paid: Number(wages.wages_paid) || 0,
       // Net is what the owner actually keeps, so it has to carry the wage bill
       // too. Without it a month with a full payroll behind it reads as pure

@@ -1,6 +1,6 @@
 import React from 'react';
 import { Trash2, Plus, Minus, CreditCard, Banknote, Globe } from 'lucide-react';
-import { PAYMENT_METHODS, type PaymentMethod } from '@/lib/constants';
+import { PAYMENT_METHODS, ORDER_TYPES, type PaymentMethod, type OrderType } from '@/lib/constants';
 import { useSettings } from '@/lib/SettingsContext';
 
 interface CartItem {
@@ -12,8 +12,12 @@ interface CartItem {
 
 interface OrderCartProps {
   cart: CartItem[];
-  orderType: 'Dine-in' | 'Delivery';
+  orderType: OrderType;
+  /** The charge that will apply to this order (0 unless it is a delivery). */
   deliveryCharge: number;
+  /** What has been typed for it; '' means the default from Settings. */
+  deliveryValue: string;
+  onDeliveryValueChange: (value: string) => void;
   /** FIX (Bug 6): discount and payment method are real inputs now. */
   discountValue: string;
   discountType: 'flat' | 'percent';
@@ -29,7 +33,7 @@ interface OrderCartProps {
   onDiscountValueChange: (value: string) => void;
   onDiscountTypeChange: (type: 'flat' | 'percent') => void;
   onPaymentMethodChange: (method: PaymentMethod) => void;
-  onOrderTypeChange: (type: 'Dine-in' | 'Delivery') => void;
+  onOrderTypeChange: (type: OrderType) => void;
   onUpdateQty: (id: number, name: string, delta: number) => void;
   onRemoveItem: (id: number, name: string) => void;
   onClearCart: () => void;
@@ -48,6 +52,8 @@ export default function OrderCart({
   cart,
   orderType,
   deliveryCharge,
+  deliveryValue,
+  onDeliveryValueChange,
   discountValue,
   discountType,
   discountAmount,
@@ -178,9 +184,9 @@ export default function OrderCart({
 
       {/* Footer */}
       <div style={{ padding: '16px 18px', background: '#FAFAF8', borderTop: '1px solid #EBEBEB' }}>
-        {/* Dine-in / Delivery toggle */}
+        {/* Dine-in / Takeaway / Delivery */}
         <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
-          {(['Dine-in', 'Delivery'] as const).map(type => {
+          {ORDER_TYPES.map(type => {
             const active = orderType === type;
             return (
               <button
@@ -270,6 +276,38 @@ export default function OrderCart({
           </div>
         )}
         {/*
+          Delivery charge, per order. The default comes from Settings; the
+          manager can change it for this order — a longer ride, or a regular
+          who is never charged. Only on deliveries: nothing else has a rider.
+        */}
+        {orderType === 'Delivery' && (
+          <div style={{
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14,
+          }}>
+            <span style={{ fontSize: 13, color: '#A3A39A' }}>Delivery Charge</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontSize: 12, color: '#A3A39A' }}>{currencySymbol}</span>
+              <input
+                type="number"
+                min="0"
+                value={deliveryValue}
+                onChange={e => onDeliveryValueChange(e.target.value)}
+                placeholder={String(deliveryCharge)}
+                aria-label="Delivery charge"
+                style={{
+                  width: 66, height: 26, borderRadius: 6,
+                  border: '1.5px solid #EBEBEB', background: '#FFFFFF',
+                  padding: '0 8px', fontSize: 13, fontWeight: 600,
+                  color: '#111110', textAlign: 'right', outline: 'none',
+                  fontFamily: 'Inter, sans-serif',
+                }}
+                onFocus={e => { e.currentTarget.style.borderColor = '#DC2626'; }}
+                onBlur={e => { e.currentTarget.style.borderColor = '#EBEBEB'; }}
+              />
+            </div>
+          </div>
+        )}
+        {/*
           Staff purchase. Sits directly under the discount row because it is a
           second, automatic discount — the cashier flips it instead of typing a
           percentage, and the rate is set once in Settings so it cannot drift
@@ -336,7 +374,7 @@ export default function OrderCart({
             marginBottom: 14, paddingBottom: 14,
             borderBottom: '1px solid #EBEBEB',
           }}>
-            <span style={{ fontSize: 13, color: '#A3A39A' }}>Delivery Charge</span>
+            <span style={{ fontSize: 13, color: '#A3A39A' }}>Delivery</span>
             <span style={{ fontSize: 13, fontWeight: 500, color: '#111110' }}>{formatMoney(deliveryCharge)}</span>
           </div>
         )}
