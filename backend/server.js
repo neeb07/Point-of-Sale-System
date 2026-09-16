@@ -143,6 +143,10 @@ app.use('/api/settings', (req, res, next) => {
    * what it replaces before it does anything — see routes/settings.js.
    */
   if (req.method === 'POST' && req.path === '/restore') return next();
+  // Clearing the trading history is the same kind of job: done at the
+  // machine, after a testing period, by whoever is there. The route itself
+  // asks for their PIN again and copies the database first.
+  if (req.method === 'POST' && req.path === '/reset') return next();
 
   // Otherwise a manager may write, but only these keys, and only via the plain
   // update.

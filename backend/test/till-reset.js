@@ -67,7 +67,9 @@ async function waitFor(url, tries = 120) {
 
   console.log();
   console.log('=== WHO MAY, AND WITH WHAT ===');
-  ok('a manager is refused', (await call('POST', '/settings/reset', M, { pin: PIN })).status === 403);
+  ok('a manager without a PIN is refused', (await call('POST', '/settings/reset', M, {})).status === 400);
+  const mWrong = await call('POST', '/settings/reset', M, { pin: WRONG });
+  ok('a manager with the wrong PIN is refused', mWrong.status === 403 && mWrong.body.code === 'WRONG_PIN');
   ok('the owner without a PIN is refused', (await call('POST', '/settings/reset', A, {})).status === 400);
   const wrong = await call('POST', '/settings/reset', A, { pin: WRONG });
   ok('the owner with the wrong PIN is refused', wrong.status === 403 && wrong.body.code === 'WRONG_PIN');
@@ -88,11 +90,11 @@ async function waitFor(url, tries = 120) {
   ok('and nothing was deleted', count('orders') === before.orders);
 
   console.log();
-  console.log('=== FORCED THROUGH ===');
+  console.log('=== FORCED THROUGH, BY THE MANAGER ===');
   const backupDir = path.join(dir, 'backups');
   const preResets = () => (fs.existsSync(backupDir) ? fs.readdirSync(backupDir).filter(f => /^pre_reset_/.test(f)) : []);
   const backupsBefore = preResets().length;
-  const done = await call('POST', '/settings/reset', A, { pin: PIN, force: true });
+  const done = await call('POST', '/settings/reset', M, { pin: PIN, force: true });
   ok('succeeds', done.status === 200 && done.body.success === true);
   ok('reports what it deleted', done.body.deleted && done.body.deleted.orders === before.orders);
   ok('and what it discarded unsent (orders, plus any pending shifts and expenses)', done.body.unsent_discarded >= before.orders);

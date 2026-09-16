@@ -1067,11 +1067,10 @@ export default function Settings() {
       </div>
 
       {/*
-        Wiping the shop is the owner's alone. Restoring a backup above is
-        recoverable and is why a manager is here at all; deleting every order
-        and starting again is not something anybody needs to do mid-service.
+        Clearing the trading history is open to the manager as well: like
+        restoring, it is done at the machine after a testing period by whoever
+        is there. The server asks for their own PIN again and keeps a copy.
       */}
-      {isAdmin && (
       <div style={{
         border: '1px solid #FEE2E2', background: '#FFF5F5', borderRadius: 12, padding: 20,
       }}>
@@ -1091,7 +1090,6 @@ export default function Settings() {
           Clear Trading Data
         </button>
       </div>
-      )}
     </div>
   );
 
@@ -1433,7 +1431,7 @@ export default function Settings() {
         </p>
         <FieldLabel label="Your PIN" />
         <input style={INPUT_STYLE} type="password" inputMode="numeric" value={resetPin}
-          onChange={(e) => setResetPin(e.target.value)} placeholder="Owner PIN" autoComplete="off" />
+          onChange={(e) => setResetPin(e.target.value)} placeholder="Your PIN" autoComplete="off" />
         <div style={{ height: 12 }} />
         <FieldLabel label="Type DELETE to confirm" />
         <input style={INPUT_STYLE} value={resetConfirm} onChange={(e) => setResetConfirm(e.target.value)} placeholder="DELETE" />

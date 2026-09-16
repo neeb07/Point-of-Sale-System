@@ -128,8 +128,9 @@ router.post('/restore', (req, res) => {
  *
  * Three protections, in order:
  *
- *  1. The owner's own PIN, typed again. The session proves somebody signed in
- *     as the owner; the PIN proves the owner is the one at the keyboard now.
+ *  1. The caller's own PIN, typed again. The session proves somebody signed
+ *     in; the PIN proves that person is the one at the keyboard now. Owner
+ *     and manager alike — the manager is the one in the shop.
  *  2. Nothing unsent is destroyed silently. Sales are pushed to the cloud
  *     first; if some cannot be (unpaired, offline), the request is refused
  *     with the count, and only an explicit `force` goes ahead regardless.
