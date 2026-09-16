@@ -18,7 +18,11 @@ const head = sh('git rev-parse HEAD');
 let existing = null;
 try { existing = sh(`git rev-list -n 1 ${tag}`); } catch (e) { /* no such tag */ }
 
-if (existing && existing !== head) {
+// Publishing a build that already exists (release:publish-only) only needs
+// the tag to be there; it was made when that build was, and HEAD may have
+// moved since. A fresh build must not reuse a version number.
+const anyCommit = process.argv.includes('--any-commit');
+if (existing && existing !== head && !anyCommit) {
   console.error(`${tag} already points at ${existing.slice(0, 7)}, not at HEAD ${head.slice(0, 7)}.`);
   console.error('Bump "version" in package.json — a version number is never reused.');
   process.exit(1);
