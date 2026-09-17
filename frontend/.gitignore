@@ -36,3 +36,4 @@ dist-ssr
 # reproducible. The root .gitignore drops lockfiles by default.
 !package-lock.json
 .release-token
+.release.json

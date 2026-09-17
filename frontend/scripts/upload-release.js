@@ -1,38 +1,49 @@
 /**
- * Put a finished build on its GitHub release — patiently.
+ * Put a finished build where the tills look for updates: Supabase Storage.
  *
- * electron-builder's own uploader sends each file once, in one request, and
- * gives up at the first dropped connection. From a shop's connection a 60 MB
- * installer can take a quarter of an hour and drop twice on the way, and every
- * retry re-packed the installer first. This uploads only what the release is
- * missing, retries each file on its own, and writes latest.yml — the file the
- * tills read — from the installer it actually uploaded.
+ * Why not GitHub Releases. From here, the route to GitHub's upload server ran
+ * at about 60 KB/s and its endpoint gives up on an upload that slow before a
+ * 100 MB installer is through — every attempt ended in a 500. Supabase's
+ * region is seven times closer, and its uploads are resumable: the file goes
+ * up in 6 MB pieces and a dropped connection continues from the last piece
+ * rather than starting over.
+ *
+ * The bucket is public and read-only to the world, which is exactly what a
+ * till needs: electron-updater reads latest.yml from it, then the installer.
+ * Writing needs the project's service key, which lives only on the machine
+ * that builds releases — see scripts/token.js.
  *
  *   node scripts/upload-release.js            (used by scripts/release.js)
  */
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { spawnSync } = require('child_process');
-const { findToken } = require('./token');
+const tus = require('tus-js-client');
+const { findConfig, FILES } = require('./token');
 
 const pkg = require('../package.json');
-const { owner, repo } = pkg.build.publish[0];
 const version = pkg.version;
-const tag = `v${version}`;
+const publish = pkg.build.publish[0];
+const BUCKET = publish.url.split('/object/public/')[1].replace(/\/+$/, '');
 const RELEASE_DIR = path.join(__dirname, '..', 'release');
-const API = `https://api.github.com/repos/${owner}/${repo}`;
-const ATTEMPTS = 8;
 
-const token = findToken();
-if (!token) { console.error('No GitHub token (see scripts/release.js).'); process.exit(1); }
-const headers = {
-  Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'blaze-release',
-};
+const cfg = findConfig();
+if (!cfg) {
+  console.error('No Supabase key. Put this in ' + FILES[0] + ':');
+  console.error('  { "supabase_url": "https://<project>.supabase.co", "supabase_service_key": "<service_role key>" }');
+  console.error('(Supabase → Project Settings → API → service_role.)');
+  process.exit(1);
+}
+if (!publish.url.startsWith(cfg.supabase_url)) {
+  console.error(`package.json publishes to ${publish.url}, but the key is for ${cfg.supabase_url}.`);
+  process.exit(1);
+}
+const auth = { Authorization: `Bearer ${cfg.supabase_service_key}`, apikey: cfg.supabase_service_key };
 
-/** electron-builder publishes "Blaze-POS Setup 1.1.5.exe" as Blaze-POS-Setup-1.1.5.exe; latest.yml must agree. */
+/** electron-builder's convention: spaces become dashes in the published name; latest.yml must agree. */
 const assetName = (file) => path.basename(file).replace(/ /g, '-');
 const sha512 = (file) => crypto.createHash('sha512').update(fs.readFileSync(file)).digest('base64');
+const mb = (n) => (n / 1024 / 1024).toFixed(1) + ' MB';
 
 function writeLatestYml(installer) {
   const size = fs.statSync(installer).size;
@@ -54,73 +65,89 @@ function writeLatestYml(installer) {
   return out;
 }
 
-async function gh(method, url, body) {
-  const r = await fetch(url, { method, headers: { ...headers, ...(body ? { 'Content-Type': 'application/json' } : {}) },
-    body: body ? JSON.stringify(body) : undefined });
-  if (r.status === 204) return null;
-  const text = await r.text();
-  if (!r.ok) throw new Error(`${method} ${url}: ${r.status} ${text.slice(0, 200)}`);
-  return text ? JSON.parse(text) : null;
+/** The bucket, public, created on first use. */
+async function ensureBucket() {
+  const r = await fetch(`${cfg.supabase_url}/storage/v1/bucket/${BUCKET}`, { headers: auth });
+  if (r.ok) {
+    const b = await r.json();
+    if (!b.public) {
+      const u = await fetch(`${cfg.supabase_url}/storage/v1/bucket/${BUCKET}`, {
+        method: 'PUT', headers: { ...auth, 'Content-Type': 'application/json' }, body: JSON.stringify({ public: true }),
+      });
+      if (!u.ok) throw new Error(`Could not make bucket "${BUCKET}" public: ${u.status} ${await u.text()}`);
+    }
+    return;
+  }
+  if (r.status !== 404 && r.status !== 400) throw new Error(`Supabase: ${r.status} ${await r.text()}`);
+  const c = await fetch(`${cfg.supabase_url}/storage/v1/bucket`, {
+    method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: BUCKET, name: BUCKET, public: true }),
+  });
+  if (!c.ok) throw new Error(`Could not create bucket "${BUCKET}": ${c.status} ${await c.text()}`);
+  console.log(`  created public bucket "${BUCKET}"`);
 }
 
-/** One attempt with curl, which streams the file and reports stalls. */
-function curlUpload(uploadUrl, file, name) {
-  const url = `${uploadUrl.replace(/\{.*\}$/, '')}?name=${encodeURIComponent(name)}`;
-  const r = spawnSync('curl', [
-    '-sS', '-o', '-', '-w', '\n%{http_code}',
-    '--speed-time', '90', '--speed-limit', '512',   // give up if under 512 B/s for 90 s
-    '--connect-timeout', '30',
-    '-X', 'POST',
-    '-H', `Authorization: Bearer ${token}`,
-    '-H', 'Content-Type: application/octet-stream',
-    '--data-binary', `@${file}`,
-    url,
-  ], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
-  if (r.error) return { ok: false, reason: r.error.message };
-  const out = (r.stdout || '').trim();
-  const code = Number(out.slice(out.lastIndexOf('\n') + 1));
-  if (r.status !== 0) return { ok: false, reason: (r.stderr || '').trim() || `curl exit ${r.status}` };
-  if (code === 201) return { ok: true };
-  return { ok: false, reason: `HTTP ${code} ${out.slice(0, 160)}` };
+/** What the bucket already holds for this name, or null. */
+async function existing(name) {
+  const r = await fetch(`${publish.url}/${name}`, { method: 'HEAD' });
+  if (!r.ok) return null;
+  return { size: Number(r.headers.get('content-length')) || 0 };
 }
 
-const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+/** Resumable upload: 6 MB pieces (Supabase's fixed size), retried and resumed on their own. */
+function upload(file, name, { contentType, cacheControl }) {
+  const size = fs.statSync(file).size;
+  return new Promise((resolve, reject) => {
+    let lastShown = -1;
+    const u = new tus.Upload(fs.createReadStream(file), {
+      endpoint: `${cfg.supabase_url}/storage/v1/upload/resumable`,
+      headers: { ...auth, 'x-upsert': 'true' },
+      uploadDataDuringCreation: true,
+      removeFingerprintOnSuccess: true,
+      chunkSize: 6 * 1024 * 1024,
+      uploadSize: size,
+      retryDelays: [0, 3000, 8000, 15000, 30000, 60000, 60000, 60000, 60000, 60000],
+      metadata: { bucketName: BUCKET, objectName: name, contentType, cacheControl: String(cacheControl) },
+      onError: reject,
+      onProgress: (sent) => {
+        const pct = Math.floor((sent / size) * 100);
+        if (pct !== lastShown && pct % 10 === 0) { process.stdout.write(`${pct}% `); lastShown = pct; }
+      },
+      onSuccess: () => resolve(),
+    });
+    u.start();
+  });
+}
 
 (async () => {
   const installer = path.join(RELEASE_DIR, `Blaze-POS Setup ${version}.exe`);
   const blockmap = `${installer}.blockmap`;
   if (!fs.existsSync(installer)) { console.error(`No build for ${version}: ${installer}`); process.exit(1); }
-  const files = [installer, ...(fs.existsSync(blockmap) ? [blockmap] : []), writeLatestYml(installer)];
 
-  const release = await gh('GET', `${API}/releases/tags/${tag}`);
-  const mb = (n) => (n / 1024 / 1024).toFixed(1) + ' MB';
+  await ensureBucket();
 
-  for (const file of files) {
-    const name = assetName(file);
-    const size = fs.statSync(file).size;
-    const fresh = await gh('GET', `${API}/releases/${release.id}/assets?per_page=100`);
-    const existing = (fresh || []).find(a => a.name === name);
-    if (existing && existing.state === 'uploaded' && existing.size === size && name !== 'latest.yml') {
-      console.log(`  ${name}: already on the release (${mb(size)}), skipped`);
+  // The installer and its blockmap first; latest.yml last, so a till that
+  // checks mid-upload still sees the previous complete release.
+  const plan = [
+    { file: installer, contentType: 'application/octet-stream', cacheControl: 31536000 },
+    ...(fs.existsSync(blockmap) ? [{ file: blockmap, contentType: 'application/octet-stream', cacheControl: 31536000 }] : []),
+    // Short cache: this is the file that says a new version exists.
+    { file: writeLatestYml(installer), contentType: 'text/yaml', cacheControl: 60, always: true },
+  ];
+
+  for (const step of plan) {
+    const name = assetName(step.file);
+    const size = fs.statSync(step.file).size;
+    const have = await existing(name);
+    if (have && have.size === size && !step.always) {
+      console.log(`  ${name}: already there (${mb(size)}), skipped`);
       continue;
     }
-    if (existing) {
-      console.log(`  ${name}: removing the ${existing.state === 'uploaded' ? 'old' : 'half-uploaded'} copy first`);
-      await gh('DELETE', `${API}/releases/assets/${existing.id}`);
-    }
-    let done = false;
-    for (let attempt = 1; attempt <= ATTEMPTS && !done; attempt++) {
-      process.stdout.write(`  ${name} (${mb(size)}): uploading, attempt ${attempt} of ${ATTEMPTS}... `);
-      const r = curlUpload(release.upload_url, file, name);
-      if (r.ok) { console.log('done'); done = true; break; }
-      console.log('failed: ' + r.reason);
-      // A failed attempt can leave a broken asset behind that blocks the name.
-      const again = await gh('GET', `${API}/releases/${release.id}/assets?per_page=100`);
-      const stub = (again || []).find(a => a.name === name);
-      if (stub) await gh('DELETE', `${API}/releases/assets/${stub.id}`);
-      await sleep(Math.min(60, 5 * attempt) * 1000);
-    }
-    if (!done) { console.error(`Gave up on ${name} after ${ATTEMPTS} attempts. Run "npm run release:publish-only" to try again.`); process.exit(1); }
+    process.stdout.write(`  ${name} (${mb(size)}): `);
+    await upload(step.file, name, step);
+    const check = await existing(name);
+    if (!check || check.size !== size) throw new Error(`${name} did not arrive intact (${check ? mb(check.size) : 'missing'})`);
+    console.log('done');
   }
-  console.log(`\nRelease ${tag} is complete: https://github.com/${owner}/${repo}/releases/tag/${tag}`);
-})().catch((err) => { console.error(err.message); process.exit(1); });
+  console.log(`\nRelease ${version} is live: ${publish.url}/latest.yml`);
+})().catch((err) => { console.error('\n' + (err && err.message ? err.message : err)); process.exit(1); });
