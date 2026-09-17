@@ -280,7 +280,7 @@ db.exec(`
 const branchCount = db.prepare('SELECT COUNT(*) AS c FROM branches').get().c;
 if (branchCount === 0) {
   const insertBranch = db.prepare('INSERT INTO branches (name) VALUES (?)');
-  ['E-18 Branch', 'CBR Town Branch'].forEach(n => insertBranch.run(n));
+  ['E-18 Branch', 'Lehtrar Road Branch'].forEach(n => insertBranch.run(n));
 }
 
 /*
@@ -288,7 +288,7 @@ if (branchCount === 0) {
  *
  * "Order 41" is ambiguous the moment there are two shops: each till numbers its
  * own orders from 1, so both branches have an order 41 every day. E-18-041 and
- * CBR-Town-041 are unambiguous over the phone and on a receipt.
+ * LR-041 are unambiguous over the phone and on a receipt.
  *
  * Display only. The underlying integer id is untouched and remains the sync
  * key, paired with the branch as (branch_id, local_id) — see cloud/db/schema.js.
@@ -304,12 +304,14 @@ try { db.exec("ALTER TABLE branches ADD COLUMN code TEXT DEFAULT NULL;"); } catc
     .trim()
     .replace(/[^A-Za-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
-    // Case is left as the owner typed the branch name: they asked for
-    // "CBR-Town-001", not "CBR-TOWN-001".
+    // Case is left as the owner typed the branch name.
     .slice(0, 12);
+  // The two shops have chosen codes; anything else derives from its name
+  // until the dashboard says otherwise (the settings downlink carries both).
+  const CHOSEN = { 'E-18 Branch': 'E-18', 'Lehtrar Road Branch': 'LR' };
   const setCode = db.prepare('UPDATE branches SET code = ? WHERE id = ?');
   db.prepare('SELECT id, name FROM branches WHERE code IS NULL OR code = ?').all('')
-    .forEach(b => setCode.run(slug(b.name) || `B${b.id}`, b.id));
+    .forEach(b => setCode.run(CHOSEN[b.name] || slug(b.name) || `B${b.id}`, b.id));
 }
 
 try { db.exec("ALTER TABLE staff ADD COLUMN branch_id INTEGER DEFAULT NULL;"); } catch(e) {}

@@ -2,13 +2,14 @@
  * Provision branches and the owner account.
  *
  *   node scripts/provision.js branch 1 "E-18 Branch"
- *   node scripts/provision.js branch 2 "CBR Town Branch"
+ *   node scripts/provision.js branch 2 "Lehtrar Road Branch"
+ *   node scripts/provision.js rename 2 "Lehtrar Road Branch" LR
  *   node scripts/provision.js owner owner@blaze.com "a good password" "Blaze Owner"
  *   node scripts/provision.js list
  *   node scripts/provision.js rekey 1
  *
  * The branch id must match the `branch_id` the till is configured with — the
- * ids in the POS's own `branches` table, which are 1 (E-18) and 2 (CBR Town).
+ * ids in the POS's own `branches` table, which are 1 (E-18) and 2 (Lehtrar Road).
  * Getting this wrong files a shop's takings under the other shop, so the script
  * makes you pass it explicitly rather than allocating one.
  *
@@ -44,6 +45,28 @@ async function createBranch(idArg, name) {
 
   console.log(`\n  Branch ${id} created: ${name}`);
   printKey(id, name, key);
+}
+
+/**
+ * Rename a branch, and set the short code its order numbers carry (E-18-041).
+ *
+ * The tills learn both through the settings downlink, which only moves when
+ * the settings version does — so it is bumped here. Nothing is renumbered:
+ * the code is how an order id is written, not part of the id.
+ */
+async function renameBranch(idArg, name, code) {
+  const id = Number(idArg);
+  const branch = await db.one('SELECT id, name, code FROM branches WHERE id = ?', [id]);
+  if (!branch) fail(`No branch ${idArg}.`);
+  if (!name) fail('New name required.');
+  const newCode = (code || branch.code || '').trim();
+  if (!/^[A-Za-z0-9-]{1,12}$/.test(newCode)) fail('Code: letters, digits and dashes, up to 12 characters (e.g. LR).');
+
+  await db.run('UPDATE branches SET name = ?, code = ? WHERE id = ?', [name, newCode, id]);
+  await db.run('UPDATE settings_version SET version = version + 1, updated_at = NOW() WHERE id = 1');
+
+  console.log(`\n  Branch ${id}: "${branch.name}" (${branch.code || '-'}) is now "${name}" (${newCode}).`);
+  console.log('  Its till picks the new name and code up within a minute; order numbers now read ' + newCode + '-001 and so on.\n');
 }
 
 async function rekeyBranch(idArg) {
@@ -95,12 +118,12 @@ async function createOwner(email, password, name) {
 }
 
 async function list() {
-  const branches = await db.q('SELECT id, name, active, created_at FROM branches ORDER BY id');
+  const branches = await db.q('SELECT id, name, code, active, created_at FROM branches ORDER BY id');
   const users = await db.q('SELECT id, email, name, role, branch_id, active FROM users ORDER BY id');
 
   console.log('\n  Branches');
   if (!branches.length) console.log('    (none — run "provision.js branch 1 \\"E-18 Branch\\"")');
-  branches.forEach(b => console.log(`    ${b.id}  ${b.name}${b.active ? '' : '  (inactive)'}`));
+  branches.forEach(b => console.log(`    ${b.id}  ${b.name}  [${b.code || '-'}]${b.active ? '' : '  (inactive)'}`));
 
   console.log('\n  Dashboard accounts');
   if (!users.length) console.log('    (none — run "provision.js owner <email> <password>")');
@@ -118,6 +141,7 @@ async function list() {
   switch (command) {
     case 'branch': await createBranch(args[0], args[1]); break;
     case 'rekey':  await rekeyBranch(args[0]); break;
+    case 'rename': await renameBranch(args[0], args[1], args[2]); break;
     case 'owner':  await createOwner(args[0], args[1], args[2]); break;
     case 'list':   await list(); break;
     default:
@@ -125,6 +149,7 @@ async function list() {
   Usage:
     node scripts/provision.js branch <id> <name>       create a branch, print its key
     node scripts/provision.js rekey  <id>              issue a new key for a branch
+    node scripts/provision.js rename <id> <name> [code] rename a branch and set its order-number code
     node scripts/provision.js owner  <email> <password> [name]
     node scripts/provision.js list                     show what exists
 `);

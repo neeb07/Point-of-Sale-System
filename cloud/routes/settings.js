@@ -128,7 +128,10 @@ router.get('/snapshot', requireBranch, async (req, res) => {
     const all = await readAll();
     const shared = {};
     CLOUD_OWNED.forEach(k => { if (all[k] != null) shared[k] = all[k]; });
-    res.json({ version: await currentVersion(), settings: shared });
+    // The till's own name and order-number code, so a rename made here
+    // reaches its receipts. The version is bumped by whatever renames.
+    const branch = await db.one('SELECT id, name, code FROM branches WHERE id = ?', [req.branch.id]);
+    res.json({ version: await currentVersion(), settings: shared, branch });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

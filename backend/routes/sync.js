@@ -113,6 +113,11 @@ router.post('/pair', async (req, res) => {
       branch_name: body.branch_name,
       api_key: body.api_key,
     });
+    // The branch's name and order-number code, as the dashboard has them.
+    db.prepare(`
+      INSERT INTO branches (id, name, code) VALUES (?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET name = excluded.name, code = COALESCE(excluded.code, branches.code)
+    `).run(Number(body.branch_id), String(body.branch_name), body.branch_code ? String(body.branch_code) : null);
 
     /*
      * Start the agents now.

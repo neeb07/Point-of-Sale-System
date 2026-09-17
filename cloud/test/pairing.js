@@ -8,7 +8,7 @@
  * throwaway copy of the till database. All removed at the end.
  *
  * The claim under test is the handover one: a machine with no identity at all
- * becomes E-18, or CBR Town, from a code somebody read out — without anybody
+ * becomes E-18, or Lehtrar Road, from a code somebody read out — without anybody
  * opening AppData, and without a 64-character key being shown to whoever is
  * standing at the counter.
  *

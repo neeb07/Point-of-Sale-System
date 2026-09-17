@@ -103,8 +103,8 @@ function recordCustomer({ name, phone, address, total }) {
  * The branch a row being written right now belongs to.
  *
  * The machine wins over the staff record, deliberately. A manager assigned to
- * E-18 who covers a shift at CBR Town is standing at the CBR Town drawer, and
- * that is CBR Town's cash — filing it under E-18 because of their staff record
+ * E-18 who covers a shift at Lehtrar Road is standing at the Lehtrar Road drawer,
+ * and that is Lehtrar Road's cash — filing it under E-18 because of their staff record
  * would misstate both branches at once. The staff record is only a fallback for
  * a till that has not been paired to a branch, which is the normal state of a
  * single-shop install.

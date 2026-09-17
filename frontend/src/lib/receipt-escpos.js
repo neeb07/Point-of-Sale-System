@@ -129,17 +129,26 @@ export function receiptOps(orderData, copyType, settings) {
   const restaurant = d.restaurant || {};
   const showPrices = copyType !== 'kitchen';
   const provisional = Boolean(info.provisional);
+  const update = info.update || null;
 
   const ops = [];
 
   // --- copy banner ---------------------------------------------------------
   // Says which copy this is, and — on the two that carry money — whether it is
   // a paid bill. The kitchen never sees money, so its banner is left alone.
-  const banner = provisional && copyType !== 'kitchen'
-    ? `${COPY_LABELS[copyType]} - PROVISIONAL, NOT PAID`
-    : COPY_LABELS[copyType];
+  const banner = update
+    ? `${COPY_LABELS[copyType]} - UPDATED ORDER`
+    : provisional && copyType !== 'kitchen'
+      ? `${COPY_LABELS[copyType]} - PROVISIONAL, NOT PAID`
+      : COPY_LABELS[copyType];
   ops.push(text(banner, { align: 'center', bold: true }));
   ops.push(rule('='));
+  if (update) {
+    // Large, so the kitchen cannot mistake it for a new order.
+    ops.push(text('UPDATED ORDER', { align: 'center', bold: true, size: 'wide' }));
+    ops.push(text(String(info.orderNumber || ''), { align: 'center', bold: true }));
+    ops.push(text('Only the changes are listed below', { align: 'center' }));
+  }
 
   // --- header --------------------------------------------------------------
   ops.push(text(restaurant.name || 'Restaurant', { align: 'center', bold: true, size: 'wide' }));
@@ -169,14 +178,34 @@ export function receiptOps(orderData, copyType, settings) {
 
   // --- items ---------------------------------------------------------------
   ops.push(rule());
-  const head = showPrices
-    ? twoCol('ITEM', 'QTY   AMOUNT', columns)
-    : twoCol('ITEM', 'QTY', columns);
-  ops.push(text(head, { bold: true }));
-  ops.push(rule());
-  (d.items || []).forEach((item) => {
-    itemRow(item, columns, showPrices, formatMoney).forEach(op => ops.push(op));
-  });
+  if (update) {
+    // The changes only: what to add to the order, and what to take off it.
+    if ((d.items || []).length) {
+      ops.push(text('ADDED', { bold: true }));
+      ops.push(text(twoCol('ITEM', 'QTY', columns), { bold: true }));
+      ops.push(rule());
+      (d.items || []).forEach((item) => {
+        itemRow(item, columns, false, formatMoney).forEach(op => ops.push(op));
+      });
+    }
+    if ((update.removed || []).length) {
+      if ((d.items || []).length) ops.push(rule());
+      ops.push(text('REMOVED - DO NOT MAKE', { bold: true }));
+      ops.push(rule());
+      update.removed.forEach((item) => {
+        itemRow(item, columns, false, formatMoney).forEach(op => ops.push(op));
+      });
+    }
+  } else {
+    const head = showPrices
+      ? twoCol('ITEM', 'QTY   AMOUNT', columns)
+      : twoCol('ITEM', 'QTY', columns);
+    ops.push(text(head, { bold: true }));
+    ops.push(rule());
+    (d.items || []).forEach((item) => {
+      itemRow(item, columns, showPrices, formatMoney).forEach(op => ops.push(op));
+    });
+  }
 
   // --- totals (not on the kitchen copy) ------------------------------------
   if (showPrices) {

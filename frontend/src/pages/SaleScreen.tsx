@@ -44,6 +44,8 @@ interface ReceiptData {
     orderType: string;
     /** A ticket that has not been paid — the bill copies say so. */
     provisional?: boolean;
+    /** A kitchen ticket listing only what changed on a held order. */
+    update?: { removed: { name: string; quantity: number }[] };
   };
   items: { name: string; quantity: number; price: number }[];
   subtotal: number;
@@ -226,7 +228,7 @@ export default function SaleScreen({ onNavigate }: SaleScreenProps = {}) {
    * marks a ticket that has not been paid for, so the customer and restaurant
    * copies say so rather than pass for a paid bill.
    */
-  const receiptFrom = (order: any, opts: { provisional?: boolean; paymentMethod?: string } = {}): ReceiptData => ({
+  const receiptFrom = (order: any, opts: { provisional?: boolean; paymentMethod?: string; update?: { added: any[]; removed: any[] } } = {}): ReceiptData => ({
     orderInfo: {
       date: moment().format('DD/MM/YYYY'),
       time: moment().format('hh:mm A'),
@@ -240,8 +242,12 @@ export default function SaleScreen({ onNavigate }: SaleScreenProps = {}) {
       cashier: currentUser?.name || 'Unknown',
       orderType: order.order_type || 'Dine-in',
       provisional: Boolean(opts.provisional),
+      // An updated ticket for the kitchen: only what changed, said so on top.
+      update: opts.update ? { removed: opts.update.removed || [] } : undefined,
     },
-    items: (order.items || []).map((i: any) => ({ name: i.name, quantity: i.quantity, price: i.price })),
+    items: opts.update
+      ? (opts.update.added || []).map((i: any) => ({ name: i.name, quantity: i.quantity, price: 0 }))
+      : (order.items || []).map((i: any) => ({ name: i.name, quantity: i.quantity, price: i.price })),
     subtotal: order.subtotal ?? 0,
     // The server's `discount` is the combined figure; the receipt shows the
     // manual and staff portions on separate lines, so take the manual part.
@@ -305,8 +311,22 @@ export default function SaleScreen({ onNavigate }: SaleScreenProps = {}) {
         ? await ordersAPI.updateHeld(editingHold.id, body)
         : await ordersAPI.hold(body);
 
-      setReceiptCopies(['kitchen']);
-      setReceiptData(receiptFrom(ticket, { provisional: true }));
+      if (editingHold) {
+        /*
+         * The kitchen is cooking from the first ticket. Print only what
+         * changed on the plate — new dishes, and any taken off — headed
+         * UPDATED ORDER with the ticket number. A change that touches no
+         * dish (a discount, a delivery charge, the table) prints nothing.
+         */
+        const changes = (ticket as any).changes || { added: [], removed: [] };
+        if (changes.added.length || changes.removed.length) {
+          setReceiptCopies(['kitchen']);
+          setReceiptData(receiptFrom(ticket, { provisional: true, update: changes }));
+        }
+      } else {
+        setReceiptCopies(['kitchen']);
+        setReceiptData(receiptFrom(ticket, { provisional: true }));
+      }
       setEditingHold(null);
       resetOrder();
       refreshHeldCount();

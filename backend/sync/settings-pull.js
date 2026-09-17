@@ -54,6 +54,28 @@ function localVersion() {
   return Number.isFinite(n) ? n : 0;
 }
 
+/**
+ * The branch's own name and order-number code, as the dashboard has them.
+ *
+ * The till's `branches` row was seeded at install and would otherwise never
+ * change — a shop renamed on the dashboard would keep printing its old code
+ * on every receipt. Only this till's own row is touched.
+ */
+const upsertBranch = db.prepare(`
+  INSERT INTO branches (id, name, code) VALUES (?, ?, ?)
+  ON CONFLICT(id) DO UPDATE SET name = excluded.name, code = COALESCE(excluded.code, branches.code)
+`);
+function applyBranch(branch) {
+  if (!branch || !Number.isFinite(Number(branch.id)) || !branch.name) return false;
+  upsertBranch.run(Number(branch.id), String(branch.name), branch.code ? String(branch.code) : null);
+  const { writeIdentity, load } = require('../db/till-identity');
+  const cfg = syncConfig();
+  if (cfg && cfg.branchId === Number(branch.id) && cfg.branchName !== branch.name) {
+    writeIdentity({ ...load(), branch_name: branch.name });
+  }
+  return true;
+}
+
 async function pullIfNewer(cloudVersion = null) {
   const config = syncConfig();
   if (!config) return { skipped: 'not paired' };
@@ -91,6 +113,7 @@ async function pullIfNewer(cloudVersion = null) {
         applied.push(key);
       }
       setSetting.run('cloud_settings_version', String(remote));
+      applyBranch(snapshot.branch);
     })();
 
     state.lastAppliedAt = Date.now();

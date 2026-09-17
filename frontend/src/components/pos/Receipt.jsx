@@ -318,11 +318,13 @@ const COPY_LABELS = {
  * held order carry PROVISIONAL across the top, the way a real shop's does; the
  * kitchen copy is left alone, because the kitchen never sees money.
  */
-const CopyBanner = ({ copyType, provisional }) => {
+const CopyBanner = ({ copyType, provisional, update }) => {
   if (!copyType || !COPY_LABELS[copyType]) return null;
-  const label = provisional && copyType !== 'kitchen'
-    ? `${COPY_LABELS[copyType]} — PROVISIONAL, NOT PAID`
-    : COPY_LABELS[copyType];
+  const label = update
+    ? `${COPY_LABELS[copyType]} — UPDATED ORDER`
+    : provisional && copyType !== 'kitchen'
+      ? `${COPY_LABELS[copyType]} — PROVISIONAL, NOT PAID`
+      : COPY_LABELS[copyType];
   return (
     <div
       style={{
@@ -391,12 +393,41 @@ export default function Receipt({
         overflow: 'hidden',
       }}
     >
-      <CopyBanner copyType={copyType} provisional={Boolean(orderInfo?.provisional)} />
+      <CopyBanner copyType={copyType} provisional={Boolean(orderInfo?.provisional)} update={Boolean(orderInfo?.update)} />
+      {orderInfo?.update && (
+        /*
+          Said twice on purpose — in the banner and here, large — because
+          this ticket looks like every other one and the one thing the
+          kitchen must not do is cook it as a new order.
+        */
+        <div style={{ padding: '8px 20px 0', textAlign: 'center', fontFamily: 'Inter, sans-serif' }}>
+          <div style={{ fontSize: 16, fontWeight: 800, color: '#111111', letterSpacing: 1 }}>UPDATED ORDER</div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: '#111111' }}>{orderInfo.orderNumber}</div>
+          <div style={{ fontSize: 11, color: '#374151', marginTop: 2 }}>Only the changes are listed below</div>
+        </div>
+      )}
       <ReceiptHeader restaurant={restaurant} />
       <ReceiptMeta orderInfo={orderInfo} />
       <ReceiptCustomer customer={customer} />
       <ReceiptDivider />
-      <ReceiptItemsTable items={items} showPrices={showPrices} />
+      {orderInfo?.update ? (
+        <>
+          {items.length > 0 && (
+            <>
+              <div style={{ padding: '8px 20px 0', fontSize: 12, fontWeight: 800, color: '#111111' }}>ADDED</div>
+              <ReceiptItemsTable items={items} showPrices={false} />
+            </>
+          )}
+          {orderInfo.update.removed && orderInfo.update.removed.length > 0 && (
+            <>
+              <div style={{ padding: '8px 20px 0', fontSize: 12, fontWeight: 800, color: '#111111' }}>REMOVED — DO NOT MAKE</div>
+              <ReceiptItemsTable items={orderInfo.update.removed} showPrices={false} />
+            </>
+          )}
+        </>
+      ) : (
+        <ReceiptItemsTable items={items} showPrices={showPrices} />
+      )}
       <ReceiptDivider />
       {showPrices && (
         <ReceiptTotals

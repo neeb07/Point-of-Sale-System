@@ -3,7 +3,7 @@
  *
  * `Authorization: Bearer <branch api key>`. The key identifies the branch, and
  * **the branch is taken from the key alone** — any `branch_id` in the request
- * body is ignored. A compromised E-18 key therefore cannot write CBR Town's
+ * body is ignored. A compromised E-18 key therefore cannot write Lehtrar Road's
  * figures, which is the property that matters most here: the whole value of the
  * dashboard is that the owner can trust which shop a number came from.
  */

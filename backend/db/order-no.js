@@ -6,7 +6,7 @@
  * customer ringing about "order 41" is asking about one of two different sales.
  *
  * So the branch's short code goes in front, and the number is padded to three
- * digits: E-18-041, CBR-Town-007. Padding is cosmetic but worth having — it
+ * digits: E-18-041, LR-007. Padding is cosmetic but worth having — it
  * keeps a printed list aligned and makes a transposed digit visible.
  *
  * This is a *label*, not a key. The row's integer id is unchanged and remains

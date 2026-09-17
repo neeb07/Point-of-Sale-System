@@ -9,7 +9,7 @@
  * Deliberate shape decisions, all inherited from the sync design:
  *
  * **Every synced row is keyed on `(branch_id, local_id)`.** Each till assigns
- * its own ids, so E-18's order #12 and CBR Town's order #12 are different sales
+ * its own ids, so E-18's order #12 and Lehtrar Road's order #12 are different sales
  * wearing the same number. The cloud keeps a `id` of its own for joins,
  * and the unique constraint on the pair is what makes a re-sent batch harmless
  * — which matters because on a flaky link a till often cannot tell whether a

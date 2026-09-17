@@ -40,7 +40,7 @@ router.get('/categories', (req, res) => res.json(CATEGORIES));
  *
  * An administrator sees everything the shop paid out. A manager sees only what
  * they recorded themselves, so the E-18 manager's fuel money never appears on
- * the CBR Town manager's screen — and neither of them can read the owner's
+ * the Lehtrar Road manager's screen — and neither of them can read the owner's
  * outgoings.
  *
  * The filter comes from the session, not from a query parameter, so a manager

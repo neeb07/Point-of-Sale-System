@@ -115,6 +115,26 @@ async function waitFor(url, tries = 120) {
   ok('items and table can be changed', edited.status === 200 && edited.body.total === 2650);
   ok('it keeps its ticket number', edited.body.ticket_no === held.body.ticket_no);
 
+  // The kitchen is cooking from the first ticket; it needs the difference,
+  // not a second full ticket. Fries were untouched and must not reappear.
+  const ch = edited.body.changes || {};
+  ok('the update says what was added', Array.isArray(ch.added) && ch.added.length === 1
+     && ch.added[0].name === 'Pizza (Large)' && ch.added[0].quantity === 1);
+  ok('and what came off — one Zinger, not both', Array.isArray(ch.removed) && ch.removed.length === 2
+     && ch.removed.some(r => r.name === 'Zinger' && r.quantity === 1)
+     && ch.removed.some(r => r.name === 'Fries' && r.quantity === 1));
+
+  const same = await call('PUT', `/orders/held/${ID}`, T, {
+    ...ticket,
+    items: [
+      { id: 1, name: 'Zinger', price: 600, quantity: 1 },
+      { id: 3, name: 'Pizza (Large)', price: 2050, quantity: 1 },
+    ],
+    table_number: '10',
+  });
+  ok('a change that touches no dish (the table) reports no dish changes',
+     same.status === 200 && same.body.changes.added.length === 0 && same.body.changes.removed.length === 0);
+
   const board = await call('GET', '/orders/held', T);
   ok('it shows on the board', (board.body || []).some(h => h.id === ID));
 

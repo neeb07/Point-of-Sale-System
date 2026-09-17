@@ -400,12 +400,48 @@ router.get('/held/:id', (req, res) => {
 });
 
 // Change a ticket — add or remove items, change a size, correct the table.
+/**
+ * What changed on the plate between two versions of a ticket.
+ *
+ * The kitchen is cooking from the first ticket. When the manager changes it,
+ * a second full ticket would have them cook the pizza twice; a ticket with no
+ * item changes at all — a discount added, a delivery charge corrected — is
+ * nothing the kitchen needs to see. So the update reports the difference in
+ * dishes and quantities, and the till prints only that, or nothing.
+ */
+function itemChanges(before, after) {
+  const key = (i) => `${i.id}|${i.variant_id || ''}|${i.name}`;
+  const tally = (items) => {
+    const m = new Map();
+    (items || []).forEach((i) => {
+      const k = key(i);
+      const cur = m.get(k) || { name: i.name, quantity: 0 };
+      cur.quantity += Number(i.quantity) || 0;
+      m.set(k, cur);
+    });
+    return m;
+  };
+  const was = tally(before), now = tally(after);
+  const added = [], removed = [];
+  for (const [k, v] of now) {
+    const delta = v.quantity - ((was.get(k) || {}).quantity || 0);
+    if (delta > 0) added.push({ name: v.name, quantity: delta });
+  }
+  for (const [k, v] of was) {
+    const delta = v.quantity - ((now.get(k) || {}).quantity || 0);
+    if (delta > 0) removed.push({ name: v.name, quantity: delta });
+  }
+  return { added, removed };
+}
+
 router.put('/held/:id', (req, res) => {
   const row = getHeld().get(req.params.id);
   if (!row) return res.status(404).json({ error: 'That ticket is no longer held.' });
   try {
+    const before = JSON.parse(row.payload);
     storeHeld(req.body, req, row.id);
-    res.json(describeHeld(getHeld().get(row.id)));
+    const changes = itemChanges(before.items, req.body && req.body.items);
+    res.json({ ...describeHeld(getHeld().get(row.id)), changes });
   } catch (err) {
     sendOrderError(res, err, 'updating held order');
   }

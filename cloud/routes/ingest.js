@@ -128,7 +128,7 @@ async function ingestOrders(client, branchId, rows, receivedAt) {
    * Remap the line items onto the CLOUD's order id.
    *
    * The till sends its own order id, which is only unique within that branch.
-   * Storing it unchanged would make E-18's items join onto CBR Town's order of
+   * Storing it unchanged would make E-18's items join onto Lehtrar Road's order of
    * the same number — quietly attributing one shop's food to the other's sale.
    */
   const cloudIdFor = new Map(result.rows.map(r => [Number(r.local_id), r.id]));

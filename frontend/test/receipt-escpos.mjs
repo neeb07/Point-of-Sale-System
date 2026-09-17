@@ -84,6 +84,21 @@ ok('the customer copy says PROVISIONAL, NOT PAID', /PROVISIONAL, NOT PAID/.test(
 ok('the kitchen copy does not', !/PROVISIONAL/.test(heldKitchen));
 
 console.log();
+console.log('=== AN UPDATED TICKET TELLS THE KITCHEN ONLY WHAT CHANGED ===');
+const updated = { ...order,
+  orderInfo: { ...order.orderInfo, orderNumber: 'Ticket H-7', provisional: true,
+               update: { removed: [{ name: 'Crunchy Pizza (X-Large)', quantity: 1 }] } },
+  items: [{ name: 'Alfredo Pasta', quantity: 1, price: 0 }] };
+const uOps = receiptOps(updated, 'kitchen', settings);
+const uText = lines(uOps).join(String.fromCharCode(10));
+ok('says UPDATED ORDER in the banner', /KITCHEN COPY - UPDATED ORDER/.test(uText));
+ok('and again, large', uOps.some(o => o.t === 'text' && o.v === 'UPDATED ORDER' && o.size === 'wide'));
+ok('with the ticket number', uText.includes('Ticket H-7'));
+ok('lists the new dish under ADDED', uText.indexOf('ADDED') < uText.indexOf('Alfredo Pasta'));
+ok('and the dropped one under REMOVED', uText.indexOf('REMOVED') < uText.indexOf('Crunchy Pizza') && uText.indexOf('REMOVED') > uText.indexOf('Alfredo Pasta'));
+ok('with no prices', !/Rs /.test(uText));
+
+console.log();
 console.log('=== A DELIVERY ORDER ===');
 const delivery = { ...order,
   orderInfo: { ...order.orderInfo, orderType: 'Delivery' }, deliveryCharge: 150,

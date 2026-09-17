@@ -193,7 +193,7 @@ router.post('/claim', async (req, res) => {
 
       const branchId = claim.rows[0].branch_id;
       const branch = await client.query(db.toPg(
-        'SELECT id, name FROM branches WHERE id = ? AND active = 1'), [branchId]);
+        'SELECT id, name, code FROM branches WHERE id = ? AND active = 1'), [branchId]);
       if (!branch.rowCount) throw new Error('That branch is no longer active.');
 
       // The machine being replaced stops reporting as this shop from here on.
@@ -223,6 +223,7 @@ router.post('/claim', async (req, res) => {
       enabled: true,
       branch_id: result.branch.id,
       branch_name: result.branch.name,
+      branch_code: result.branch.code || null,
       api_key: result.apiKey,
     });
   } catch (err) {

@@ -31,13 +31,13 @@ report an empty shop, which reads exactly like a shop that sold nothing.
 
 ## Provisioning
 
-Branch ids **must match the ids the tills use** — 1 for E-18, 2 for CBR Town,
+Branch ids **must match the ids the tills use** — 1 for E-18, 2 for Lehtrar Road,
 as seeded in `backend/db/database.js`. A mismatch files one shop's takings
 under the other, so the script makes you pass the id explicitly.
 
 ```
 node scripts/provision.js branch 1 "E-18 Branch"
-node scripts/provision.js branch 2 "CBR Town Branch"
+node scripts/provision.js branch 2 "Lehtrar Road Branch"
 node scripts/provision.js owner owner@blaze.com "a long password" "Blaze Owner"
 node scripts/provision.js list
 ```

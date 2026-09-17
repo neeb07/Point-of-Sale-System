@@ -178,5 +178,5 @@ function writeIdentity(config) {
 }
 
 module.exports = {
-  tillBranchId, isSyncEnabled, syncConfig, publicStatus, writeIdentity, IDENTITY_PATH,
+  tillBranchId, isSyncEnabled, syncConfig, publicStatus, writeIdentity, load, IDENTITY_PATH,
 };
