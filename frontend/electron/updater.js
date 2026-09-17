@@ -16,12 +16,11 @@
  * never mid-order. The screen says an update is waiting; whoever closes up
  * gets it.
  *
- * **Updates come from a public Supabase Storage bucket** (package.json
- * `build.publish`): latest.yml says what the newest version is, the installer
- * sits beside it. The tills need no key — the bucket is world-readable — and
- * releases go up from the build machine with scripts/release.js. GitHub was
- * tried first and abandoned: from here the route to its upload server was too
- * slow for its endpoint to accept a 100 MB installer.
+ * **Updates come from GitHub Releases.** The repository is public, so the
+ * tills need no token, and there is nothing to host or keep running. If the
+ * repository is ever made private this breaks silently (the check fails and
+ * is logged, nothing else), and the update source would need to move to the
+ * cloud — see package.json `build.publish`.
  *
  * Only in the packaged app. In development there is nothing to update to.
  */
