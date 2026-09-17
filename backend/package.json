@@ -21,7 +21,6 @@
     "express": "^5.2.1",
     "form-data": "^4.0.6",
     "node-fetch": "^3.3.2",
-    "nodemon": "^3.1.14",
     "pdfkit": "^0.19.1"
   },
   "better_sqlite3_options": {
@@ -29,6 +28,7 @@
   },
   "devDependencies": {
     "@electron/rebuild": "^4.0.6",
-    "electron-rebuild": "^3.2.9"
+    "electron-rebuild": "^3.2.9",
+    "nodemon": "^3.1.14"
   }
 }

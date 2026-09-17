@@ -1,9 +1,9 @@
 /**
  * Build, tag and publish a release with one command:  npm run release
  *
- * `npm run release:publish-only` skips the build and publishes what is
- * already in release/win-unpacked — for when a build finished but the upload
- * did not (a dropped connection, a missing token).
+ * `npm run release:publish-only` skips the build and uploads what is already
+ * in release/ — for when a build finished but the upload did not. Only the
+ * files the release is missing are sent, each with its own retries.
  *
  * The GitHub token is read from, in order:
  *   1. the GH_TOKEN environment variable
@@ -14,26 +14,9 @@
  * in any terminal, whether or not the terminal was opened after a user
  * variable was set. Neither file is ever committed.
  */
-const fs = require('fs');
-const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
-
-const FILES = [
-  path.join(os.homedir(), '.blaze-release-token'),
-  path.join(__dirname, '..', '.release-token'),
-];
-
-function findToken() {
-  if (process.env.GH_TOKEN && process.env.GH_TOKEN.trim()) return process.env.GH_TOKEN.trim();
-  for (const f of FILES) {
-    try {
-      const t = fs.readFileSync(f, 'utf8').trim();
-      if (t) return t;
-    } catch (e) { /* not there */ }
-  }
-  return null;
-}
+const { findToken, FILES } = require('./token');
 
 const token = findToken();
 if (!token) {
@@ -85,8 +68,9 @@ ensureRelease().then(() => {
   if (!publishOnly) {
     run('npm', ['run', 'prepare-backend']);
     run('npx', ['vite', 'build']);
-    run('npx', ['electron-builder', 'build', '--win', '--publish', 'always']);
-  } else {
-    run('npx', ['electron-builder', '--win', '--publish', 'always', '--prepackaged', 'release/win-unpacked']);
+    // Built here, uploaded by our own uploader: electron-builder's sends each
+    // file once and gives up at the first dropped connection.
+    run('npx', ['electron-builder', 'build', '--win', '--publish', 'never']);
   }
+  run('node', [path.join(__dirname, 'upload-release.js')]);
 }).catch((err) => { console.error(err.message); process.exit(1); });

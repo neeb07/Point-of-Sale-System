@@ -19,11 +19,12 @@
 FROM node:22-alpine AS build
 WORKDIR /app
 
-# frontend's runtime packages. Everything heavy — Electron, electron-builder,
-# the POS's own Vite — is dev-only and skipped; --ignore-scripts guards against
-# any postinstall reaching for the network or a native toolchain.
+# The packages the dashboard's screens import through ../frontend/src. They
+# live in frontend's devDependencies (Vite bundles them, so the installed POS
+# does not ship them), hence no --omit=dev here. --ignore-scripts keeps
+# Electron's postinstall from downloading a binary this image never runs.
 COPY frontend/package.json frontend/package-lock.json frontend/
-RUN npm ci --prefix frontend --omit=dev --ignore-scripts
+RUN npm ci --prefix frontend --ignore-scripts
 
 COPY dashboard/package.json dashboard/package-lock.json dashboard/
 RUN npm ci --prefix dashboard
