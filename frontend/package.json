@@ -160,6 +160,10 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Blaze POS"
-    }
+    },
+    "electronLanguages": [
+      "en-US",
+      "en-GB"
+    ]
   }
 }
