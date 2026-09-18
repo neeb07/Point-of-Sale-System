@@ -27,19 +27,52 @@ const { formatOrderNo } = require('../db/order-no');
  * today, and a deal edited later is a rare thing to reprint.
  */
 const dealContentsStmt = db.prepare(`
-  SELECT di.quantity, mi.name, iv.label AS variant_label
+  SELECT di.quantity, mi.name, mi.category, iv.label AS variant_label
     FROM deal_items di
     LEFT JOIN menu_items    mi ON mi.id = di.menu_item_id
     LEFT JOIN item_variants iv ON iv.id = di.variant_id
    WHERE di.deal_id = ?
    ORDER BY di.id
 `);
-function dealContents(dealId) {
+const dealNameStmt = db.prepare('SELECT name FROM deals WHERE id = ?');
+const isPizzaLine = (category) => /pizza/i.test(String(category || ''));
+
+/**
+ * The flavours chosen for a deal's pizzas, read back from the order line.
+ *
+ * The till appends them to the deal's name when the cashier picks them —
+ * "Platter Deal 1 (Vegetable Pizza, Tikka)" — and that name is what the order
+ * stores, so this is the one place they survive. The deal's definition names
+ * a placeholder pizza for pricing and size; the receipt must show what was
+ * actually chosen, never the placeholder.
+ */
+function chosenFlavours(dealId, lineName) {
+  const deal = dealNameStmt.get(dealId);
+  if (!deal || !lineName) return [];
+  const prefix = `${deal.name} (`;
+  const s = String(lineName);
+  if (!s.startsWith(prefix) || !s.endsWith(')')) return [];
+  return s.slice(prefix.length, -1).split(',').map(x => x.trim()).filter(Boolean);
+}
+
+function dealContents(dealId, lineName) {
   try {
-    return dealContentsStmt.all(dealId).map(r => ({
-      name: r.variant_label ? `${r.name} (${r.variant_label})` : (r.name || 'Item'),
-      quantity: Number(r.quantity) || 1,
-    }));
+    const flavours = chosenFlavours(dealId, lineName);
+    let slot = 0;
+    return dealContentsStmt.all(dealId).flatMap((r) => {
+      const qty = Number(r.quantity) || 1;
+      const size = r.variant_label ? ` (${r.variant_label})` : '';
+      if (!isPizzaLine(r.category)) return [{ name: (r.name || 'Item') + size, quantity: qty }];
+      // One entry per pizza, each with the flavour picked for that slot; a
+      // slot with no choice recorded is a pizza of that size, not the
+      // placeholder the deal was priced against.
+      const out = [];
+      for (let n = 0; n < qty; n++) {
+        const flavour = flavours[slot++];
+        out.push({ name: (flavour || 'Pizza') + size, quantity: 1 });
+      }
+      return out;
+    });
   } catch (e) { return []; }
 }
 /** Attach `contents` to every deal line; other lines are returned as they are. */
@@ -47,7 +80,7 @@ function withDealContents(items) {
   return (items || []).map((i) => {
     const isDeal = i.is_deal === 1 || i.is_deal === true;
     const dealId = i.menu_item_id != null ? i.menu_item_id : i.id;
-    return isDeal && dealId != null ? { ...i, contents: dealContents(dealId) } : i;
+    return isDeal && dealId != null ? { ...i, contents: dealContents(dealId, i.name) } : i;
   });
 }
 

@@ -55,9 +55,20 @@ const itemKey = (menuItemId: number, variantId?: number | null) =>
 const lineUnitPrice = (i: DealItem) =>
   i.variant_id != null && i.variant_price != null ? i.variant_price : i.price;
 
-/** Display name including the variant label when present. */
-const lineName = (i: DealItem) =>
-  i.variant_label ? `${i.name} (${i.variant_label})` : i.name;
+/**
+ * Display name including the variant label when present.
+ *
+ * A pizza in a deal is a size, not a flavour: the flavour is chosen at the
+ * till when the deal is sold and printed on that receipt. The specific pizza
+ * the deal was built with only fixes the price and the size, so it is not
+ * shown — "Tikka (Medium)" here would read as a promise the receipt then
+ * breaks.
+ */
+const lineName = (i: DealItem) => {
+  const size = i.variant_label ? ` (${i.variant_label})` : '';
+  if (/pizza/i.test(i.category || '')) return `Pizza${size} — flavour chosen at the till`;
+  return i.name + size;
+};
 
 const ORANGE = '#DC2626';
 const ORANGE_LIGHT = '#FEEFD0';

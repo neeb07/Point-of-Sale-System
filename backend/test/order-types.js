@@ -108,6 +108,24 @@ async function waitFor(url, tries = 120) {
     console.log('   (no deal with items in this database — skipped)');
   }
 
+  // A deal with a pizza in it is priced against one pizza but sold with the
+  // flavour the customer picks; the receipt must show the flavour, never the
+  // pizza the deal happened to be built with.
+  const pizzaDeal = db.prepare(`
+    SELECT d.id, d.name, d.price, mi.name AS placeholder, iv.label AS size
+      FROM deals d JOIN deal_items di ON di.deal_id = d.id
+      JOIN menu_items mi ON mi.id = di.menu_item_id
+      LEFT JOIN item_variants iv ON iv.id = di.variant_id
+     WHERE mi.category LIKE '%Pizza%' ORDER BY d.id LIMIT 1`).get();
+  if (pizzaDeal) {
+    const soldAs = `${pizzaDeal.name} (Vegetable Pizza)`;
+    const r = await call('POST', '/orders', M, { items: [{ id: pizzaDeal.id, name: soldAs, price: pizzaDeal.price, quantity: 1, is_deal: true }], order_type: 'Dine-in', payment_method: 'Cash' });
+    const names = ((r.body.items || [])[0]?.contents || []).map(c => c.name);
+    console.log('   ' + soldAs + ': ' + names.join(', '));
+    ok('the chosen flavour is listed with the size', names.some(n => n.startsWith('Vegetable Pizza') && (!pizzaDeal.size || n.includes(pizzaDeal.size))));
+    ok('and the placeholder pizza is not', !names.some(n => n.startsWith(pizzaDeal.placeholder)));
+  }
+
   console.log();
   console.log('=== THE REPORT SPLITS THEM ===');
   const today = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })();
