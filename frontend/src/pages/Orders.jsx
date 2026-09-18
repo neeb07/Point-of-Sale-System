@@ -252,6 +252,7 @@ export default function Orders() {
         orderType: order.order_type || 'Dine-in',
       },
       items: (order.items || []).map((i) => ({
+        contents: i.contents,
         name: i.name,
         quantity: i.quantity,
         price: i.price,

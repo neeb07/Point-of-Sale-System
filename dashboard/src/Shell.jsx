@@ -8,7 +8,7 @@ import { SettingsProvider } from '@/lib/SettingsContext';
 // vite.config.js for how their three environment-specific imports are replaced.
 import Reports from '@/pages/Reports';
 import ExpensesScreen from '@/pages/ExpensesScreen';
-import ShiftsScreen from '@/pages/ShiftsScreen';
+import ShiftsScreen from './ShiftsScreen';
 import Cashier from '@/pages/Cashier';
 import InventoryScreen from '@/pages/InventoryScreen';
 import MenuManagement from '@/pages/MenuManagement';

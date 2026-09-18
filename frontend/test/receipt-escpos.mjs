@@ -99,6 +99,17 @@ ok('and the dropped one under REMOVED', uText.indexOf('REMOVED') < uText.indexOf
 ok('with no prices', !/Rs /.test(uText));
 
 console.log();
+console.log('=== A DEAL SAYS WHAT IS INSIDE IT ===');
+const withDeal = { ...order, items: [
+  { name: 'Pizza Deal 2 (Tikka)', quantity: 1, price: 1800,
+    contents: [{ name: 'Chicken Tikka Pizza (Large)', quantity: 1 }, { name: 'Hot Wings', quantity: 6 }, { name: 'Soft Drink 1.5L', quantity: 1 }] },
+] };
+const dealText = lines(receiptOps(withDeal, 'kitchen', settings)).join(String.fromCharCode(10));
+ok('the deal line is there', dealText.includes('Pizza Deal 2'));
+ok('and each dish inside it, indented', dealText.includes(String.fromCharCode(10) + '  - Chicken Tikka Pizza') && /- 6 x Hot Wings/.test(dealText) && /- Soft Drink/.test(dealText));
+ok('within the roll width', lines(receiptOps(withDeal, 'customer', settings)).every(l => l.length <= 48));
+
+console.log();
 console.log('=== A DELIVERY ORDER ===');
 const delivery = { ...order,
   orderInfo: { ...order.orderInfo, orderType: 'Delivery' }, deliveryCharge: 150,

@@ -151,6 +151,21 @@ router.get('/shifts/current', requireUser, async (req, res) => {
   }
 });
 
+/**
+ * Every drawer open right now, one per branch — what the Shifts tab shows
+ * side by side. Newest first, so the branch that opened last leads.
+ */
+router.get('/shifts/open', requireUser, async (req, res) => {
+  const s = scope(req, 's');
+  try {
+    res.json(await db.q(
+      `${SHIFT_SELECT} WHERE s.status = 'open'${s.sql} ORDER BY s.opened_at DESC`,
+      s.params));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get('/shifts/history', requireUser, async (req, res) => {
   const limit = Math.min(Number(req.query.limit) || 10, 50);
   const s = scope(req, 's');

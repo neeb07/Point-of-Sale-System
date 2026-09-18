@@ -17,6 +17,40 @@ const { formatOrderNo } = require('../db/order-no');
  * confirmed ticket is a sale in exactly the way a direct sale is.
  */
 
+/**
+ * What is inside a deal, for the receipt.
+ *
+ * A deal is sold as one line — "Pizza Deal 2" — but the kitchen has to make
+ * the pizza, the wings and the drink, and a customer wants to see what the
+ * price covered. Read from the deal's current definition when the order is
+ * described, not stored per order: the definition is what the shop sells
+ * today, and a deal edited later is a rare thing to reprint.
+ */
+const dealContentsStmt = db.prepare(`
+  SELECT di.quantity, mi.name, iv.label AS variant_label
+    FROM deal_items di
+    LEFT JOIN menu_items    mi ON mi.id = di.menu_item_id
+    LEFT JOIN item_variants iv ON iv.id = di.variant_id
+   WHERE di.deal_id = ?
+   ORDER BY di.id
+`);
+function dealContents(dealId) {
+  try {
+    return dealContentsStmt.all(dealId).map(r => ({
+      name: r.variant_label ? `${r.name} (${r.variant_label})` : (r.name || 'Item'),
+      quantity: Number(r.quantity) || 1,
+    }));
+  } catch (e) { return []; }
+}
+/** Attach `contents` to every deal line; other lines are returned as they are. */
+function withDealContents(items) {
+  return (items || []).map((i) => {
+    const isDeal = i.is_deal === 1 || i.is_deal === true;
+    const dealId = i.menu_item_id != null ? i.menu_item_id : i.id;
+    return isDeal && dealId != null ? { ...i, contents: dealContents(dealId) } : i;
+  });
+}
+
 const VALID_PAYMENTS = ['Cash', 'Card', 'Online'];
 /** Where the food goes. Anything else is filed as dine-in rather than refused. */
 const VALID_ORDER_TYPES = ['Dine-in', 'Takeaway', 'Delivery'];
@@ -241,7 +275,7 @@ function describeOrder(body, p, branchId, extra = {}) {
     payment_method: p.paymentMethod,
     order_type: p.orderType,
     table_number: body.table_number || null,
-    items: p.items,
+    items: withDealContents(p.items),
     customer_name: trimmed(body.customer_name),
     customer_phone: trimmed(body.customer_phone),
     customer_address: trimmed(body.customer_address),
@@ -415,7 +449,7 @@ function itemChanges(before, after) {
     const m = new Map();
     (items || []).forEach((i) => {
       const k = key(i);
-      const cur = m.get(k) || { name: i.name, quantity: 0 };
+      const cur = m.get(k) || { name: i.name, quantity: 0, id: i.id, is_deal: i.is_deal };
       cur.quantity += Number(i.quantity) || 0;
       m.set(k, cur);
     });
@@ -425,13 +459,14 @@ function itemChanges(before, after) {
   const added = [], removed = [];
   for (const [k, v] of now) {
     const delta = v.quantity - ((was.get(k) || {}).quantity || 0);
-    if (delta > 0) added.push({ name: v.name, quantity: delta });
+    if (delta > 0) added.push({ name: v.name, quantity: delta, id: v.id, is_deal: v.is_deal });
   }
   for (const [k, v] of was) {
     const delta = v.quantity - ((now.get(k) || {}).quantity || 0);
-    if (delta > 0) removed.push({ name: v.name, quantity: delta });
+    if (delta > 0) removed.push({ name: v.name, quantity: delta, id: v.id, is_deal: v.is_deal });
   }
-  return { added, removed };
+  // The kitchen makes what is inside a deal, so an added deal says what that is.
+  return { added: withDealContents(added), removed: withDealContents(removed) };
 }
 
 router.put('/held/:id', (req, res) => {
@@ -538,7 +573,7 @@ router.get('/', (req, res) => {
     const formatted = orders.map(o => ({
       ...o,
       order_no: formatOrderNo(branchCode(o.branch_id), o.id),
-      items: allItems.filter(i => i.order_id === o.id)
+      items: withDealContents(allItems.filter(i => i.order_id === o.id))
     }));
 
     res.json(formatted);
@@ -552,7 +587,7 @@ router.get('/', (req, res) => {
 router.get('/:id', (req, res) => {
   const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(req.params.id);
   if (!order) return res.status(404).json({ error: 'Order not found' });
-  const items = db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(req.params.id);
+  const items = withDealContents(db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(req.params.id));
   res.json({ ...order, order_no: formatOrderNo(branchCode(order.branch_id), order.id), items });
 });
 

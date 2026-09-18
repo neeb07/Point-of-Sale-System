@@ -125,9 +125,18 @@ const ReceiptItemsTable = ({ items, showPrices = true }) => {
     </div>
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       {items.map((item, idx) => (
-        <div key={idx} style={{ display: 'flex', alignItems: 'center' }}>
+        <div key={idx} style={{ display: 'flex', alignItems: 'flex-start' }}>
           <div style={{ flex: 1, fontWeight: 500, fontSize: 13, color: '#374151' }}>
             {item.name}
+            {/* A deal's contents, one line each: the kitchen makes these, and
+                the customer sees what the price covered. */}
+            {Array.isArray(item.contents) && item.contents.length > 0 && (
+              <div style={{ marginTop: 2, paddingLeft: 10, fontSize: 11.5, fontWeight: 500, color: '#374151', lineHeight: 1.4 }}>
+                {item.contents.map((c, ci) => (
+                  <div key={ci}>• {c.quantity > 1 ? `${c.quantity} × ` : ''}{c.name}</div>
+                ))}
+              </div>
+            )}
           </div>
           <div style={{
             width: 60,

@@ -108,6 +108,12 @@ function itemRow(item, columns, showPrices, formatMoney) {
     const a = showPrices ? (first ? amount.padStart(amtW) : ' '.repeat(amtW)) : '';
     out.push(text(ln.padEnd(nameW) + ' ' + q + a));
   });
+  // What a deal is made of, indented under it. Wrapped to the name column so
+  // a long dish never runs under the quantity.
+  (item.contents || []).forEach((c) => {
+    const label = `${c.quantity > 1 ? `${c.quantity} x ` : ''}${c.name}`;
+    wrap(label, nameW - 4).forEach((piece, i) => out.push(text((i === 0 ? '  - ' : '    ') + piece)));
+  });
   return out;
 }
 

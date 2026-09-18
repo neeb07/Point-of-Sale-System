@@ -47,7 +47,7 @@ interface ReceiptData {
     /** A kitchen ticket listing only what changed on a held order. */
     update?: { removed: { name: string; quantity: number }[] };
   };
-  items: { name: string; quantity: number; price: number }[];
+  items: { name: string; quantity: number; price: number; contents?: { name: string; quantity: number }[] }[];
   subtotal: number;
   discount: number;
   employeeDiscount: number;
@@ -246,8 +246,8 @@ export default function SaleScreen({ onNavigate }: SaleScreenProps = {}) {
       update: opts.update ? { removed: opts.update.removed || [] } : undefined,
     },
     items: opts.update
-      ? (opts.update.added || []).map((i: any) => ({ name: i.name, quantity: i.quantity, price: 0 }))
-      : (order.items || []).map((i: any) => ({ name: i.name, quantity: i.quantity, price: i.price })),
+      ? (opts.update.added || []).map((i: any) => ({ name: i.name, quantity: i.quantity, price: 0, contents: i.contents }))
+      : (order.items || []).map((i: any) => ({ name: i.name, quantity: i.quantity, price: i.price, contents: i.contents })),
     subtotal: order.subtotal ?? 0,
     // The server's `discount` is the combined figure; the receipt shows the
     // manual and staff portions on separate lines, so take the manual part.

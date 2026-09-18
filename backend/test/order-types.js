@@ -95,8 +95,22 @@ async function waitFor(url, tries = 120) {
   ok('and confirms at 250', (confirmed.status === 200 || confirmed.status === 201) && Number(confirmed.body.delivery_charge) === 250);
 
   console.log();
+  console.log('=== A DEAL LISTS WHAT IS INSIDE IT ===');
+  const deal = db.prepare('SELECT d.id, d.name, d.price FROM deals d WHERE EXISTS (SELECT 1 FROM deal_items di WHERE di.deal_id = d.id) ORDER BY d.id LIMIT 1').get();
+  if (deal) {
+    const sold = await call('POST', '/orders', M, { items: [{ id: deal.id, name: deal.name, price: deal.price, quantity: 1, is_deal: true }], order_type: 'Takeaway', payment_method: 'Cash' });
+    const line = (sold.body.items || [])[0] || {};
+    ok('the sale describes the deal with its contents', Array.isArray(line.contents) && line.contents.length > 0 && line.contents.every(c => c.name && c.quantity >= 1));
+    const again = (await call('GET', `/orders/${sold.body.id}`, M)).body;
+    ok('and so does the order when fetched again for a reprint', Array.isArray((again.items || [])[0]?.contents) && again.items[0].contents.length === line.contents.length);
+    console.log('   ' + deal.name + ': ' + line.contents.map(c => `${c.quantity}x ${c.name}`).join(', '));
+  } else {
+    console.log('   (no deal with items in this database — skipped)');
+  }
+
+  console.log();
   console.log('=== THE REPORT SPLITS THEM ===');
-  const today = new Date().toISOString().slice(0, 10);
+  const today = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })();
   const kpi = (await call('GET', `/reports/kpi?from=${today}&to=${today}`, M)).body;
   const byType = Object.fromEntries((kpi.by_type || []).map(r => [r.order_type, r]));
   ok('reports takeaway', byType.Takeaway && byType.Takeaway.orders >= 1);
