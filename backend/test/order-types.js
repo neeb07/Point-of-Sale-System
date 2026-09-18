@@ -124,6 +124,7 @@ async function waitFor(url, tries = 120) {
     console.log('   ' + soldAs + ': ' + names.join(', '));
     ok('the chosen flavour is listed with the size', names.some(n => n.startsWith('Vegetable Pizza') && (!pizzaDeal.size || n.includes(pizzaDeal.size))));
     ok('and the placeholder pizza is not', !names.some(n => n.startsWith(pizzaDeal.placeholder)));
+    ok('the line prints under the bare deal name', (r.body.items || [])[0]?.print_name === pizzaDeal.name);
   }
 
   console.log();

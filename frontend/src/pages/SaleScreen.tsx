@@ -245,9 +245,10 @@ export default function SaleScreen({ onNavigate }: SaleScreenProps = {}) {
       // An updated ticket for the kitchen: only what changed, said so on top.
       update: opts.update ? { removed: opts.update.removed || [] } : undefined,
     },
+    // A deal prints under its bare name; the flavours are in its contents.
     items: opts.update
-      ? (opts.update.added || []).map((i: any) => ({ name: i.name, quantity: i.quantity, price: 0, contents: i.contents }))
-      : (order.items || []).map((i: any) => ({ name: i.name, quantity: i.quantity, price: i.price, contents: i.contents })),
+      ? (opts.update.added || []).map((i: any) => ({ name: i.print_name || i.name, quantity: i.quantity, price: 0, contents: i.contents }))
+      : (order.items || []).map((i: any) => ({ name: i.print_name || i.name, quantity: i.quantity, price: i.price, contents: i.contents })),
     subtotal: order.subtotal ?? 0,
     // The server's `discount` is the combined figure; the receipt shows the
     // manual and staff portions on separate lines, so take the manual part.

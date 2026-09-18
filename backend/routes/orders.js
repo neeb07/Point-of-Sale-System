@@ -75,12 +75,21 @@ function dealContents(dealId, lineName) {
     });
   } catch (e) { return []; }
 }
-/** Attach `contents` to every deal line; other lines are returned as they are. */
+/**
+ * Attach `contents` to every deal line; other lines are returned as they are.
+ *
+ * `print_name` is the deal's bare name for the receipt: the flavours are
+ * listed inside the contents, so repeating them in the line above would say
+ * the same thing twice. `name` keeps the flavours, because it is what the
+ * order stores and what the flavours are read back from.
+ */
 function withDealContents(items) {
   return (items || []).map((i) => {
     const isDeal = i.is_deal === 1 || i.is_deal === true;
     const dealId = i.menu_item_id != null ? i.menu_item_id : i.id;
-    return isDeal && dealId != null ? { ...i, contents: dealContents(dealId, i.name) } : i;
+    if (!isDeal || dealId == null) return i;
+    const deal = dealNameStmt.get(dealId);
+    return { ...i, contents: dealContents(dealId, i.name), print_name: (deal && deal.name) || i.name };
   });
 }
 

@@ -253,7 +253,7 @@ export default function Orders() {
       },
       items: (order.items || []).map((i) => ({
         contents: i.contents,
-        name: i.name,
+        name: i.print_name || i.name,
         quantity: i.quantity,
         price: i.price,
       })),
