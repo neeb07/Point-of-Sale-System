@@ -76,6 +76,29 @@ function applyBranch(branch) {
   return true;
 }
 
+/**
+ * How often the branch's name and code are checked, whatever the version says.
+ *
+ * The settings version is the wrong gate for this. A shop renamed on the
+ * dashboard bumps that version once; a till that was offline, or running a
+ * build that did not yet know to read the branch out of the snapshot, records
+ * the new version anyway and from then on believes it is up to date — and
+ * keeps printing the old code on every receipt, for good. This is the answer:
+ * the snapshot is a few hundred bytes, so fetching it hourly costs nothing and
+ * closes the hole permanently.
+ */
+const BRANCH_CHECK_MS = 60 * 60 * 1000;
+
+function branchNeedsCheck() {
+  const cfg = syncConfig();
+  if (!cfg) return false;
+  const row = db.prepare('SELECT name, code FROM branches WHERE id = ?').get(cfg.branchId);
+  // Nothing on record, or no code to print in front of an order number.
+  if (!row || !row.code) return true;
+  const last = Number((getSetting.get('branch_checked_at') || {}).value) || 0;
+  return Date.now() - last > BRANCH_CHECK_MS;
+}
+
 async function pullIfNewer(cloudVersion = null) {
   const config = syncConfig();
   if (!config) return { skipped: 'not paired' };
@@ -85,7 +108,8 @@ async function pullIfNewer(cloudVersion = null) {
 
   try {
     const local = localVersion();
-    if (cloudVersion != null && Number(cloudVersion) <= local) {
+    const checkBranch = branchNeedsCheck();
+    if (cloudVersion != null && Number(cloudVersion) <= local && !checkBranch) {
       return { ok: true, upToDate: true, version: local };
     }
 
@@ -97,6 +121,12 @@ async function pullIfNewer(cloudVersion = null) {
 
     const snapshot = await res.json();
     const remote = Number(snapshot.version);
+
+    // The branch first, and regardless of the version — see BRANCH_CHECK_MS.
+    if (applyBranch(snapshot.branch)) {
+      setSetting.run('branch_checked_at', String(Date.now()));
+    }
+
     if (!Number.isFinite(remote) || remote <= local) {
       return { ok: true, upToDate: true, version: local };
     }
@@ -113,7 +143,6 @@ async function pullIfNewer(cloudVersion = null) {
         applied.push(key);
       }
       setSetting.run('cloud_settings_version', String(remote));
-      applyBranch(snapshot.branch);
     })();
 
     state.lastAppliedAt = Date.now();
